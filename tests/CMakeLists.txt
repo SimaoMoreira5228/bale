@@ -11,10 +11,12 @@ include(${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake)
 
 add_executable(bale_tests
     base/checked_test.cpp
+    checksum/crc_test.cpp
     io/byte_reader_test.cpp
     io/file_test.cpp
 )
 target_link_libraries(bale_tests PRIVATE
+    bale_checksum
     bale_io
     bale_warnings
     doctest::doctest_with_main
