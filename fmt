@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$repo_root"
+
+format_args=(-i)
+if [[ "${1:-}" == "--check" ]]; then
+    format_args=(--dry-run --Werror)
+elif (($#)); then
+    echo "usage: ./fmt [--check]" >&2
+    exit 2
+fi
+
+command -v clang-format >/dev/null || {
+    echo "clang-format is required" >&2
+    exit 1
+}
+
+git ls-files -z --cached --others --exclude-standard --deduplicate -- \
+    '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx' '*.ipp' \
+    ':!:third_party/' \
+    | while IFS= read -r -d '' path; do
+        if [[ -f "$path" ]]; then
+            printf '%s\0' "$path"
+        fi
+    done \
+    | xargs -0 -r clang-format "${format_args[@]}" --
