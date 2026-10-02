@@ -7,3 +7,4 @@ build/
 *.eps
 *.prn
 compile_commands.json
+.claude/worktrees/

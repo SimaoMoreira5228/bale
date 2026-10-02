@@ -108,6 +108,7 @@ case "$cmd" in
         sanitize_flags="-fsanitize=address,undefined -fno-sanitize-recover=undefined"
         sanitize_flags+=" -fno-omit-frame-pointer"
         configure "$sanitize_dir" \
+            -DBALE_LINK_COMPILE_COMMANDS=OFF \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_C_FLAGS="$sanitize_flags" \
             -DCMAKE_CXX_FLAGS="$sanitize_flags" \
@@ -121,6 +122,7 @@ case "$cmd" in
     cover)
         cover_dir="$build_root/cover"
         configure "$cover_dir" \
+            -DBALE_LINK_COMPILE_COMMANDS=OFF \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_C_FLAGS="--coverage" \
             -DCMAKE_CXX_FLAGS="--coverage" \
@@ -171,11 +173,6 @@ case "$cmd" in
         lint
         run_tests "$build_dir"
         ;;
-    ide)
-        configure "$build_dir" "$@"
-        ln -sfn "$build_dir/compile_commands.json" "$repo_root/compile_commands.json"
-        echo "Compile database: $repo_root/compile_commands.json"
-        ;;
     lines)
         git -C "$repo_root" ls-files -z --cached --others --exclude-standard --deduplicate \
             | (cd "$repo_root" && xargs -0 -r wc -l) \
@@ -199,7 +196,6 @@ usage: ./dev <command> [args...]
   format-check  fail if any source needs formatting
   lint          run clang-tidy over project sources
   check         format-check, lint and test
-  ide           configure and link compile_commands.json at the repo root
   lines         line counts of tracked and untracked files
   clean         remove build/
 
