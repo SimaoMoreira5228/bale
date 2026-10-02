@@ -14,10 +14,14 @@ add_executable(bale_tests
     checksum/crc_test.cpp
     io/byte_reader_test.cpp
     io/file_test.cpp
+    security/archive_path_test.cpp
+    security/budget_test.cpp
+    security/case_fold_test.cpp
 )
 target_link_libraries(bale_tests PRIVATE
     bale_checksum
     bale_io
+    bale_security
     bale_warnings
     doctest::doctest_with_main
 )
