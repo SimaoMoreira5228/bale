@@ -1,5 +1,6 @@
 add_subdirectory(base)
 add_subdirectory(checksum)
 add_subdirectory(format)
+add_subdirectory(formats)
 add_subdirectory(io)
 add_subdirectory(security)
