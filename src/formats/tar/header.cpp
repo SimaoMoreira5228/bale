@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <limits>
 
-namespace bale {
+namespace bale::tar {
 
 namespace {
 
@@ -37,11 +37,11 @@ constexpr std::string_view ustarMagic{
 };
 constexpr std::string_view gnuMagic{"ustar  \0", 8};
 
-std::span<const std::byte> bytesOf(TarBlock block, Field field) {
+std::span<const std::byte> bytesOf(Block block, Field field) {
     return block.subspan(field.offset, field.length);
 }
 
-std::string_view textOf(TarBlock block, Field field) {
+std::string_view textOf(Block block, Field field) {
     auto bytes = bytesOf(block, field);
     std::string_view text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
     return text.substr(0, text.find('\0'));
@@ -93,7 +93,7 @@ Result<std::uint64_t> parseBase256(std::span<const std::byte> field, std::uint64
     return value;
 }
 
-bool checksumMatches(TarBlock block) {
+bool checksumMatches(Block block) {
     auto stored = parseOctal(bytesOf(block, checksumField), 0);
     if (!stored) {
         return false;
@@ -116,28 +116,28 @@ bool checksumMatches(TarBlock block) {
     return signedSum >= 0 && *stored == static_cast<std::uint64_t>(signedSum);
 }
 
-Result<TarFormat> detectFormat(TarBlock block, std::uint64_t offset) {
+Result<Format> detectFormat(Block block, std::uint64_t offset) {
     auto magic = bytesOf(block, magicField);
     std::string_view text(reinterpret_cast<const char*>(magic.data()), magic.size());
     if (text == ustarMagic) {
-        return TarFormat::Ustar;
+        return Format::Ustar;
     }
     if (text == gnuMagic) {
-        return TarFormat::Gnu;
+        return Format::Gnu;
     }
 
     auto blank = std::ranges::all_of(magic, [](std::byte value) {
         return value == std::byte{0};
     });
     if (blank) {
-        return TarFormat::V7;
+        return Format::V7;
     }
     return fail(ErrorKind::Malformed, "unknown tar magic", offset + magicField.offset);
 }
 
-template <std::integral T> Result<T> parseField(TarBlock block, Field field, std::uint64_t offset) {
+template <std::integral T> Result<T> parseField(Block block, Field field, std::uint64_t offset) {
     auto fieldOffset = offset + field.offset;
-    auto value = parseTarNumber(bytesOf(block, field), fieldOffset);
+    auto value = parseNumber(bytesOf(block, field), fieldOffset);
     if (!value) {
         return std::unexpected(value.error());
     }
@@ -174,7 +174,7 @@ Result<std::uint64_t> parseDecimal(std::string_view text, std::uint64_t offset) 
     return value;
 }
 
-Result<void> parsePaxTime(std::string_view text, std::uint64_t offset, TarPaxValues& values) {
+Result<void> parsePaxTime(std::string_view text, std::uint64_t offset, PaxValues& values) {
     bool negative = text.starts_with('-');
     if (negative) {
         text.remove_prefix(1);
@@ -222,7 +222,7 @@ Result<void> parsePaxTime(std::string_view text, std::uint64_t offset, TarPaxVal
 Result<void> assignPath(
     std::string_view value,
     std::uint64_t offset,
-    const TarLimits& limits,
+    const Limits& limits,
     std::string& target,
     bool& present
 ) {
@@ -259,8 +259,8 @@ Result<void> applyPaxRecord(
     std::string_view key,
     std::string_view value,
     std::uint64_t offset,
-    const TarLimits& limits,
-    TarPaxValues& values
+    const Limits& limits,
+    PaxValues& values
 ) {
     if (key.starts_with("GNU.sparse.")) {
         return fail(ErrorKind::Unsupported, "GNU sparse tar entries are not supported", offset);
@@ -303,7 +303,7 @@ Result<void> applyPaxRecord(
 
 }
 
-void TarPaxValues::clear() {
+void PaxValues::clear() {
     hasPath = false;
     hasLinkPath = false;
     hasUname = false;
@@ -314,32 +314,32 @@ void TarPaxValues::clear() {
     hasMtime = false;
 }
 
-bool TarPaxValues::empty() const {
+bool PaxValues::empty() const {
     return !hasPath && !hasLinkPath && !hasUname && !hasGname && !hasSize && !hasUid && !hasGid &&
         !hasMtime;
 }
 
-bool isZeroTarBlock(TarBlock block) {
+bool isZeroBlock(Block block) {
     return std::ranges::all_of(block, [](std::byte value) {
         return value == std::byte{0};
     });
 }
 
-bool looksLikeTar(TarBlock firstBlock) {
-    if (isZeroTarBlock(firstBlock)) {
+bool looksLikeTar(Block firstBlock) {
+    if (isZeroBlock(firstBlock)) {
         return false;
     }
-    return parseTarHeader(firstBlock, 0).has_value();
+    return parseHeader(firstBlock, 0).has_value();
 }
 
-Result<std::uint64_t> parseTarNumber(std::span<const std::byte> field, std::uint64_t offset) {
+Result<std::uint64_t> parseNumber(std::span<const std::byte> field, std::uint64_t offset) {
     if (!field.empty() && (std::to_integer<std::uint8_t>(field[0]) & 0x80U) != 0) {
         return parseBase256(field, offset);
     }
     return parseOctal(field, offset);
 }
 
-Result<TarHeader> parseTarHeader(TarBlock block, std::uint64_t offset) {
+Result<Header> parseHeader(Block block, std::uint64_t offset) {
     if (!checksumMatches(block)) {
         return fail(ErrorKind::Integrity, "tar header checksum mismatch", offset);
     }
@@ -349,7 +349,7 @@ Result<TarHeader> parseTarHeader(TarBlock block, std::uint64_t offset) {
         return std::unexpected(format.error());
     }
 
-    TarHeader header;
+    Header header;
     header.format = *format;
     header.typeflag = static_cast<char>(block[typeflagOffset]);
     header.name = textOf(block, nameField);
@@ -386,18 +386,18 @@ Result<TarHeader> parseTarHeader(TarBlock block, std::uint64_t offset) {
     header.size = *size;
     header.mtime = *mtime;
 
-    if (header.format == TarFormat::V7) {
+    if (header.format == Format::V7) {
         return header;
     }
 
     header.uname = textOf(block, unameField);
     header.gname = textOf(block, gnameField);
-    if (header.format == TarFormat::Ustar) {
+    if (header.format == Format::Ustar) {
         header.prefix = textOf(block, prefixField);
     }
 
-    auto kind = tarEntryKind(header.typeflag);
-    if (kind == TarEntryKind::CharDevice || kind == TarEntryKind::BlockDevice) {
+    auto kind = entryKind(header.typeflag);
+    if (kind == EntryKind::CharDevice || kind == EntryKind::BlockDevice) {
         auto major = parseField<std::uint32_t>(block, devMajorField, offset);
         if (!major) {
             return std::unexpected(major.error());
@@ -413,58 +413,58 @@ Result<TarHeader> parseTarHeader(TarBlock block, std::uint64_t offset) {
     return header;
 }
 
-TarEntryKind tarEntryKind(char typeflag) {
+EntryKind entryKind(char typeflag) {
     switch (typeflag) {
     case '0':
     case '\0':
     case '7':
-        return TarEntryKind::Regular;
+        return EntryKind::Regular;
     case '1':
-        return TarEntryKind::HardLink;
+        return EntryKind::HardLink;
     case '2':
-        return TarEntryKind::Symlink;
+        return EntryKind::Symlink;
     case '3':
-        return TarEntryKind::CharDevice;
+        return EntryKind::CharDevice;
     case '4':
-        return TarEntryKind::BlockDevice;
+        return EntryKind::BlockDevice;
     case '5':
-        return TarEntryKind::Directory;
+        return EntryKind::Directory;
     case '6':
-        return TarEntryKind::Fifo;
+        return EntryKind::Fifo;
     default:
-        return TarEntryKind::Other;
+        return EntryKind::Other;
     }
 }
 
-bool tarEntryHasData(TarEntryKind kind) {
+bool entryHasData(EntryKind kind) {
     switch (kind) {
-    case TarEntryKind::HardLink:
-    case TarEntryKind::Symlink:
-    case TarEntryKind::CharDevice:
-    case TarEntryKind::BlockDevice:
-    case TarEntryKind::Fifo:
+    case EntryKind::HardLink:
+    case EntryKind::Symlink:
+    case EntryKind::CharDevice:
+    case EntryKind::BlockDevice:
+    case EntryKind::Fifo:
         return false;
-    case TarEntryKind::Regular:
-    case TarEntryKind::Directory:
-    case TarEntryKind::Other:
+    case EntryKind::Regular:
+    case EntryKind::Directory:
+    case EntryKind::Other:
         return true;
     }
     return true;
 }
 
-std::optional<std::uint64_t> tarPaddedSize(std::uint64_t size) {
-    auto rounded = checkedAdd<std::uint64_t>(size, tarBlockSize - 1);
+std::optional<std::uint64_t> paddedSize(std::uint64_t size) {
+    auto rounded = checkedAdd<std::uint64_t>(size, blockSize - 1);
     if (!rounded) {
         return std::nullopt;
     }
-    return *rounded & ~std::uint64_t{tarBlockSize - 1};
+    return *rounded & ~std::uint64_t{blockSize - 1};
 }
 
 Result<void> parsePaxRecords(
     std::string_view data,
     std::uint64_t offset,
-    const TarLimits& limits,
-    TarPaxValues& values
+    const Limits& limits,
+    PaxValues& values
 ) {
     constexpr std::size_t maxLengthDigits = 19;
 

@@ -1,5 +1,5 @@
 #include "base/endian.hpp"
-#include "formats/zip/zip_reader.hpp"
+#include "formats/zip/reader.hpp"
 
 namespace bale::zip {
 

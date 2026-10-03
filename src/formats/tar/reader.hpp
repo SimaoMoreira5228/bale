@@ -10,10 +10,11 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
-namespace bale {
+namespace bale::tar {
 
-struct TarEntry {
+struct Entry {
     std::string_view path;
     std::string_view linkTarget;
     std::string_view uname;
@@ -28,20 +29,19 @@ struct TarEntry {
     std::uint32_t mode = 0;
     std::uint32_t devMajor = 0;
     std::uint32_t devMinor = 0;
-    TarEntryKind kind = TarEntryKind::Regular;
-    TarFormat format = TarFormat::V7;
+    EntryKind kind = EntryKind::Regular;
+    Format format = Format::V7;
     char typeflag = '0';
 };
 
-class TarReader {
+class Reader {
   public:
-    // NOTE: the file must outlive the reader.
-    [[nodiscard]] static Result<TarReader> open(const File& file, const TarLimits& limits = {});
+    [[nodiscard]] static Result<Reader> open(File file, const Limits& limits = {});
 
     // NOTE: returns nullptr at the end of the archive. The entry and its string views stay valid
     // only until the next call to next() or until the reader is moved or destroyed. After an
     // error every later call returns the same error.
-    [[nodiscard]] Result<const TarEntry*> next();
+    [[nodiscard]] Result<const Entry*> next();
 
   private:
     enum class BlockState : std::uint8_t {
@@ -50,34 +50,34 @@ class TarReader {
         End,
     };
 
-    TarReader(const File& file, std::uint64_t fileSize, const TarLimits& limits) :
-        file_(&file), fileSize_(fileSize), limits_(limits) {
+    Reader(File file, std::uint64_t fileSize, const Limits& limits) :
+        file_(std::move(file)), fileSize_(fileSize), limits_(limits) {
     }
 
-    [[nodiscard]] Result<const TarEntry*> readNext();
+    [[nodiscard]] Result<const Entry*> readNext();
     [[nodiscard]] Result<BlockState> readBlock(std::uint64_t offset);
     [[nodiscard]] Result<std::uint64_t> dataEnd(std::uint64_t dataOffset, std::uint64_t size) const;
-    [[nodiscard]] Result<void> readMetaData(const TarHeader& header, std::string& buffer);
-    [[nodiscard]] Result<const TarEntry*> endOfArchive(BlockState state, bool pendingMeta);
-    [[nodiscard]] Result<const TarEntry*> finishEntry(const TarHeader& header);
+    [[nodiscard]] Result<void> readMetaData(const Header& header, std::string& buffer);
+    [[nodiscard]] Result<const Entry*> endOfArchive(BlockState state, bool pendingMeta);
+    [[nodiscard]] Result<const Entry*> finishEntry(const Header& header);
 
-    const File* file_;
+    File file_;
     std::uint64_t fileSize_;
-    TarLimits limits_;
+    Limits limits_;
     std::uint64_t position_ = 0;
     std::uint64_t entryCount_ = 0;
     bool done_ = false;
     std::optional<Error> failure_;
-    std::array<std::byte, tarBlockSize> block_{};
+    std::array<std::byte, blockSize> block_{};
     std::string metaBuffer_;
     std::string path_;
     std::string longPath_;
     std::string longLink_;
     bool hasLongPath_ = false;
     bool hasLongLink_ = false;
-    TarPaxValues localPax_;
-    TarPaxValues globalPax_;
-    TarEntry entry_;
+    PaxValues localPax_;
+    PaxValues globalPax_;
+    Entry entry_;
 };
 
 }

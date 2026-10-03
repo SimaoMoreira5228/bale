@@ -1,6 +1,6 @@
-#include "formats/zip/zip_reader.hpp"
+#include "formats/zip/reader.hpp"
 
-#include "zip_builder.hpp"
+#include "zip_fixture.hpp"
 
 #include <doctest/doctest.h>
 
@@ -10,7 +10,7 @@
 #include <vector>
 
 using namespace bale;
-using namespace bale::test;
+using namespace bale::zip::test;
 
 namespace {
 

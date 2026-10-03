@@ -1,4 +1,4 @@
-#include "formats/zip/zip_reader.hpp"
+#include "formats/zip/reader.hpp"
 
 #include "base/checked.hpp"
 #include "base/endian.hpp"

@@ -3,8 +3,9 @@
 #include "base/checked.hpp"
 
 #include <span>
+#include <utility>
 
-namespace bale {
+namespace bale::tar {
 
 namespace {
 
@@ -36,15 +37,15 @@ std::string_view pickText(
 
 }
 
-Result<TarReader> TarReader::open(const File& file, const TarLimits& limits) {
+Result<Reader> Reader::open(File file, const Limits& limits) {
     auto size = file.size();
     if (!size) {
         return std::unexpected(size.error());
     }
-    return TarReader(file, *size, limits);
+    return Reader(std::move(file), *size, limits);
 }
 
-Result<const TarEntry*> TarReader::next() {
+Result<const Entry*> Reader::next() {
     if (failure_) {
         return std::unexpected(*failure_);
     }
@@ -59,7 +60,7 @@ Result<const TarEntry*> TarReader::next() {
     return entry;
 }
 
-Result<const TarEntry*> TarReader::readNext() {
+Result<const Entry*> Reader::readNext() {
     localPax_.clear();
     hasLongPath_ = false;
     hasLongLink_ = false;
@@ -75,7 +76,7 @@ Result<const TarEntry*> TarReader::readNext() {
             return endOfArchive(*state, pendingMeta);
         }
 
-        auto header = parseTarHeader(block_, position_);
+        auto header = parseHeader(block_, position_);
         if (!header) {
             return std::unexpected(header.error());
         }
@@ -83,7 +84,7 @@ Result<const TarEntry*> TarReader::readNext() {
         switch (header->typeflag) {
         case 'x':
         case 'X': {
-            auto dataOffset = position_ + tarBlockSize;
+            auto dataOffset = position_ + blockSize;
             auto read = readMetaData(*header, metaBuffer_);
             if (!read) {
                 return std::unexpected(read.error());
@@ -96,7 +97,7 @@ Result<const TarEntry*> TarReader::readNext() {
             continue;
         }
         case 'g': {
-            auto dataOffset = position_ + tarBlockSize;
+            auto dataOffset = position_ + blockSize;
             auto read = readMetaData(*header, metaBuffer_);
             if (!read) {
                 return std::unexpected(read.error());
@@ -144,24 +145,24 @@ Result<const TarEntry*> TarReader::readNext() {
     }
 }
 
-Result<TarReader::BlockState> TarReader::readBlock(std::uint64_t offset) {
+Result<Reader::BlockState> Reader::readBlock(std::uint64_t offset) {
     auto remaining = fileSize_ - offset;
     if (remaining == 0) {
         return BlockState::End;
     }
-    if (remaining < tarBlockSize) {
+    if (remaining < blockSize) {
         return fail(ErrorKind::Truncated, "tar archive ends inside a header block", offset);
     }
 
-    auto read = file_->readExactAt(offset, block_);
+    auto read = file_.readExactAt(offset, block_);
     if (!read) {
         return std::unexpected(read.error());
     }
-    return isZeroTarBlock(block_) ? BlockState::Zero : BlockState::Header;
+    return isZeroBlock(block_) ? BlockState::Zero : BlockState::Header;
 }
 
-Result<std::uint64_t> TarReader::dataEnd(std::uint64_t dataOffset, std::uint64_t size) const {
-    auto padded = tarPaddedSize(size);
+Result<std::uint64_t> Reader::dataEnd(std::uint64_t dataOffset, std::uint64_t size) const {
+    auto padded = paddedSize(size);
     if (!padded) {
         return fail(ErrorKind::Malformed, "tar entry size overflows", dataOffset);
     }
@@ -171,19 +172,19 @@ Result<std::uint64_t> TarReader::dataEnd(std::uint64_t dataOffset, std::uint64_t
     return dataOffset + *padded;
 }
 
-Result<void> TarReader::readMetaData(const TarHeader& header, std::string& buffer) {
+Result<void> Reader::readMetaData(const Header& header, std::string& buffer) {
     if (header.size > limits_.maxExtendedHeaderBytes) {
         return fail(ErrorKind::LimitExceeded, "tar extended header exceeds limit", position_);
     }
 
-    auto dataOffset = position_ + tarBlockSize;
+    auto dataOffset = position_ + blockSize;
     auto end = dataEnd(dataOffset, header.size);
     if (!end) {
         return std::unexpected(end.error());
     }
 
     buffer.resize(static_cast<std::size_t>(header.size));
-    auto read = file_->readExactAt(dataOffset, std::as_writable_bytes(std::span(buffer)));
+    auto read = file_.readExactAt(dataOffset, std::as_writable_bytes(std::span(buffer)));
     if (!read) {
         return read;
     }
@@ -192,13 +193,13 @@ Result<void> TarReader::readMetaData(const TarHeader& header, std::string& buffe
     return {};
 }
 
-Result<const TarEntry*> TarReader::endOfArchive(BlockState state, bool pendingMeta) {
+Result<const Entry*> Reader::endOfArchive(BlockState state, bool pendingMeta) {
     if (pendingMeta) {
         return fail(ErrorKind::Malformed, "tar extended header without entry", position_);
     }
 
     if (state == BlockState::Zero) {
-        auto second = readBlock(position_ + tarBlockSize);
+        auto second = readBlock(position_ + blockSize);
         if (!second) {
             return std::unexpected(second.error());
         }
@@ -206,7 +207,7 @@ Result<const TarEntry*> TarReader::endOfArchive(BlockState state, bool pendingMe
             return fail(
                 ErrorKind::Malformed,
                 "lone zero block before tar header",
-                position_ + tarBlockSize
+                position_ + blockSize
             );
         }
     }
@@ -215,7 +216,7 @@ Result<const TarEntry*> TarReader::endOfArchive(BlockState state, bool pendingMe
     return nullptr;
 }
 
-Result<const TarEntry*> TarReader::finishEntry(const TarHeader& header) {
+Result<const Entry*> Reader::finishEntry(const Header& header) {
     if (entryCount_ >= limits_.maxEntries) {
         return fail(ErrorKind::LimitExceeded, "tar entry count exceeds limit", position_);
     }
@@ -247,20 +248,20 @@ Result<const TarEntry*> TarReader::finishEntry(const TarHeader& header) {
         return fail(ErrorKind::LimitExceeded, "tar path exceeds limit", position_);
     }
 
-    auto kind = tarEntryKind(header.typeflag);
+    auto kind = entryKind(header.typeflag);
     auto size =
         pick(localPax_.hasSize, localPax_.size, globalPax_.hasSize, globalPax_.size, header.size);
-    if (!tarEntryHasData(kind)) {
+    if (!entryHasData(kind)) {
         size = 0;
     }
 
-    auto dataOffset = position_ + tarBlockSize;
+    auto dataOffset = position_ + blockSize;
     auto end = dataEnd(dataOffset, size);
     if (!end) {
         return std::unexpected(end.error());
     }
 
-    entry_ = TarEntry{};
+    entry_ = Entry{};
     entry_.path = path;
     entry_.linkTarget = linkTarget;
     entry_.uname = pickText(

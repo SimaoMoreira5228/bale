@@ -9,19 +9,19 @@
 #include <string>
 #include <string_view>
 
-namespace bale {
+namespace bale::tar {
 
-inline constexpr std::size_t tarBlockSize = 512;
+inline constexpr std::size_t blockSize = 512;
 
-using TarBlock = std::span<const std::byte, tarBlockSize>;
+using Block = std::span<const std::byte, blockSize>;
 
-enum class TarFormat : std::uint8_t {
+enum class Format : std::uint8_t {
     V7,
     Ustar,
     Gnu,
 };
 
-enum class TarEntryKind : std::uint8_t {
+enum class EntryKind : std::uint8_t {
     Regular,
     HardLink,
     Symlink,
@@ -32,14 +32,14 @@ enum class TarEntryKind : std::uint8_t {
     Other,
 };
 
-struct TarLimits {
+struct Limits {
     std::uint64_t maxExtendedHeaderBytes = std::uint64_t{1} << 20;
     std::size_t maxPathBytes = std::size_t{64} * 1024;
     std::uint64_t maxEntries = 10'000'000;
 };
 
 // NOTE: the string views point into the parsed block and are only valid while it is.
-struct TarHeader {
+struct Header {
     std::string_view name;
     std::string_view prefix;
     std::string_view linkName;
@@ -53,10 +53,10 @@ struct TarHeader {
     std::uint32_t devMajor = 0;
     std::uint32_t devMinor = 0;
     char typeflag = '0';
-    TarFormat format = TarFormat::V7;
+    Format format = Format::V7;
 };
 
-struct TarPaxValues {
+struct PaxValues {
     std::string path;
     std::string linkPath;
     std::string uname;
@@ -79,27 +79,27 @@ struct TarPaxValues {
     [[nodiscard]] bool empty() const;
 };
 
-[[nodiscard]] bool isZeroTarBlock(TarBlock block);
+[[nodiscard]] bool isZeroBlock(Block block);
 
-[[nodiscard]] bool looksLikeTar(TarBlock firstBlock);
+[[nodiscard]] bool looksLikeTar(Block firstBlock);
 
 [[nodiscard]] Result<std::uint64_t>
-parseTarNumber(std::span<const std::byte> field, std::uint64_t offset);
+parseNumber(std::span<const std::byte> field, std::uint64_t offset);
 
-[[nodiscard]] Result<TarHeader> parseTarHeader(TarBlock block, std::uint64_t offset);
+[[nodiscard]] Result<Header> parseHeader(Block block, std::uint64_t offset);
 
-[[nodiscard]] TarEntryKind tarEntryKind(char typeflag);
+[[nodiscard]] EntryKind entryKind(char typeflag);
 
-[[nodiscard]] bool tarEntryHasData(TarEntryKind kind);
+[[nodiscard]] bool entryHasData(EntryKind kind);
 
-[[nodiscard]] std::optional<std::uint64_t> tarPaddedSize(std::uint64_t size);
+[[nodiscard]] std::optional<std::uint64_t> paddedSize(std::uint64_t size);
 
 // NOTE: records are applied in order onto `values`; an empty value removes that key from it.
 [[nodiscard]] Result<void> parsePaxRecords(
     std::string_view data,
     std::uint64_t offset,
-    const TarLimits& limits,
-    TarPaxValues& values
+    const Limits& limits,
+    PaxValues& values
 );
 
 }
