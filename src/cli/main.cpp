@@ -17,6 +17,12 @@ constexpr std::string_view usage = R"(usage: bale <command> [arguments]
 commands:
   list <archive> [--long]   list entries, --long adds type, size and modification time
   test <archive>            check archive structure and entry checksums
+  extract <archive> [options]
+      -o, --output <dir>      extract into dir (default: current directory)
+      --replace               replace existing regular files
+      --skip-existing         keep existing files and skip those entries
+      --allow-symlinks        create symlinks whose target stays inside the output
+      --sync                  flush every file to disk before moving it into place
   formats                   show which formats bale can read
   help                      show this message
 )";
@@ -61,6 +67,51 @@ int runTest(std::span<const std::string_view> arguments) {
     return exitWith(bale::cli::testArchive(arguments[0]));
 }
 
+int runExtract(std::span<const std::string_view> arguments) {
+    bale::ExtractPolicy policy;
+    std::string_view archive;
+    std::string_view output = ".";
+    for (std::size_t index = 0; index < arguments.size(); ++index) {
+        std::string_view argument = arguments[index];
+        if (argument == "-o" || argument == "--output") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--output needs a directory");
+            }
+            ++index;
+            output = arguments[index];
+            continue;
+        }
+        if (argument == "--replace") {
+            policy.overwrite = bale::OverwritePolicy::Replace;
+            continue;
+        }
+        if (argument == "--skip-existing") {
+            policy.overwrite = bale::OverwritePolicy::Skip;
+            continue;
+        }
+        if (argument == "--allow-symlinks") {
+            policy.symlinks = bale::SymlinkPolicy::AllowContained;
+            continue;
+        }
+        if (argument == "--sync") {
+            policy.durable = true;
+            continue;
+        }
+        if (argument.starts_with('-')) {
+            return usageError("unknown option for extract");
+        }
+        if (!archive.empty()) {
+            return usageError("extract takes one archive");
+        }
+        archive = argument;
+    }
+
+    if (archive.empty()) {
+        return usageError("extract needs an archive");
+    }
+    return exitWith(bale::cli::extractArchive(archive, output, policy));
+}
+
 int runFormats() {
     std::println("{:<6} {:<5} {:<5} {}", "format", "list", "test", "notes");
     std::println(
@@ -100,6 +151,9 @@ int run(std::span<char*> argv) {
     }
     if (command == "test") {
         return runTest(rest);
+    }
+    if (command == "extract") {
+        return runExtract(rest);
     }
     if (command == "formats") {
         return runFormats();

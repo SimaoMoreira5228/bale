@@ -2,12 +2,15 @@
 
 #include "base/error.hpp"
 #include "formats/tar/header.hpp"
+#include "io/chunk_sink.hpp"
 #include "io/file.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -42,6 +45,35 @@ class Reader {
     // only until the next call to next() or until the reader is moved or destroyed. After an
     // error every later call returns the same error.
     [[nodiscard]] Result<const Entry*> next();
+
+    template <ChunkSink Sink>
+    [[nodiscard]] Result<void>
+    streamData(const Entry& entry, std::span<std::byte> scratch, Sink&& sink) const {
+        if (scratch.empty() && entry.size != 0) {
+            return fail(ErrorKind::LimitExceeded, "scratch buffer is empty");
+        }
+
+        std::uint64_t position = entry.dataOffset;
+        std::uint64_t remaining = entry.size;
+        while (remaining > 0) {
+            auto chunk = scratch.first(
+                static_cast<std::size_t>(std::min<std::uint64_t>(remaining, scratch.size()))
+            );
+            auto read = file_.readExactAt(position, chunk);
+            if (!read) {
+                return read;
+            }
+
+            auto sunk = sink(std::span<const std::byte>(chunk));
+            if (!sunk) {
+                return sunk;
+            }
+
+            position += chunk.size();
+            remaining -= chunk.size();
+        }
+        return {};
+    }
 
   private:
     enum class BlockState : std::uint8_t {
