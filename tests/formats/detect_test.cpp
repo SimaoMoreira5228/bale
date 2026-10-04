@@ -2,6 +2,7 @@
 
 #include "format/envelope.hpp"
 #include "formats/tar/tar_fixture.hpp"
+#include "io/temp_file.hpp"
 
 #include <doctest/doctest.h>
 
@@ -13,8 +14,8 @@ using namespace bale;
 namespace {
 
 ArchiveFormat detectBytes(std::span<const std::byte> bytes) {
-    tar::test::TempArchive archive;
-    auto file = archive.write(bytes);
+    test::TempFile archive(bytes);
+    auto file = archive.open();
     REQUIRE(file);
 
     auto format = detectFormat(*file);

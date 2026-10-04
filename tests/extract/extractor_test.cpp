@@ -2,6 +2,8 @@
 
 #include "extract/extractor.hpp"
 
+#include "io/temp_file.hpp"
+
 #include <doctest/doctest.h>
 
 #include <algorithm>
@@ -27,31 +29,20 @@ namespace {
 class TempTree {
   public:
     TempTree() {
-        std::random_device seed;
-        auto name = "bale-extract-test-" + std::to_string(seed()) + std::to_string(seed());
-        base_ = fs::temp_directory_path() / name;
-        fs::create_directories(base_ / "root");
-        fs::create_directories(base_ / "outside");
-    }
-
-    TempTree(const TempTree&) = delete;
-    TempTree& operator=(const TempTree&) = delete;
-
-    ~TempTree() {
-        std::error_code ignored;
-        fs::remove_all(base_, ignored);
+        fs::create_directories(root());
+        fs::create_directories(outside());
     }
 
     [[nodiscard]] fs::path root() const {
-        return base_ / "root";
+        return base_.path() / "root";
     }
 
     [[nodiscard]] fs::path outside() const {
-        return base_ / "outside";
+        return base_.path() / "outside";
     }
 
   private:
-    fs::path base_;
+    bale::test::TempPath base_;
 };
 
 ArchivePath at(std::string_view path) {

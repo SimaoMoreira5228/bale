@@ -95,8 +95,8 @@ TEST_CASE("Reader reuses one entry and keeps returning end after the archive") {
     ArchiveBuilder builder;
     builder.entry(named(std::string(100, 'a')), "1").entry(named("b"), "2").zeros(2);
 
-    TempArchive archive;
-    auto file = archive.write(builder.bytes());
+    bale::test::TempFile archive(builder.bytes());
+    auto file = archive.open();
     REQUIRE(file);
     auto reader = Reader::open(std::move(*file));
     REQUIRE(reader);
@@ -136,8 +136,8 @@ TEST_CASE("Reader applies pax per-entry and global overrides") {
     builder.meta('g', global).meta('x', local).block(makeHeader(lying)).data("abc");
     builder.entry(plain, "zz").meta('g', paxRecord("uid", "")).entry(plain, "").zeros(2);
 
-    TempArchive archive;
-    auto file = archive.write(builder.bytes());
+    bale::test::TempFile archive(builder.bytes());
+    auto file = archive.open();
     REQUIRE(file);
     auto reader = Reader::open(std::move(*file));
     REQUIRE(reader);

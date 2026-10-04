@@ -3,6 +3,7 @@
 #include "formats/tar/header.hpp"
 #include "formats/tar/reader.hpp"
 #include "io/file.hpp"
+#include "io/temp_file.hpp"
 
 #include <algorithm>
 #include <array>
@@ -153,44 +154,6 @@ class ArchiveBuilder {
     std::vector<std::byte> bytes_;
 };
 
-class TempArchive {
-  public:
-    TempArchive() {
-        std::random_device seed;
-        auto name = "bale-tar-test-" + std::to_string(seed()) + std::to_string(seed());
-        path_ = std::filesystem::temp_directory_path() / name;
-    }
-
-    TempArchive(const TempArchive&) = delete;
-    TempArchive& operator=(const TempArchive&) = delete;
-
-    ~TempArchive() {
-        std::error_code ignored;
-        std::filesystem::remove(path_, ignored);
-    }
-
-    [[nodiscard]] const std::filesystem::path& path() const {
-        return path_;
-    }
-
-    [[nodiscard]] Result<File> write(std::span<const std::byte> bytes) const {
-        auto created = File::createNew(path_);
-        if (!created) {
-            return std::unexpected(created.error());
-        }
-        if (!bytes.empty()) {
-            auto appended = created->append(bytes);
-            if (!appended) {
-                return std::unexpected(appended.error());
-            }
-        }
-        return File::openRead(path_);
-    }
-
-  private:
-    std::filesystem::path path_;
-};
-
 struct Listed {
     std::string path;
     std::string linkTarget;
@@ -206,8 +169,8 @@ struct Listing {
 
 inline Listing listArchive(std::span<const std::byte> bytes, const Limits& limits = {}) {
     Listing listing;
-    TempArchive archive;
-    auto file = archive.write(bytes);
+    bale::test::TempFile archive(bytes);
+    auto file = archive.open();
     if (!file) {
         listing.error = file.error();
         return listing;

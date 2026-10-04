@@ -1,41 +1,15 @@
 #include "io/file.hpp"
 
+#include "io/temp_file.hpp"
+
 #include <doctest/doctest.h>
 
 #include <array>
 #include <filesystem>
-#include <random>
-#include <string>
 
 using namespace bale;
 
-namespace {
-
-class TempPath {
-  public:
-    TempPath() {
-        std::random_device seed;
-        auto name = "bale-file-test-" + std::to_string(seed()) + std::to_string(seed());
-        path_ = std::filesystem::temp_directory_path() / name;
-    }
-
-    TempPath(const TempPath&) = delete;
-    TempPath& operator=(const TempPath&) = delete;
-
-    ~TempPath() {
-        std::error_code ignored;
-        std::filesystem::remove(path_, ignored);
-    }
-
-    [[nodiscard]] const std::filesystem::path& path() const {
-        return path_;
-    }
-
-  private:
-    std::filesystem::path path_;
-};
-
-}
+using bale::test::TempPath;
 
 TEST_CASE("File appends, reports size and reads at offsets") {
     TempPath temp;
