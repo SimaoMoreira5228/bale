@@ -318,6 +318,8 @@ ExitCode exitCodeFor(ErrorKind kind) {
         return ExitCode::PasswordRequired;
     case ErrorKind::Io:
         return ExitCode::Io;
+    case ErrorKind::AlreadyExists:
+        return ExitCode::AlreadyExists;
     }
     return ExitCode::InvalidArchive;
 }
