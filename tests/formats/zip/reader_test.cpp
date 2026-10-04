@@ -1,5 +1,6 @@
 #include "formats/zip/reader.hpp"
 
+#include "codecs/codec_fixture.hpp"
 #include "zip_fixture.hpp"
 
 #include <doctest/doctest.h>
@@ -36,12 +37,24 @@ std::vector<zip::Entry> collect(const zip::Reader& reader) {
     return entries;
 }
 
-std::string readAll(const zip::Reader& reader, const zip::Entry& entry) {
-    std::string text(entry.uncompressedSize, '\0');
-    auto out = std::as_writable_bytes(std::span(text.data(), text.size()));
-    auto read = reader.readStored(entry, out);
-    REQUIRE(read);
+Result<std::string>
+streamText(zip::Reader& reader, const zip::Entry& entry, std::size_t scratchSize = 64) {
+    std::vector<std::byte> scratch(scratchSize);
+    std::string text;
+    auto streamed = reader.streamEntry(entry, scratch, [&](std::span<const std::byte> chunk) {
+        text.append(reinterpret_cast<const char*>(chunk.data()), chunk.size());
+        return Result<void>{};
+    });
+    if (!streamed) {
+        return std::unexpected(streamed.error());
+    }
     return text;
+}
+
+std::string readAll(zip::Reader& reader, const zip::Entry& entry) {
+    auto text = streamText(reader, entry);
+    REQUIRE(text);
+    return *text;
 }
 
 void checkRejected(
@@ -116,7 +129,7 @@ TEST_CASE("ZIP reader lists stored entries with metadata and reads their data") 
     std::array<std::byte, 3> scratch{};
     std::string streamed;
     std::size_t chunks = 0;
-    auto result = reader->streamStored(entries[0], scratch, [&](std::span<const std::byte> chunk) {
+    auto result = reader->streamEntry(entries[0], scratch, [&](std::span<const std::byte> chunk) {
         streamed.append(reinterpret_cast<const char*>(chunk.data()), chunk.size());
         ++chunks;
         return Result<void>{};
@@ -427,47 +440,138 @@ TEST_CASE("ZIP reader enforces caller limits before allocating") {
     CHECK(openZip(temp, {.maxEntries = 2, .maxCentralDirectoryBytes = 113, .maxNameLength = 15}));
 }
 
+TEST_CASE("ZIP reader inflates deflate entries and enforces the declared size exactly") {
+    std::string large(100'000, '-');
+    for (std::size_t index = 0; index < large.size(); index += 41) {
+        large[index] = static_cast<char>('A' + index % 23);
+    }
+    auto packed = test::deflateRaw(large);
+    REQUIRE_FALSE(packed.empty());
+
+    ZipSpec spec;
+    spec.entries.push_back(
+        {.name = "golden.txt",
+         .data = std::string(test::goldenDeflateText),
+         .method = zip::methodDeflate,
+         .payload = test::goldenDeflate()}
+    );
+    spec.entries.push_back(
+        {.name = "large.txt",
+         .data = large,
+         .method = zip::methodDeflate,
+         .flags = zip::flagDataDescriptor,
+         .payload = packed}
+    );
+    spec.entries.push_back(
+        {.name = "empty", .data = "", .method = zip::methodDeflate, .payload = test::deflateRaw("")}
+    );
+
+    TempFile temp(buildZip(spec).bytes);
+    auto reader = openZip(temp);
+    REQUIRE(reader);
+    auto entries = collect(*reader);
+    REQUIRE(entries.size() == 3);
+    CHECK(readAll(*reader, entries[0]) == test::goldenDeflateText);
+    CHECK(readAll(*reader, entries[1]) == large);
+    CHECK(streamText(*reader, entries[1], 2) == large);
+    CHECK(readAll(*reader, entries[2]).empty());
+
+    ZipEntrySpec hostile{
+        .name = "hostile",
+        .data = large,
+        .method = zip::methodDeflate,
+        .payload = packed,
+    };
+    ErrorKind kind = ErrorKind::Malformed;
+    std::string_view expected;
+    SUBCASE("declared size smaller than the stream") {
+        hostile.declaredSize = static_cast<std::uint32_t>(large.size() - 1);
+        kind = ErrorKind::LimitExceeded;
+        expected = "deflate entry exceeds declared size";
+    }
+    SUBCASE("declared size larger than the stream") {
+        hostile.declaredSize = static_cast<std::uint32_t>(large.size() + 1);
+        expected = "deflate entry shorter than declared size";
+    }
+    SUBCASE("data after the final block") {
+        hostile.payload->push_back(std::byte{0});
+        expected = "trailing data after deflate stream";
+    }
+    SUBCASE("stream cut short") {
+        hostile.payload->pop_back();
+        kind = ErrorKind::Truncated;
+        expected = "deflate stream truncated";
+    }
+    SUBCASE("reserved block type") {
+        (*hostile.payload)[0] = std::byte{0x07};
+        expected = "invalid deflate stream";
+    }
+    SUBCASE("CRC-32 mismatch") {
+        hostile.crc = 1;
+        kind = ErrorKind::Integrity;
+        expected = "entry CRC-32 mismatch";
+    }
+
+    TempFile hostileFile(buildZip({.entries = {hostile}}).bytes);
+    auto hostileReader = openZip(hostileFile);
+    REQUIRE(hostileReader);
+    auto entry = collect(*hostileReader)[0];
+    std::array<std::byte, 512> scratch{};
+    std::uint64_t delivered = 0;
+    auto streamed =
+        hostileReader->streamEntry(entry, scratch, [&](std::span<const std::byte> chunk) {
+            delivered += chunk.size();
+            return Result<void>{};
+        });
+    REQUIRE_FALSE(streamed);
+    CHECK(streamed.error().kind == kind);
+    CHECK(streamed.error().what == expected);
+    CHECK(delivered <= entry.uncompressedSize);
+}
+
 TEST_CASE("ZIP reader rejects bad entry data access") {
     ZipSpec spec = twoEntrySpec();
     spec.entries.push_back({.name = "bad-crc", .data = "payload", .crc = 0x12345678});
-    spec.entries.push_back({.name = "deflated", .data = "xx", .method = zip::methodDeflate});
+    spec.entries.push_back({.name = "bzip2", .data = "xx", .method = 12});
     spec.entries.push_back({.name = "locked", .data = "xx", .flags = zip::flagEncrypted});
+    spec.entries.push_back(
+        {.name = "deflated",
+         .data = "d",
+         .method = zip::methodDeflate,
+         .payload = test::deflateRaw("d")}
+    );
     auto built = buildZip(spec);
 
     TempFile temp(built.bytes);
     auto reader = openZip(temp);
     REQUIRE(reader);
     auto entries = collect(*reader);
-    REQUIRE(entries.size() == 5);
+    REQUIRE(entries.size() == 6);
 
-    std::array<std::byte, 7> out{};
-    auto badCrc = reader->readStored(entries[2], out);
+    auto badCrc = streamText(*reader, entries[2], 4);
     REQUIRE_FALSE(badCrc);
     CHECK(badCrc.error().kind == ErrorKind::Integrity);
+    CHECK(badCrc.error().what == "entry CRC-32 mismatch");
 
-    std::array<std::byte, 4> scratch{};
-    auto sink = [](std::span<const std::byte>) {
-        return Result<void>{};
-    };
-    auto streamed = reader->streamStored(entries[2], scratch, sink);
-    REQUIRE_FALSE(streamed);
-    CHECK(streamed.error().kind == ErrorKind::Integrity);
+    auto bzip2 = streamText(*reader, entries[3]);
+    REQUIRE_FALSE(bzip2);
+    CHECK(bzip2.error().kind == ErrorKind::Unsupported);
+    CHECK(bzip2.error().what == "compression method is not supported");
 
-    std::array<std::byte, 2> small{};
-    auto deflated = reader->readStored(entries[3], small);
-    REQUIRE_FALSE(deflated);
-    CHECK(deflated.error().kind == ErrorKind::Unsupported);
-    CHECK(deflated.error().what == "deflate decompression is not implemented yet");
-
-    auto locked = reader->readStored(entries[4], small);
+    auto locked = streamText(*reader, entries[4]);
     REQUIRE_FALSE(locked);
     CHECK(locked.error().kind == ErrorKind::Unsupported);
 
-    auto wrongSize = reader->readStored(entries[0], small);
-    REQUIRE_FALSE(wrongSize);
-    CHECK(wrongSize.error().kind == ErrorKind::LimitExceeded);
+    auto noScratch = streamText(*reader, entries[0], 0);
+    REQUIRE_FALSE(noScratch);
+    CHECK(noScratch.error().kind == ErrorKind::LimitExceeded);
+    auto smallScratch = streamText(*reader, entries[5], 1);
+    REQUIRE_FALSE(smallScratch);
+    CHECK(smallScratch.error().kind == ErrorKind::LimitExceeded);
+    CHECK(streamText(*reader, entries[5], 2) == "d");
 
-    auto failing = reader->streamStored(entries[0], scratch, [](std::span<const std::byte>) {
+    std::array<std::byte, 4> scratch{};
+    auto failing = reader->streamEntry(entries[0], scratch, [](std::span<const std::byte>) {
         return Result<void>{fail(ErrorKind::Io, "sink full")};
     });
     REQUIRE_FALSE(failing);
@@ -521,7 +625,7 @@ TEST_CASE("ZIP reader fails cleanly on every truncation and single-byte corrupti
             if (!*more) {
                 break;
             }
-            auto ignored = reader->streamStored(entry, scratch, [](std::span<const std::byte>) {
+            auto ignored = reader->streamEntry(entry, scratch, [](std::span<const std::byte>) {
                 return Result<void>{};
             });
             static_cast<void>(ignored);

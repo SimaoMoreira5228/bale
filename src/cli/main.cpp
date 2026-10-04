@@ -119,7 +119,7 @@ int runFormats() {
         "zip",
         "yes",
         "yes",
-        "stored entries only, ZIP64, no encryption"
+        "stored and deflate, ZIP64, no encryption"
     );
     std::println(
         "{:<6} {:<5} {:<5} {}",

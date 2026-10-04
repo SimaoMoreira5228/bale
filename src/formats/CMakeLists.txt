@@ -1,3 +1,4 @@
+add_subdirectory(gzip)
 add_subdirectory(tar)
 add_subdirectory(zip)
 

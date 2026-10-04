@@ -2,14 +2,12 @@
 
 #include "base/endian.hpp"
 #include "checksum/crc.hpp"
-#include "io/file.hpp"
+#include "io/temp_file.hpp"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <optional>
-#include <random>
 #include <span>
 #include <string>
 #include <string_view>
@@ -65,6 +63,8 @@ struct ZipEntrySpec {
     std::uint16_t dosDate = 0x5B51;
     std::uint32_t externalAttributes = 0100644U << 16;
     std::optional<std::uint32_t> crc{};
+    std::optional<Bytes> payload{};
+    std::optional<std::uint32_t> declaredSize{};
     Bytes centralExtra{};
     bool zip64 = false;
 };
@@ -96,7 +96,10 @@ inline BuiltZip buildZip(const ZipSpec& spec) {
         offsets.push_back(out.size() - base);
         auto crc = entry.crc.value_or(Crc32::of(asBytes(entry.data)));
         bool descriptor = (entry.flags & 0x0008) != 0;
-        auto size = static_cast<std::uint32_t>(entry.data.size());
+        auto text = asBytes(entry.data);
+        auto stored = entry.payload.value_or(Bytes(text.begin(), text.end()));
+        auto packed = static_cast<std::uint32_t>(stored.size());
+        auto size = entry.declaredSize.value_or(static_cast<std::uint32_t>(entry.data.size()));
 
         put32(out, 0x04034b50);
         put16(out, entry.zip64 ? 45 : 20);
@@ -105,7 +108,7 @@ inline BuiltZip buildZip(const ZipSpec& spec) {
         put16(out, entry.dosTime);
         put16(out, entry.dosDate);
         put32(out, descriptor ? 0 : crc);
-        put32(out, descriptor ? 0 : (entry.zip64 ? 0xFFFFFFFF : size));
+        put32(out, descriptor ? 0 : (entry.zip64 ? 0xFFFFFFFF : packed));
         put32(out, descriptor ? 0 : (entry.zip64 ? 0xFFFFFFFF : size));
         put16(out, static_cast<std::uint16_t>(entry.name.size()));
         put16(out, entry.zip64 ? 20 : 0);
@@ -113,14 +116,14 @@ inline BuiltZip buildZip(const ZipSpec& spec) {
         if (entry.zip64) {
             put16(out, 0x0001);
             put16(out, 16);
-            put64(out, entry.data.size());
-            put64(out, entry.data.size());
+            put64(out, size);
+            put64(out, packed);
         }
-        putText(out, entry.data);
+        out.insert(out.end(), stored.begin(), stored.end());
         if (descriptor) {
             put32(out, 0x08074b50);
             put32(out, crc);
-            put32(out, size);
+            put32(out, packed);
             put32(out, size);
         }
     }
@@ -129,14 +132,16 @@ inline BuiltZip buildZip(const ZipSpec& spec) {
     for (std::size_t index = 0; index < spec.entries.size(); ++index) {
         const auto& entry = spec.entries[index];
         auto crc = entry.crc.value_or(Crc32::of(asBytes(entry.data)));
-        auto size = static_cast<std::uint32_t>(entry.data.size());
+        auto packed =
+            static_cast<std::uint32_t>(entry.payload ? entry.payload->size() : entry.data.size());
+        auto size = entry.declaredSize.value_or(static_cast<std::uint32_t>(entry.data.size()));
 
         Bytes extra;
         if (entry.zip64) {
             put16(extra, 0x0001);
             put16(extra, 24);
-            put64(extra, entry.data.size());
-            put64(extra, entry.data.size());
+            put64(extra, size);
+            put64(extra, packed);
             put64(extra, offsets[index]);
         }
         extra.insert(extra.end(), entry.centralExtra.begin(), entry.centralExtra.end());
@@ -149,7 +154,7 @@ inline BuiltZip buildZip(const ZipSpec& spec) {
         put16(out, entry.dosTime);
         put16(out, entry.dosDate);
         put32(out, crc);
-        put32(out, entry.zip64 ? 0xFFFFFFFF : size);
+        put32(out, entry.zip64 ? 0xFFFFFFFF : packed);
         put32(out, entry.zip64 ? 0xFFFFFFFF : size);
         put16(out, static_cast<std::uint16_t>(entry.name.size()));
         put16(out, static_cast<std::uint16_t>(extra.size()));
@@ -201,38 +206,6 @@ inline BuiltZip buildZip(const ZipSpec& spec) {
     return built;
 }
 
-class TempFile {
-  public:
-    explicit TempFile(std::span<const std::byte> contents) {
-        std::random_device seed;
-        auto name = "bale-zip-test-" + std::to_string(seed()) + std::to_string(seed());
-        path_ = std::filesystem::temp_directory_path() / name;
-
-        auto file = File::createNew(path_);
-        if (file) {
-            ok_ = file->append(contents).has_value();
-        }
-    }
-
-    TempFile(const TempFile&) = delete;
-    TempFile& operator=(const TempFile&) = delete;
-
-    ~TempFile() {
-        std::error_code ignored;
-        std::filesystem::remove(path_, ignored);
-    }
-
-    [[nodiscard]] bool ok() const {
-        return ok_;
-    }
-
-    [[nodiscard]] Result<File> open() const {
-        return File::openRead(path_);
-    }
-
-  private:
-    std::filesystem::path path_;
-    bool ok_ = false;
-};
+using bale::test::TempFile;
 
 }

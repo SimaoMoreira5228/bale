@@ -218,7 +218,7 @@ ExitCode extractTar(std::string_view argument, File file, Session& session) {
 }
 
 [[nodiscard]] Result<EntryResult>
-extractZipEntry(Session& session, const zip::Reader& reader, const zip::Entry& entry) {
+extractZipEntry(Session& session, zip::Reader& reader, const zip::Entry& entry) {
     // TODO: decode CP437 names when the UTF-8 flag is clear; non-ASCII legacy names are refused
     // as invalid UTF-8 until then.
     auto path = session.path(entry.name);
@@ -242,7 +242,7 @@ extractZipEntry(Session& session, const zip::Reader& reader, const zip::Entry& e
 
         std::string& target = session.linkTarget();
         target.clear();
-        auto read = reader.streamStored(entry, session.scratch(), [&target](auto chunk) {
+        auto read = reader.streamEntry(entry, session.scratch(), [&target](auto chunk) {
             target.append(reinterpret_cast<const char*>(chunk.data()), chunk.size());
             return Result<void>{};
         });
@@ -253,7 +253,7 @@ extractZipEntry(Session& session, const zip::Reader& reader, const zip::Entry& e
     }
 
     return writeFile(session, *path, metadata, [&](auto&& sink) {
-        return reader.streamStored(entry, session.scratch(), sink);
+        return reader.streamEntry(entry, session.scratch(), sink);
     });
 }
 

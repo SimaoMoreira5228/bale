@@ -2,11 +2,11 @@
 
 #include "base/error.hpp"
 #include "checksum/crc.hpp"
+#include "codecs/decoders.hpp"
 #include "io/byte_reader.hpp"
 #include "io/chunk_sink.hpp"
 #include "io/file.hpp"
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -124,56 +124,60 @@ class Reader {
 
     [[nodiscard]] Result<std::uint64_t> dataOffset(const Entry& entry) const;
 
-    [[nodiscard]] Result<void> readStored(const Entry& entry, std::span<std::byte> out) const;
-
     // SECURITY: chunks reach the sink before the CRC-32 is known; output is untrusted until the
     // call returns success.
     template <ChunkSink Sink>
     [[nodiscard]] Result<void>
-    streamStored(const Entry& entry, std::span<std::byte> scratch, Sink&& sink) const {
-        auto offset = storedDataOffset(entry);
-        if (!offset) {
-            return std::unexpected(offset.error());
-        }
-        if (scratch.empty() && entry.uncompressedSize != 0) {
-            return fail(ErrorKind::LimitExceeded, "scratch buffer is empty");
+    streamEntry(const Entry& entry, std::span<std::byte> scratch, Sink&& sink) {
+        auto stream = beginEntry(entry, scratch);
+        if (!stream) {
+            return std::unexpected(stream.error());
         }
 
-        Crc32 crc;
-        std::uint64_t position = *offset;
-        std::uint64_t remaining = entry.uncompressedSize;
-        while (remaining > 0) {
-            auto chunk = scratch.first(
-                static_cast<std::size_t>(std::min<std::uint64_t>(remaining, scratch.size()))
-            );
-            auto read = file_.readExactAt(position, chunk);
-            if (!read) {
-                return std::unexpected(read.error());
+        while (true) {
+            auto chunk = nextChunk(*stream);
+            if (!chunk) {
+                return std::unexpected(chunk.error());
+            }
+            if (chunk->empty()) {
+                return {};
             }
 
-            crc.update(chunk);
-            auto sunk = sink(std::span<const std::byte>(chunk));
+            auto sunk = sink(*chunk);
             if (!sunk) {
                 return std::unexpected(sunk.error());
             }
-
-            position += chunk.size();
-            remaining -= chunk.size();
         }
-
-        if (crc.value() != entry.crc32) {
-            return fail(ErrorKind::Integrity, "stored entry CRC-32 mismatch", *offset);
-        }
-        return {};
     }
 
   private:
     explicit Reader(File file) : file_(std::move(file)) {
     }
 
-    [[nodiscard]] Result<std::uint64_t> storedDataOffset(const Entry& entry) const;
+    struct EntryStream {
+        Inflater* inflater = nullptr;
+        std::span<std::byte> input;
+        std::span<std::byte> output;
+        std::span<const std::byte> pending;
+        std::uint64_t dataStart = 0;
+        std::uint64_t position = 0;
+        std::uint64_t inputLeft = 0;
+        std::uint64_t outputLeft = 0;
+        Crc32 crc;
+        std::uint32_t expectedCrc = 0;
+        std::uint16_t method = 0;
+        bool streamEnded = false;
+        bool done = false;
+    };
+
+    [[nodiscard]] Result<EntryStream> beginEntry(const Entry& entry, std::span<std::byte> scratch);
+    [[nodiscard]] Result<std::span<const std::byte>> nextChunk(EntryStream& stream);
+    [[nodiscard]] Result<std::span<const std::byte>> nextStored(EntryStream& stream);
+    [[nodiscard]] Result<std::span<const std::byte>> nextDeflated(EntryStream& stream);
+    [[nodiscard]] static Result<std::span<const std::byte>> finishEntry(EntryStream& stream);
 
     File file_;
+    std::optional<Inflater> inflater_;
     std::vector<std::byte> buffer_;
     std::size_t directorySize_ = 0;
     std::uint64_t directoryOffset_ = 0;
