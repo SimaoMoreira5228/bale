@@ -6,8 +6,6 @@
 #include <utility>
 
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
 #include <windows.h>
 #else
 #include <cerrno>
@@ -76,7 +74,7 @@ Result<File> File::openRead(const std::filesystem::path& path) {
     HANDLE handle = CreateFileW(
         path.c_str(),
         GENERIC_READ,
-        FILE_SHARE_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         nullptr,
         OPEN_EXISTING,
         FILE_ATTRIBUTE_NORMAL,

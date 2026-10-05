@@ -36,7 +36,7 @@ inline std::vector<std::byte> deflateRaw(std::span<const std::byte> data) {
         return {};
     }
 
-    std::vector<std::byte> out(zng_deflateBound(&stream, data.size()));
+    std::vector<std::byte> out(zng_deflateBound(&stream, static_cast<unsigned long>(data.size())));
     stream.next_in = reinterpret_cast<const std::uint8_t*>(data.data());
     stream.avail_in = static_cast<std::uint32_t>(data.size());
     stream.next_out = reinterpret_cast<std::uint8_t*>(out.data());

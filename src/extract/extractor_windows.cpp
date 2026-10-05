@@ -5,8 +5,6 @@
 #include <algorithm>
 #include <cstring>
 
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
 #include <windows.h>
 #include <winternl.h>
 
@@ -32,6 +30,16 @@
 #define FILE_OPEN_REPARSE_POINT 0x00200000
 #endif
 
+#ifdef _MSC_VER
+extern "C" NTSTATUS NTAPI NtSetInformationFile(
+    HANDLE file,
+    PIO_STATUS_BLOCK status,
+    PVOID information,
+    ULONG length,
+    FILE_INFORMATION_CLASS informationClass
+);
+#endif
+
 namespace bale {
 
 namespace {
@@ -49,6 +57,7 @@ constexpr NTSTATUS statusPathNotFound = static_cast<NTSTATUS>(0xC000003AL);
 constexpr NTSTATUS statusNotADirectory = static_cast<NTSTATUS>(0xC0000103L);
 constexpr NTSTATUS statusFileIsADirectory = static_cast<NTSTATUS>(0xC00000BAL);
 constexpr ULONG_PTR fileCreated = 2;
+constexpr auto fileRenameInformation = static_cast<FILE_INFORMATION_CLASS>(10);
 constexpr ULONG shareAll = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
 constexpr ACCESS_MASK directoryAccess = FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES |
     FILE_WRITE_ATTRIBUTES | FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY;
@@ -363,10 +372,10 @@ Result<EntryResult> Extractor::place(
         }
     }
 
-    // SECURITY: the rename is relative to the parent handle, so it never resolves a path. With
-    // ReplaceIfExists the check above can race with a swap to a reparse point, but the rename then
-    // replaces the reparse point itself rather than writing through it, and renaming over a
-    // directory fails.
+    // SECURITY: the rename goes straight to NtSetInformationFile relative to the parent handle; the
+    // Win32 wrapper would turn the name into a full path first. With ReplaceIfExists the check
+    // above can race with a swap to a reparse point, but the rename then replaces the reparse
+    // point itself rather than writing through it, and renaming over a directory fails.
     alignas(FILE_RENAME_INFO) std::array<std::byte, sizeof(FILE_RENAME_INFO) + sizeof(WideName)>
         buffer{};
     auto* info = reinterpret_cast<FILE_RENAME_INFO*>(buffer.data());
@@ -375,14 +384,14 @@ Result<EntryResult> Extractor::place(
     info->FileNameLength = static_cast<DWORD>(name->size() * sizeof(wchar_t));
     std::memcpy(info->FileName, name->data(), name->size() * sizeof(wchar_t));
 
-    const auto size = static_cast<DWORD>(sizeof(FILE_RENAME_INFO) + info->FileNameLength);
-    if (SetFileInformationByHandle(entry.get(), FileRenameInfo, info, size)) {
+    const auto size = static_cast<ULONG>(sizeof(FILE_RENAME_INFO) + info->FileNameLength);
+    IO_STATUS_BLOCK io{};
+    NTSTATUS status = NtSetInformationFile(entry.get(), &io, info, size, fileRenameInformation);
+    if (isSuccess(status)) {
         return EntryResult{};
     }
-
-    const DWORD error = GetLastError();
-    if (error != ERROR_ALREADY_EXISTS && error != ERROR_FILE_EXISTS) {
-        return systemFailure(ErrorKind::Io, "cannot move entry into place");
+    if (status != statusNameCollision) {
+        return statusFailure(ErrorKind::Io, "cannot move entry into place", status);
     }
     if (replace) {
         return fail(ErrorKind::AlreadyExists, "existing target is not a regular file");
