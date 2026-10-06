@@ -18,10 +18,11 @@ add_executable(bale_tests
     format/envelope_test.cpp
     format/tlv_test.cpp
     formats/detect_test.cpp
-    formats/gzip/decoder_test.cpp
+    formats/gzip/stream_test.cpp
     formats/tar/header_test.cpp
     formats/tar/reader_test.cpp
     formats/zip/reader_test.cpp
+    formats/zstd/stream_test.cpp
     io/byte_reader_test.cpp
     io/file_test.cpp
     security/archive_path_test.cpp
@@ -35,9 +36,11 @@ target_link_libraries(bale_tests PRIVATE
     bale_codecs
     bale_extract
     bale_format
+    bale_formats_compressed
     bale_formats_gzip
     bale_formats_tar
     bale_formats_zip
+    bale_formats_zstd
     bale_io
     bale_security
     bale_warnings

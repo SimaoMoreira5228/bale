@@ -1,5 +1,8 @@
 #pragma once
 
+#include "base/endian.hpp"
+#include "checksum/crc.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -49,6 +52,36 @@ inline std::vector<std::byte> deflateRaw(std::span<const std::byte> data) {
 
 inline std::vector<std::byte> deflateRaw(std::string_view text) {
     return deflateRaw(std::as_bytes(std::span(text.data(), text.size())));
+}
+
+// NOTE: one gzip member with an optional FNAME; GNU gzip writes the same layout.
+inline std::vector<std::byte>
+gzipMember(std::span<const std::byte> data, std::string_view name = {}, std::uint32_t mtime = 0) {
+    std::vector<std::byte> out{
+        std::byte{0x1f},
+        std::byte{0x8b},
+        std::byte{8},
+        std::byte{name.empty() ? std::uint8_t{0} : std::uint8_t{0x08}},
+    };
+    std::array<std::byte, 4> word{};
+    storeLe(word.data(), mtime);
+    out.insert(out.end(), word.begin(), word.end());
+    out.push_back(std::byte{0});
+    out.push_back(std::byte{3});
+    if (!name.empty()) {
+        for (char value : name) {
+            out.push_back(static_cast<std::byte>(value));
+        }
+        out.push_back(std::byte{0});
+    }
+
+    auto packed = deflateRaw(data);
+    out.insert(out.end(), packed.begin(), packed.end());
+    storeLe(word.data(), Crc32::of(data));
+    out.insert(out.end(), word.begin(), word.end());
+    storeLe(word.data(), static_cast<std::uint32_t>(data.size()));
+    out.insert(out.end(), word.begin(), word.end());
+    return out;
 }
 
 // NOTE: the size is never pledged, so the frame header carries the full window instead of a
