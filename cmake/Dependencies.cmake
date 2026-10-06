@@ -1,7 +1,12 @@
-option(BALE_USE_SYSTEM_CODECS "Link system zlib-ng and zstd instead of building pinned sources" OFF)
+option(
+    BALE_USE_SYSTEM_CODECS
+    "Link system zlib-ng, zstd and BLAKE3 instead of building pinned sources"
+    OFF
+)
 
 add_library(bale_zlib_ng INTERFACE)
 add_library(bale_zstd INTERFACE)
+add_library(bale_blake3 INTERFACE)
 
 if(BALE_USE_SYSTEM_CODECS)
     find_package(zlib-ng CONFIG QUIET)
@@ -29,6 +34,16 @@ if(BALE_USE_SYSTEM_CODECS)
     else()
         message(FATAL_ERROR "BALE_USE_SYSTEM_CODECS: zstd not found")
     endif()
+
+    find_package(blake3 1.5 CONFIG QUIET)
+    if(TARGET BLAKE3::blake3)
+        target_link_libraries(bale_blake3 INTERFACE BLAKE3::blake3)
+    elseif(PkgConfig_FOUND)
+        pkg_check_modules(BALE_SYSTEM_BLAKE3 REQUIRED IMPORTED_TARGET libblake3>=1.5)
+        target_link_libraries(bale_blake3 INTERFACE PkgConfig::BALE_SYSTEM_BLAKE3)
+    else()
+        message(FATAL_ERROR "BALE_USE_SYSTEM_CODECS: BLAKE3 not found")
+    endif()
     return()
 endif()
 
@@ -44,6 +59,12 @@ FetchContent_Declare(zstd
     URL https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz
     URL_HASH SHA256=eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3
     SOURCE_SUBDIR build/cmake
+    SYSTEM
+)
+FetchContent_Declare(blake3
+    URL https://github.com/BLAKE3-team/BLAKE3/archive/refs/tags/1.8.7.tar.gz
+    URL_HASH SHA256=c6782a28842b1c0478524ac06a4f2ede784038ee298d6e2162c0b089c4306a3c
+    SOURCE_SUBDIR c
     SYSTEM
 )
 
@@ -78,8 +99,16 @@ block(SCOPE_FOR VARIABLES)
     set(ZSTD_LEGACY_SUPPORT OFF)
     set(ZSTD_MULTITHREAD_SUPPORT OFF)
 
-    FetchContent_MakeAvailable(zlib_ng zstd)
+    # NOTE: BLAKE3 picks its SIMD kernels at run time through CPUID, so the default amd64
+    # assembly and NEON builds stay portable; no -march flags are involved.
+    set(BLAKE3_USE_TBB OFF)
+    set(BLAKE3_FETCH_TBB OFF)
+    set(BLAKE3_EXAMPLES OFF)
+    set(BLAKE3_TESTING OFF)
+
+    FetchContent_MakeAvailable(zlib_ng zstd blake3)
 endblock()
 
 target_link_libraries(bale_zlib_ng INTERFACE zlib-ng::zlib)
 target_link_libraries(bale_zstd INTERFACE libzstd_static)
+target_link_libraries(bale_blake3 INTERFACE BLAKE3::blake3)
