@@ -31,12 +31,11 @@ class CompressedStream {
 
     [[nodiscard]] Compression compression() const;
 
-    // NOTE: the first gzip member's header, or nullptr for other codecs.
     [[nodiscard]] const gzip::Header* gzipHeader() const;
 
     [[nodiscard]] std::uint64_t outputBytes() const;
 
-    // NOTE: same contract as gzip::Stream::read and zstd::Stream::read: 0 means the verified end.
+    // NOTE: 0 means the end of the stream, with every codec checksum verified.
     [[nodiscard]] Result<std::size_t> read(std::span<std::byte> out);
 
     // SECURITY: chunks reach the sink before the codec checksums are verified; output is untrusted

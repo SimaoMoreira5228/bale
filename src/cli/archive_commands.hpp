@@ -42,8 +42,6 @@ struct OpenedArchive {
 
 [[nodiscard]] Result<tar::Source> openTarSource(File file, Compression compression);
 
-// NOTE: the gzip FNAME when it is a safe single file name, otherwise the archive's own file name
-// without its .gz or .zst suffix (or with .out appended when it has neither).
 [[nodiscard]] Result<ArchivePath>
 singleFileName(std::string_view archive, const CompressedStream& stream, std::string& out);
 

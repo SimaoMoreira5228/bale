@@ -39,8 +39,7 @@ class Stream {
         return outputBytes_;
     }
 
-    // NOTE: decompresses into out and returns how many bytes were written; 0 means the input ended
-    // exactly at the end of a frame.
+    // NOTE: 0 means the input ended exactly at the end of a frame.
     // SECURITY: bytes are returned before a frame's optional content checksum is checked; output
     // is untrusted until a read returns 0.
     [[nodiscard]] Result<std::size_t> read(std::span<std::byte> out);

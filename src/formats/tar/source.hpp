@@ -14,8 +14,6 @@
 
 namespace bale::tar {
 
-// NOTE: the bytes a tar reader walks through front to back: a seekable file, whose skips are free
-// and whose size is known up front, or a decompressed stream that can only be read in order.
 class Source {
   public:
     [[nodiscard]] static Result<Source> open(File file);
@@ -28,10 +26,8 @@ class Source {
 
     [[nodiscard]] bool seekable() const;
 
-    // NOTE: bytes left before the end, known only for a seekable file.
     [[nodiscard]] std::optional<std::uint64_t> remaining() const;
 
-    // NOTE: fills out completely unless the source ends first; returns the count read.
     [[nodiscard]] Result<std::size_t> readFull(std::span<std::byte> out);
 
     [[nodiscard]] Result<void> skip(std::uint64_t count);

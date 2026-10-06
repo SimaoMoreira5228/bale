@@ -76,6 +76,11 @@ class Session {
     }
 
     void fail(std::string_view name, const Error& error) {
+        if (repeatsLastFailure(error)) {
+            return;
+        }
+        lastFailure_ = error;
+
         ++tally_.failed;
         if (tally_.firstFailure == ExitCode::Ok) {
             tally_.firstFailure = exitCodeFor(error.kind);
@@ -101,8 +106,17 @@ class Session {
     std::string path_;
     std::string link_;
     std::string linkTarget_;
+    [[nodiscard]] bool repeatsLastFailure(const Error& error) const {
+        if (!lastFailure_ || error.offset == Error::noOffset) {
+            return false;
+        }
+        return lastFailure_->kind == error.kind && lastFailure_->offset == error.offset &&
+            lastFailure_->what == error.what;
+    }
+
     std::string escaped_;
     Tally tally_;
+    std::optional<Error> lastFailure_;
 };
 
 [[nodiscard]] std::optional<std::int64_t>
