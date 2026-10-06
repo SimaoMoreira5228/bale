@@ -22,6 +22,9 @@ class File {
     File& operator=(File&& other) noexcept;
     ~File();
 
+    // NOTE: the copy shares the open file; reads stay positional, so both can be used freely.
+    [[nodiscard]] Result<File> duplicate() const;
+
     [[nodiscard]] Result<std::uint64_t> size() const;
 
     [[nodiscard]] Result<std::size_t> readAt(std::uint64_t offset, std::span<std::byte> out) const;

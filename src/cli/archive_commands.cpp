@@ -1,8 +1,10 @@
 #include "cli/archive_commands.hpp"
 
 #include "cli/terminal_text.hpp"
+#include "formats/compressed/stream.hpp"
 #include "formats/detect.hpp"
 #include "formats/tar/reader.hpp"
+#include "formats/tar/source.hpp"
 #include "formats/zip/reader.hpp"
 #include "io/file.hpp"
 
@@ -52,16 +54,20 @@ struct CivilTime {
 
 void printRow(
     char kind,
-    std::uint64_t size,
+    std::optional<std::uint64_t> size,
     std::optional<CivilTime> time,
     std::string_view name,
     std::string_view linkTarget = {}
 ) {
+    if (size) {
+        std::print("{} {:>14} ", kind, *size);
+    } else {
+        std::print("{} {:>14} ", kind, "-");
+    }
+
     if (time) {
         std::print(
-            "{} {:>14} {:04}-{:02}-{:02} {:02}:{:02} {}",
-            kind,
-            size,
+            "{:04}-{:02}-{:02} {:02}:{:02} {}",
             time->year,
             time->month,
             time->day,
@@ -70,7 +76,7 @@ void printRow(
             name
         );
     } else {
-        std::print("{} {:>14} {:16} {}", kind, size, "", name);
+        std::print("{:16} {}", "", name);
     }
 
     if (linkTarget.empty()) {
@@ -161,16 +167,17 @@ ExitCode listZip(std::string_view argument, File file, const ListOptions& option
     }
 }
 
-ExitCode listTar(std::string_view argument, File file, const ListOptions& options) {
-    auto reader = tar::Reader::open(std::move(file));
-    if (!reader) {
-        return reportFailure(argument, reader.error());
+ExitCode listTar(std::string_view argument, OpenedArchive archive, const ListOptions& options) {
+    auto source = openTarSource(std::move(archive.file), archive.format.compression);
+    if (!source) {
+        return reportFailure(argument, source.error());
     }
 
+    tar::Reader reader(std::move(*source));
     std::string escapedPath;
     std::string escapedTarget;
     while (true) {
-        auto next = reader->next();
+        auto next = reader.next();
         if (!next) {
             return reportFailure(argument, next.error());
         }
@@ -244,15 +251,16 @@ ExitCode testZip(std::string_view argument, File file) {
     return result;
 }
 
-ExitCode testTar(std::string_view argument, File file) {
-    auto reader = tar::Reader::open(std::move(file));
-    if (!reader) {
-        return reportFailure(argument, reader.error());
+ExitCode testTar(std::string_view argument, OpenedArchive archive) {
+    auto source = openTarSource(std::move(archive.file), archive.format.compression);
+    if (!source) {
+        return reportFailure(argument, source.error());
     }
 
+    tar::Reader reader(std::move(*source));
     std::uint64_t count = 0;
     while (true) {
-        auto next = reader->next();
+        auto next = reader.next();
         if (!next) {
             return reportFailure(argument, next.error());
         }
@@ -263,6 +271,53 @@ ExitCode testTar(std::string_view argument, File file) {
     }
 
     std::println("ok: {} entries", count);
+    return ExitCode::Ok;
+}
+
+ExitCode
+listSingleFile(std::string_view argument, OpenedArchive archive, const ListOptions& options) {
+    auto stream = CompressedStream::open(std::move(archive.file), archive.format.compression);
+    if (!stream) {
+        return reportFailure(argument, stream.error());
+    }
+
+    std::string normalized;
+    auto path = singleFileName(argument, *stream, normalized);
+    if (!path) {
+        return reportFailure(argument, path.error());
+    }
+
+    std::string escaped;
+    auto name = escapeForTerminal(path->path, escaped);
+    if (!options.detailed) {
+        std::println("{}", name);
+        return ExitCode::Ok;
+    }
+
+    std::optional<CivilTime> time;
+    const auto* header = stream->gzipHeader();
+    if (header != nullptr && header->mtime != 0) {
+        time = civilFromUnix(header->mtime);
+    }
+    printRow('-', std::nullopt, time, name);
+    return ExitCode::Ok;
+}
+
+ExitCode testSingleFile(std::string_view argument, OpenedArchive archive) {
+    auto stream = CompressedStream::open(std::move(archive.file), archive.format.compression);
+    if (!stream) {
+        return reportFailure(argument, stream.error());
+    }
+
+    std::vector<std::byte> scratch(testChunkSize);
+    auto checked = stream->readAll(scratch, [](std::span<const std::byte>) -> Result<void> {
+        return {};
+    });
+    if (!checked) {
+        return reportFailure(argument, checked.error());
+    }
+
+    std::println("ok: {} bytes", stream->outputBytes());
     return ExitCode::Ok;
 }
 
@@ -317,10 +372,10 @@ Result<OpenedArchive> openArchive(std::string_view argument) {
     if (!format) {
         return std::unexpected(format.error());
     }
-    if (*format == ArchiveFormat::Unknown) {
+    if (format->container == Container::Unknown) {
         return fail(ErrorKind::Unsupported, "unrecognized archive format");
     }
-    if (*format == ArchiveFormat::Bale) {
+    if (format->container == Container::Bale) {
         return fail(ErrorKind::Unsupported, "native BALE archives cannot be read yet");
     }
 
@@ -330,16 +385,60 @@ Result<OpenedArchive> openArchive(std::string_view argument) {
     };
 }
 
+Result<tar::Source> openTarSource(File file, Compression compression) {
+    if (compression == Compression::None) {
+        return tar::Source::open(std::move(file));
+    }
+
+    auto stream = CompressedStream::open(std::move(file), compression);
+    if (!stream) {
+        return std::unexpected(stream.error());
+    }
+    return tar::Source(std::move(*stream));
+}
+
+Result<ArchivePath>
+singleFileName(std::string_view archive, const CompressedStream& stream, std::string& out) {
+    PathPolicy policy;
+    Limits limits;
+    const auto* header = stream.gzipHeader();
+    if (header != nullptr && !header->name.empty()) {
+        auto stored =
+            normalizeArchivePath(std::as_bytes(std::span(header->name)), policy, limits, out);
+        if (stored && stored->depth == 1 && !stored->directory) {
+            return stored;
+        }
+    }
+
+    auto leaf = std::filesystem::path(archive).filename().string();
+    bool stripped = false;
+    for (std::string_view suffix : {std::string_view(".gz"), std::string_view(".zst")}) {
+        if (leaf.size() > suffix.size() && leaf.ends_with(suffix)) {
+            leaf.resize(leaf.size() - suffix.size());
+            stripped = true;
+            break;
+        }
+    }
+    if (!stripped) {
+        leaf += ".out";
+    }
+    return normalizeArchivePath(std::as_bytes(std::span(leaf)), policy, limits, out);
+}
+
 ExitCode listArchive(std::string_view argument, const ListOptions& options) {
     auto archive = openArchive(argument);
     if (!archive) {
         return reportFailure(argument, archive.error());
     }
 
-    if (archive->format == ArchiveFormat::Zip) {
+    switch (archive->format.container) {
+    case Container::Zip:
         return listZip(argument, std::move(archive->file), options);
+    case Container::SingleFile:
+        return listSingleFile(argument, std::move(*archive), options);
+    default:
+        return listTar(argument, std::move(*archive), options);
     }
-    return listTar(argument, std::move(archive->file), options);
 }
 
 ExitCode testArchive(std::string_view argument) {
@@ -348,10 +447,14 @@ ExitCode testArchive(std::string_view argument) {
         return reportFailure(argument, archive.error());
     }
 
-    if (archive->format == ArchiveFormat::Zip) {
+    switch (archive->format.container) {
+    case Container::Zip:
         return testZip(argument, std::move(archive->file));
+    case Container::SingleFile:
+        return testSingleFile(argument, std::move(*archive));
+    default:
+        return testTar(argument, std::move(*archive));
     }
-    return testTar(argument, std::move(archive->file));
 }
 
 }

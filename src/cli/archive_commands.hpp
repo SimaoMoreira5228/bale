@@ -2,11 +2,14 @@
 
 #include "base/error.hpp"
 #include "extract/extractor.hpp"
+#include "formats/compressed/stream.hpp"
 #include "formats/detect.hpp"
+#include "formats/tar/source.hpp"
 #include "io/file.hpp"
+#include "security/archive_path.hpp"
 
 #include <cstdint>
-
+#include <string>
 #include <string_view>
 
 namespace bale::cli {
@@ -32,10 +35,17 @@ ExitCode reportFailure(std::string_view context, const Error& error);
 
 struct OpenedArchive {
     File file;
-    ArchiveFormat format = ArchiveFormat::Unknown;
+    ArchiveFormat format;
 };
 
 [[nodiscard]] Result<OpenedArchive> openArchive(std::string_view argument);
+
+[[nodiscard]] Result<tar::Source> openTarSource(File file, Compression compression);
+
+// NOTE: the gzip FNAME when it is a safe single file name, otherwise the archive's own file name
+// without its .gz or .zst suffix (or with .out appended when it has neither).
+[[nodiscard]] Result<ArchivePath>
+singleFileName(std::string_view archive, const CompressedStream& stream, std::string& out);
 
 struct ListOptions {
     bool detailed = false;

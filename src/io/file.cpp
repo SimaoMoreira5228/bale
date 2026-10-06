@@ -109,6 +109,15 @@ void File::close() {
     }
 }
 
+Result<File> File::duplicate() const {
+    HANDLE process = GetCurrentProcess();
+    HANDLE copy = INVALID_HANDLE_VALUE;
+    if (!DuplicateHandle(process, handle_, process, &copy, 0, FALSE, DUPLICATE_SAME_ACCESS)) {
+        return systemFailure("cannot duplicate file handle");
+    }
+    return File(copy);
+}
+
 Result<std::uint64_t> File::size() const {
     LARGE_INTEGER size;
     if (!GetFileSizeEx(handle_, &size)) {
@@ -184,6 +193,14 @@ void File::close() {
         ::close(handle_);
         handle_ = invalidHandle;
     }
+}
+
+Result<File> File::duplicate() const {
+    int fd = ::fcntl(handle_, F_DUPFD_CLOEXEC, 0);
+    if (fd < 0) {
+        return systemFailure("cannot duplicate file handle");
+    }
+    return File(fd);
 }
 
 Result<std::uint64_t> File::size() const {
