@@ -1,10 +1,11 @@
 add_library(bale_cli STATIC
     archive_commands.cpp
+    create_command.cpp
     extract_command.cpp
     terminal_text.cpp
 )
 target_link_libraries(bale_cli
-    PUBLIC bale_extract bale_formats
+    PUBLIC bale_archive bale_extract bale_formats
     PRIVATE bale_warnings
 )
 

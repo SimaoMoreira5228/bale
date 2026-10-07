@@ -1,5 +1,6 @@
 #pragma once
 
+#include "archive/chunk.hpp"
 #include "base/error.hpp"
 #include "extract/extractor.hpp"
 #include "formats/compressed/stream.hpp"
@@ -52,6 +53,17 @@ struct ListOptions {
 [[nodiscard]] ExitCode listArchive(std::string_view argument, const ListOptions& options);
 
 [[nodiscard]] ExitCode testArchive(std::string_view argument);
+
+struct CreateOptions {
+    std::uint32_t chunkSize = archive::defaultChunkSize;
+    bool durable = false;
+};
+
+[[nodiscard]] ExitCode createArchive(
+    std::string_view archivePath,
+    std::string_view directory,
+    const CreateOptions& options
+);
 
 [[nodiscard]] ExitCode extractArchive(
     std::string_view argument,

@@ -1,3 +1,4 @@
+#include "archive/reader.hpp"
 #include "cli/archive_commands.hpp"
 #include "cli/terminal_text.hpp"
 #include "formats/compressed/stream.hpp"
@@ -325,6 +326,56 @@ ExitCode extractZip(std::string_view argument, File file, Session& session) {
     }
 }
 
+[[nodiscard]] Result<EntryResult>
+extractBaleEntry(Session& session, archive::Reader& reader, const archive::ManifestEntry& entry) {
+    auto path = session.path(entry.path);
+    if (!path) {
+        return std::unexpected(path.error());
+    }
+
+    EntryMetadata metadata{
+        .mode = entry.mode,
+        .mtimeNanoseconds = entry.mtimeNanoseconds,
+    };
+    switch (entry.kind) {
+    case archive::EntryKind::Directory:
+        return session.extractor().createDirectory(*path, metadata);
+    case archive::EntryKind::Regular:
+        return writeFile(session, *path, metadata, [&](auto&& sink) {
+            return reader.streamFile(entry, sink);
+        });
+    case archive::EntryKind::Symlink:
+        return session.extractor().createSymlink(*path, entry.target, metadata);
+    case archive::EntryKind::HardLink: {
+        auto target = session.linkPath(entry.target);
+        if (!target) {
+            return std::unexpected(target.error());
+        }
+        return session.extractor().createHardLink(*path, *target);
+    }
+    }
+    return EntryResult{
+        .outcome = EntryOutcome::Skipped,
+        .reason = "unknown bale entry kind",
+    };
+}
+
+ExitCode extractBale(std::string_view argument, File file, Session& session) {
+    auto reader = archive::Reader::open(std::move(file));
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    for (const auto& entry : reader->manifest().entries) {
+        auto result = extractBaleEntry(session, *reader, entry);
+        session.record(entry.path, result);
+        if (!result && result.error().kind == ErrorKind::LimitExceeded) {
+            break;
+        }
+    }
+    return session.finish();
+}
+
 }
 
 ExitCode extractArchive(
@@ -345,6 +396,10 @@ ExitCode extractArchive(
     }
 
     PathPolicy pathPolicy;
+    if (archive->format.container == Container::Bale) {
+        Session session(std::move(*extractor), policy, pathPolicy);
+        return extractBale(argument, std::move(archive->file), session);
+    }
     if (archive->format.container == Container::Zip) {
         pathPolicy.backslash = Backslash::Separator;
         Session session(std::move(*extractor), policy, pathPolicy);
