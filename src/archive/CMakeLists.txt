@@ -3,6 +3,9 @@ add_library(bale_archive STATIC
     commit.cpp
     index.cpp
     manifest.cpp
+    reader.cpp
+    tree_walk.cpp
+    writer.cpp
 )
 target_link_libraries(bale_archive
     PUBLIC bale_base bale_checksum bale_format bale_io bale_security
