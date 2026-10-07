@@ -10,6 +10,7 @@ FetchContent_MakeAvailable(doctest)
 include(${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake)
 
 add_executable(bale_tests
+    archive/schema_test.cpp
     base/checked_test.cpp
     checksum/blake3_test.cpp
     checksum/crc_test.cpp
@@ -34,6 +35,7 @@ add_executable(bale_tests
 )
 target_include_directories(bale_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(bale_tests PRIVATE
+    bale_archive
     bale_checksum
     bale_cli
     bale_codecs

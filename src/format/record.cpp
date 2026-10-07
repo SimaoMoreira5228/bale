@@ -58,9 +58,9 @@ std::array<std::byte, recordPrefixSize> encodeRecordPrefix(const RecordHeader& h
     return out;
 }
 
-std::array<std::byte, recordTrailerSize> encodeRecordTrailer(std::span<const std::byte> payload) {
+std::array<std::byte, recordTrailerSize> encodeRecordTrailer(std::uint32_t payloadChecksum) {
     std::array<std::byte, recordTrailerSize> out{};
-    storeLe(out.data() + payloadCrcAt, Crc32c::of(payload));
+    storeLe(out.data() + payloadCrcAt, payloadChecksum);
     std::ranges::copy(recordEndMarker, out.begin() + endMarkerAt);
     return out;
 }

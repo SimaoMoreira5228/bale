@@ -71,7 +71,7 @@ struct Record {
 encodeRecordPrefix(const RecordHeader& header);
 
 [[nodiscard]] std::array<std::byte, recordTrailerSize>
-encodeRecordTrailer(std::span<const std::byte> payload);
+encodeRecordTrailer(std::uint32_t payloadChecksum);
 
 [[nodiscard]] Result<RecordHeader> decodeRecordPrefix(
     std::span<const std::byte> data,
