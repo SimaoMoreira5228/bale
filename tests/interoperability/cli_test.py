@@ -120,6 +120,21 @@ def test_native(work, source):
     expect_exit("bale extract", run("extract", archive, "-o", output, cwd=work), EXIT_OK)
     check("bale contents", same_tree(source, output), "extracted tree differs")
 
+    compressed = work / "compressed.bale"
+    expect_exit(
+        "bale zstd create",
+        run("create", "--codec", "zstd", compressed, source, cwd=work),
+        EXIT_OK,
+    )
+    expect_exit("bale zstd test", run("test", compressed, cwd=work), EXIT_OK)
+    compressed_output = work / "compressed.out"
+    expect_exit(
+        "bale zstd extract",
+        run("extract", compressed, "-o", compressed_output, cwd=work),
+        EXIT_OK,
+    )
+    check("bale zstd contents", same_tree(source, compressed_output), "extracted tree differs")
+
     corrupt = work / "corrupt.bale"
     data = bytearray(archive.read_bytes())
     data[200] ^= 0x01

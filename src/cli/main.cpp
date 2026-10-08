@@ -22,6 +22,7 @@ constexpr std::string_view usage = R"(usage: bale <command> [arguments]
 commands:
   create <archive.bale> <dir> [options]
       --chunk-size <n>        chunk size in bytes, K or M suffix allowed (default 1M)
+      --codec <raw|zstd>      chunk codec (default raw; zstd keeps raw when larger)
       --sync                  flush the archive to disk before writing its footer
   list <archive> [--long]   list entries, --long adds type, size and modification time
   test <archive>            check archive structure and entry checksums
@@ -110,6 +111,20 @@ int runCreate(std::span<const std::string_view> arguments) {
             options.durable = true;
             continue;
         }
+        if (argument == "--codec") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--codec needs raw or zstd");
+            }
+            ++index;
+            if (arguments[index] == "raw") {
+                options.codec = bale::CodecId::Raw;
+            } else if (arguments[index] == "zstd") {
+                options.codec = bale::CodecId::Zstd;
+            } else {
+                return usageError("--codec must be raw or zstd");
+            }
+            continue;
+        }
         if (argument.starts_with('-')) {
             return usageError("unknown option for create");
         }
@@ -186,7 +201,7 @@ int runFormats() {
     printFormat("tar.zst", "tar inside zstd, recognized by content; read as one stream");
     printFormat("gzip", "one compressed file, multi-member; named by FNAME or archive name");
     printFormat("zstd", "one compressed file, multi-frame, window up to 128 MiB");
-    printFormat("bale", "native format, also written by bale create; raw chunks, not frozen");
+    printFormat("bale", "native format, raw and zstd chunks; not frozen");
     return exitWith(ExitCode::Ok);
 }
 

@@ -2,12 +2,13 @@
 
 bale is two things that share one engine. It's an archive format of its own, built around content addressing, append-only snapshots and strict framing. It's also an archiver that opens the formats you already have, ZIP and TAR for now, with more on the way.
 
-It's early. The native format isn't frozen: `bale create` writes `.bale` files so the design can be tested, but a later build may not read them. Chunks are stored uncompressed for now. What works today is reading ZIP and TAR safely and a first native archive with deduplicated, BLAKE3-verified chunks.
+It's early. The native format isn't frozen: `bale create` writes `.bale` files so the design can be tested, but a later build may not read them. Native archives use deduplicated, BLAKE3-verified chunks, stored raw by default or compressed with zstd when requested.
 
 ## What you can do with it right now
 
 ```sh
 bale create backup.bale ./project
+bale create --codec zstd backup.bale ./project
 bale test backup.bale
 bale list archive.zip
 bale list --long backup.tar

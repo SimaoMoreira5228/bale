@@ -107,8 +107,19 @@ Result<Writer> Writer::create(File file, const WriterOptions& options) {
     if (options.chunkSize < minChunkSize || options.chunkSize > maxChunkSize) {
         return fail(ErrorKind::LimitExceeded, "chunk size outside the supported range");
     }
+    if (options.codec != CodecId::Raw && options.codec != CodecId::Zstd) {
+        return fail(ErrorKind::Unsupported, "writer codec not supported");
+    }
 
     Writer writer(std::move(file), options);
+    if (options.codec == CodecId::Zstd) {
+        auto encoder = ZstdEncoder::create();
+        if (!encoder) {
+            return std::unexpected(encoder.error());
+        }
+        writer.encoder_.emplace(std::move(*encoder));
+        writer.compressionBuffer_.resize(ZstdEncoder::compressBound(options.chunkSize));
+    }
 
     Superblock superblock;
     superblock.archiveId = options.archiveId ? *options.archiveId : randomArchiveId();
@@ -190,15 +201,17 @@ Result<void> Writer::appendRaw(std::span<const std::byte> data) {
 Result<Writer::RecordSpan> Writer::writeRecord(
     RecordType type,
     std::span<const std::byte> head,
-    std::span<const std::byte> body
+    std::span<const std::byte> body,
+    CodecId codec,
+    std::uint64_t decodedLength
 ) {
     std::uint64_t payloadLength = std::uint64_t{head.size()} + body.size();
     RecordHeader header;
     header.type = type;
     header.payloadLength = payloadLength;
-    header.decodedLength = payloadLength;
+    header.decodedLength = decodedLength == 0 ? payloadLength : decodedLength;
     header.sequence = sequence_;
-    header.codec = CodecId::Raw;
+    header.codec = codec;
 
     Crc32c checksum;
     checksum.update(head);
@@ -238,7 +251,26 @@ Result<void> Writer::storeChunk(std::span<const std::byte> chunk) {
     if (!descriptor) {
         return poison(descriptor.error());
     }
-    auto span = writeRecord(RecordType::Data, descriptor_, chunk);
+    std::span<const std::byte> storedChunk = chunk;
+    CodecId codec = CodecId::Raw;
+    if (encoder_) {
+        auto compressed = encoder_->compress(chunk, compressionBuffer_);
+        if (!compressed) {
+            return poison(compressed.error());
+        }
+        if (*compressed < chunk.size()) {
+            storedChunk = std::span(compressionBuffer_).first(*compressed);
+            codec = CodecId::Zstd;
+        }
+    }
+
+    auto span = writeRecord(
+        RecordType::Data,
+        descriptor_,
+        storedChunk,
+        codec,
+        descriptor_.size() + chunk.size()
+    );
     if (!span) {
         return std::unexpected(span.error());
     }
@@ -248,7 +280,7 @@ Result<void> Writer::storeChunk(std::span<const std::byte> chunk) {
             .key = key,
             .recordOffset = span->offset,
             .recordLength = span->length,
-            .codec = CodecId::Raw,
+            .codec = codec,
         }
     );
     table_.insert(index_, static_cast<std::uint32_t>(index_.size() - 1));
