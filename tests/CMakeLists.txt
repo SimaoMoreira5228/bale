@@ -55,3 +55,12 @@ target_link_libraries(bale_tests PRIVATE
     doctest::doctest_with_main
 )
 doctest_discover_tests(bale_tests)
+
+find_package(Python3 3.10 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND AND NOT CMAKE_CROSSCOMPILING)
+    add_test(
+        NAME interoperability.cli
+        COMMAND Python3::Interpreter -I ${CMAKE_CURRENT_SOURCE_DIR}/interoperability/cli_test.py
+            $<TARGET_FILE:bale>
+    )
+endif()
