@@ -46,6 +46,16 @@ You need CMake 3.25 or newer, a C++23 compiler (GCC 14+ or Clang 18+), and Ninja
 ./dev run bale list some.zip
 ```
 
+On Windows, register a per-user File Explorer submenu for single files, folders and `.bale` archives:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/install-windows-context-menu.ps1 C:\path\to\bale.exe
+```
+
+It creates `<item>.bale`, or extracts a `.bale` archive beside itself or into a folder. Run the same
+script with `-Uninstall` to remove the menu. This uses static registry verbs; Windows 11 may show it
+under **Show more options**.
+
 `./dev` wraps the usual chores: `sanitize` runs the tests under ASan and UBSan, `cover` gives a coverage summary, `lint` runs clang-tidy, `format` runs clang-format, and `check` does format, lint and tests in one go. Configuring also links `compile_commands.json` into the repo root, so clangd works in any editor without extra setup.
 
 ## Layout

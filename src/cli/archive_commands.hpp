@@ -67,10 +67,15 @@ struct CreateOptions {
     const CreateOptions& options
 );
 
+[[nodiscard]] ExitCode createArchiveFromPath(std::string_view input);
+
 [[nodiscard]] ExitCode extractArchive(
     std::string_view argument,
     std::string_view destination,
     const ExtractPolicy& policy
 );
+
+[[nodiscard]] ExitCode extractArchiveHere(std::string_view argument);
+[[nodiscard]] ExitCode extractArchiveToFolder(std::string_view argument);
 
 }
