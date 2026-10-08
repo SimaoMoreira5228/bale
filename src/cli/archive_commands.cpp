@@ -151,6 +151,7 @@ ExitCode listZip(std::string_view argument, File file, const ListOptions& option
     auto cursor = reader->entries();
     zip::Entry entry;
     std::string escaped;
+    std::string nameStorage;
     while (true) {
         auto more = cursor.next(entry);
         if (!more) {
@@ -160,7 +161,11 @@ ExitCode listZip(std::string_view argument, File file, const ListOptions& option
             return ExitCode::Ok;
         }
 
-        auto name = escapeForTerminal(entry.name, escaped);
+        auto utf8Name = zip::nameAsUtf8(entry, nameStorage);
+        if (!utf8Name) {
+            return reportFailure(argument, utf8Name.error());
+        }
+        auto name = escapeForTerminal(*utf8Name, escaped);
         if (options.detailed) {
             printRow(zipKind(entry), entry.uncompressedSize, zipTime(entry), name);
         } else {
@@ -303,6 +308,7 @@ ExitCode testZip(std::string_view argument, File file) {
     std::string escaped;
     std::uint64_t failures = 0;
     ExitCode result = ExitCode::Ok;
+    std::string nameStorage;
     while (true) {
         auto more = cursor.next(entry);
         if (!more) {
@@ -310,6 +316,10 @@ ExitCode testZip(std::string_view argument, File file) {
         }
         if (!*more) {
             break;
+        }
+        auto utf8Name = zip::nameAsUtf8(entry, nameStorage);
+        if (!utf8Name) {
+            return reportFailure(argument, utf8Name.error());
         }
         if (isZipDirectory(entry) && entry.uncompressedSize == 0) {
             continue;
@@ -324,7 +334,7 @@ ExitCode testZip(std::string_view argument, File file) {
         if (result == ExitCode::Ok) {
             result = exitCodeFor(checked.error().kind);
         }
-        reportError(escapeForTerminal(entry.name, escaped), checked.error());
+        reportError(escapeForTerminal(*utf8Name, escaped), checked.error());
     }
 
     if (failures == 0) {

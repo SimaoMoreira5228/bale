@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -77,6 +78,8 @@ struct Entry {
         return (flags & flagUtf8) != 0;
     }
 };
+
+[[nodiscard]] Result<std::string_view> nameAsUtf8(const Entry& entry, std::string& storage);
 
 class Cursor {
   public:
