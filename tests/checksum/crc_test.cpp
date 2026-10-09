@@ -3,6 +3,7 @@
 #include <doctest/doctest.h>
 
 #include <array>
+#include <cstdint>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -13,6 +14,30 @@ namespace {
 
 std::span<const std::byte> bytesOf(std::string_view text) {
     return std::as_bytes(std::span(text));
+}
+
+class XorShift {
+  public:
+    std::uint64_t operator()() {
+        state_ ^= state_ << 13;
+        state_ ^= state_ >> 7;
+        state_ ^= state_ << 17;
+        return state_;
+    }
+
+  private:
+    std::uint64_t state_ = 0x9E3779B97F4A7C15;
+};
+
+template <typename Checksum> void checkSplitUpdates(std::span<const std::byte> data) {
+    const auto whole = Checksum::of(data);
+    for (std::size_t split : {0U, 1U, 7U, 8U, 9U, 500U, 999U}) {
+        Checksum crc;
+        crc.update(data.first(split));
+        crc.update({});
+        crc.update(data.subspan(split));
+        CHECK(crc.value() == whole);
+    }
 }
 
 }
@@ -44,12 +69,47 @@ TEST_CASE("incremental updates at unaligned split points equal a single pass") {
     for (std::size_t index = 0; index < data.size(); ++index) {
         data[index] = static_cast<std::byte>(index * 31 + 7);
     }
-    auto whole = Crc32c::of(data);
 
-    for (std::size_t split : {1U, 7U, 8U, 9U, 500U, 999U}) {
-        Crc32c crc;
-        crc.update(std::span(data).first(split));
-        crc.update(std::span(data).subspan(split));
-        CHECK(crc.value() == whole);
+    checkSplitUpdates<Crc32>(data);
+    checkSplitUpdates<Crc32c>(data);
+}
+
+TEST_CASE("every available CRC kernel matches the portable reference") {
+    std::vector<std::byte> data((std::size_t{1} << 20) + 16);
+    XorShift random;
+    for (std::byte& byte : data) {
+        byte = static_cast<std::byte>(random());
+    }
+
+    for (CrcAlgorithm algorithm : {CrcAlgorithm::Crc32, CrcAlgorithm::Crc32c}) {
+        const CrcKernel reference = portableCrcKernel(algorithm);
+        std::vector<CrcKernel> kernels{reference};
+        if (auto accelerated = acceleratedCrcKernel(algorithm)) {
+            kernels.push_back(*accelerated);
+        }
+
+        const std::uint32_t check = algorithm == CrcAlgorithm::Crc32 ? 0xCBF43926 : 0xE3069283;
+        for (const CrcKernel& kernel : kernels) {
+            CAPTURE(kernel.name);
+            CHECK(kernel.function(0, bytesOf("123456789")) == check);
+            CHECK(kernel.function(0x1234, {}) == 0x1234);
+
+            std::size_t mismatches = 0;
+            for (int round = 0; round < 2000; ++round) {
+                const std::size_t offset = random() % 16;
+                const std::size_t length = random() % 4097;
+                const auto seed = static_cast<std::uint32_t>(random());
+                auto slice = std::span(data).subspan(offset, length);
+                if (kernel.function(seed, slice) != reference.function(seed, slice)) {
+                    ++mismatches;
+                }
+            }
+            CHECK(mismatches == 0);
+
+            for (std::size_t offset : {0U, 3U}) {
+                auto slice = std::span(data).subspan(offset, std::size_t{1} << 20);
+                CHECK(kernel.function(0, slice) == reference.function(0, slice));
+            }
+        }
     }
 }
