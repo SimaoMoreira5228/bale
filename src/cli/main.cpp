@@ -30,6 +30,8 @@ commands:
       --chunk-size <n>        chunk size in bytes, K or M suffix allowed (default 1M)
       --codec <raw|zstd>      chunk codec (default raw; zstd keeps raw when larger)
       --sync                  flush the archive to disk before writing its footer
+  update <archive.bale> <dir> [options]
+      append a new snapshot of the directory, reusing unchanged chunks
   list <archive> [--long]   list entries, --long adds type, size and modification time
   test <archive>            check archive structure and entry checksums
   extract <archive> [options]
@@ -99,7 +101,7 @@ std::optional<std::uint32_t> parseSize(std::string_view text) {
     return static_cast<std::uint32_t>(value * multiplier);
 }
 
-int runCreate(std::span<const std::string_view> arguments) {
+int runCreate(std::span<const std::string_view> arguments, bool update = false) {
     bale::cli::CreateOptions options;
     std::vector<std::string_view> positional;
     for (std::size_t index = 0; index < arguments.size(); ++index) {
@@ -135,13 +137,19 @@ int runCreate(std::span<const std::string_view> arguments) {
             continue;
         }
         if (argument.starts_with('-')) {
-            return usageError("unknown option for create");
+            return usageError(update ? "unknown option for update" : "unknown option for create");
         }
         positional.push_back(argument);
     }
 
     if (positional.size() != 2) {
-        return usageError("create takes an archive and a directory");
+        return usageError(
+            update ? "update takes an archive and a directory"
+                   : "create takes an archive and a directory"
+        );
+    }
+    if (update) {
+        return exitWith(bale::cli::updateArchive(positional[0], positional[1], options));
     }
     return exitWith(bale::cli::createArchive(positional[0], positional[1], options));
 }
@@ -242,6 +250,9 @@ int run(std::span<const std::string_view> argv) {
     }
     if (command == "create") {
         return runCreate(rest);
+    }
+    if (command == "update") {
+        return runCreate(rest, true);
     }
     if (command == "test") {
         return runTest(rest);

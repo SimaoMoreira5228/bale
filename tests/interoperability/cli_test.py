@@ -120,6 +120,16 @@ def test_native(work, source):
     expect_exit("bale extract", run("extract", archive, "-o", output, cwd=work), EXIT_OK)
     check("bale contents", same_tree(source, output), "extracted tree differs")
 
+    updated_source = work / "updated-source"
+    updated_source.mkdir()
+    (updated_source / "replacement.txt").write_text("new snapshot\n", encoding="utf-8")
+    expect_exit("bale update", run("update", archive, updated_source, cwd=work), EXIT_OK)
+    expect_exit("bale updated test", run("test", archive, cwd=work), EXIT_OK)
+    listing = run("list", archive, cwd=work)
+    expect_exit("bale updated list", listing, EXIT_OK)
+    check("updated snapshot entry", "replacement.txt" in listing.stdout, listing.stdout)
+    check("old snapshot entry removed", "docs/deep/random.bin" not in listing.stdout, listing.stdout)
+
     compressed = work / "compressed.bale"
     expect_exit(
         "bale zstd create",

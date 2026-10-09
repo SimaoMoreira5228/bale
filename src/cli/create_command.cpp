@@ -80,6 +80,56 @@ ExitCode createArchive(
     return result;
 }
 
+ExitCode updateArchive(
+    std::string_view archivePath,
+    std::string_view directory,
+    const CreateOptions& options
+) {
+    auto file = File::openAppend(pathFromUtf8(archivePath));
+    if (!file) {
+        return reportFailure(archivePath, file.error());
+    }
+
+    archive::WriterOptions writerOptions;
+    writerOptions.chunkSize = options.chunkSize;
+    writerOptions.codec = options.codec;
+    writerOptions.durable = options.durable;
+    auto writer = archive::Writer::append(std::move(*file), writerOptions);
+    if (!writer) {
+        return reportFailure(archivePath, writer.error());
+    }
+
+    auto added = writer->addTree(pathFromUtf8(directory), pathFromUtf8(archivePath));
+    std::string escaped;
+    for (const auto& skipped : writer->skipped()) {
+        std::println(
+            stderr,
+            "bale: skipped {}: {}",
+            escapeForTerminal(skipped.path, escaped),
+            skipped.reason
+        );
+    }
+    if (!added) {
+        return reportFailure(directory, added.error());
+    }
+
+    auto summary = writer->finish();
+    if (!summary) {
+        return reportFailure(archivePath, summary.error());
+    }
+
+    std::println(
+        "updated {}: {} entries, {} bytes of content in {} unique of {} chunks, {} bytes total",
+        escapeForTerminal(archivePath, escaped),
+        summary->entries,
+        summary->contentBytes,
+        summary->dataRecords,
+        summary->chunkReferences,
+        summary->archiveSize
+    );
+    return ExitCode::Ok;
+}
+
 ExitCode createArchiveFromPath(std::string_view input) {
     std::filesystem::path source = pathFromUtf8(input);
     std::error_code error;

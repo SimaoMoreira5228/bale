@@ -22,8 +22,9 @@ namespace bale::archive {
 
 struct ReaderOptions {
     Limits limits;
-    std::uint64_t footerScanWindow = std::uint64_t{1} << 20;
+    std::uint64_t footerScanBlockSize = std::uint64_t{1} << 20;
     std::uint64_t maxMetadataBytes = std::uint64_t{256} << 20;
+    std::uint64_t maxGenerations = 100'000;
 };
 
 enum class VerifyMode : std::uint8_t {
@@ -96,6 +97,13 @@ class Reader {
     [[nodiscard]] Result<VerifyReport> verify(VerifyMode mode);
 
   private:
+    struct Generation {
+        Footer footer;
+        Commit commit;
+        Blake3Digest digest{};
+        std::uint64_t footerOffset = 0;
+    };
+
     Reader(File file, const ReaderOptions& options, std::uint64_t fileSize) :
         file_(std::move(file)), options_(options), fileSize_(fileSize) {
     }
@@ -130,6 +138,7 @@ class Reader {
     Manifest manifest_;
     std::vector<IndexEntry> index_;
     std::vector<std::uint32_t> byOffset_;
+    std::vector<Generation> generations_;
 };
 
 }

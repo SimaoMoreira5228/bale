@@ -268,6 +268,46 @@ TEST_CASE("writer output matches the independently encoded golden archive byte f
     CHECK(report->bytesVerified == 5);
 }
 
+TEST_CASE("append writes a linked snapshot and reuses indexed chunks") {
+    TempPath temp;
+    {
+        auto writer = newWriter(temp.path());
+        REQUIRE(writer.addBytes("old", bytesOf("shared")));
+        REQUIRE(writer.finish());
+    }
+    {
+        auto tail = File::openAppend(temp.path());
+        REQUIRE(tail);
+        std::vector<std::byte> interrupted(127, std::byte{0xA5});
+        REQUIRE(tail->append(interrupted));
+    }
+
+    auto file = File::openAppend(temp.path());
+    REQUIRE(file);
+    auto writer = Writer::append(std::move(*file));
+    REQUIRE(writer);
+    REQUIRE(writer->addBytes("new", bytesOf("shared")));
+    auto summary = writer->finish();
+    REQUIRE(summary);
+    CHECK(summary->dataRecords == 1);
+    CHECK(summary->chunkReferences == 1);
+
+    auto input = File::openRead(temp.path());
+    REQUIRE(input);
+    auto reader = Reader::open(std::move(*input));
+    REQUIRE(reader);
+    CHECK(reader->commit().generation == 2);
+    CHECK(reader->ignoredTrailingBytes() == 0);
+    CHECK(reader->commit().previous != Blake3Digest{});
+    REQUIRE(reader->manifest().entries.size() == 1);
+    CHECK(reader->manifest().entries.front().path == "new");
+    CHECK(contents(*reader, reader->manifest().entries.front()) == "shared");
+
+    auto verified = reader->verify(VerifyMode::Content);
+    REQUIRE(verified);
+    CHECK(verified->chunksVerified == 1);
+}
+
 TEST_CASE("a nested tree round-trips with deduplicated chunks, empty files and links") {
     TempPath temp;
     fs::path root = temp.path() / "tree";
@@ -577,10 +617,10 @@ TEST_CASE("footer discovery skips trailing garbage and fake footers within the w
     CHECK(reader->verify(VerifyMode::Content));
 
     ReaderOptions narrow;
-    narrow.footerScanWindow = 512;
-    auto outOfWindow = openBytes(garbage, narrow);
-    REQUIRE_FALSE(outOfWindow);
-    CHECK(outOfWindow.error().kind == ErrorKind::Integrity);
+    narrow.footerScanBlockSize = 512;
+    auto recovered = openBytes(garbage, narrow);
+    REQUIRE(recovered);
+    CHECK(recovered->ignoredTrailingBytes() == 1000);
 
     auto replayed = golden;
     replayed.insert(replayed.end(), 10, std::byte{0});
@@ -589,6 +629,18 @@ TEST_CASE("footer discovery skips trailing garbage and fake footers within the w
     REQUIRE(skipped);
     CHECK(skipped->ignoredTrailingBytes() == 106);
     CHECK(skipped->footerOffset() == golden.size() - 96);
+}
+
+TEST_CASE("footer discovery recovers past an interrupted append larger than the scan window") {
+    auto bytes = goldenArchive();
+    bytes.resize(bytes.size() + (2U << 20), std::byte{0xA5});
+
+    ReaderOptions options;
+    options.footerScanBlockSize = 512;
+    auto reader = openBytes(bytes, options);
+    REQUIRE(reader);
+    CHECK(reader->commit().generation == 1);
+    CHECK(reader->ignoredTrailingBytes() == (2U << 20));
 }
 
 TEST_CASE("cross-record inconsistencies are rejected even when every digest is valid") {
@@ -617,7 +669,7 @@ TEST_CASE("cross-record inconsistencies are rejected even when every digest is v
         CHECK(opened.error().kind == ErrorKind::Malformed);
     }
 
-    SUBCASE("later generations are refused until parent linkage is implemented") {
+    SUBCASE("a generation without a valid parent is rejected") {
         Assembler assembler;
         auto data = assembler.addData("hello");
         Commit commit;
@@ -627,7 +679,7 @@ TEST_CASE("cross-record inconsistencies are rejected even when every digest is v
         commit.index = assembler.addIndex({indexed("hello", data)});
         auto opened = openBytes(assembler.finish(commit));
         REQUIRE_FALSE(opened);
-        CHECK(opened.error().kind == ErrorKind::Unsupported);
+        CHECK(opened.error().kind == ErrorKind::Malformed);
     }
 
     SUBCASE("swapped index locations are caught when the chunk is read") {

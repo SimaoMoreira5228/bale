@@ -1,6 +1,7 @@
 #include "archive/writer.hpp"
 
 #include "archive/commit.hpp"
+#include "archive/reader.hpp"
 #include "base/checked.hpp"
 #include "base/endian.hpp"
 #include "checksum/crc.hpp"
@@ -129,6 +130,58 @@ Result<Writer> Writer::create(File file, const WriterOptions& options) {
     auto written = writer.appendRaw(encoded);
     if (!written) {
         return std::unexpected(written.error());
+    }
+    return writer;
+}
+
+Result<Writer> Writer::append(File file, const WriterOptions& options) {
+    if (options.chunkSize < minChunkSize || options.chunkSize > maxChunkSize) {
+        return fail(ErrorKind::LimitExceeded, "chunk size outside the supported range");
+    }
+    if (options.codec != CodecId::Raw && options.codec != CodecId::Zstd) {
+        return fail(ErrorKind::Unsupported, "writer codec not supported");
+    }
+
+    auto readFile = file.duplicate();
+    if (!readFile) {
+        return std::unexpected(readFile.error());
+    }
+    auto reader = Reader::open(std::move(*readFile));
+    if (!reader) {
+        return std::unexpected(reader.error());
+    }
+    auto verified = reader->verify(VerifyMode::Structure);
+    if (!verified) {
+        return std::unexpected(verified.error());
+    }
+    if (reader->commit().generation == std::numeric_limits<std::uint64_t>::max()) {
+        return fail(ErrorKind::LimitExceeded, "archive generation limit exceeded");
+    }
+
+    std::uint64_t position = reader->footerOffset() + footerSize;
+    auto truncated = file.truncate(position);
+    if (!truncated) {
+        return std::unexpected(truncated.error());
+    }
+
+    Writer writer(std::move(file), options);
+    writer.position_ = position;
+    writer.sequence_ = verified->records;
+    writer.generation_ = reader->commit().generation + 1;
+    writer.previousCommit_ = reader->commitDigest();
+    writer.previousFooterOffset_ = reader->footerOffset();
+    writer.index_.assign(reader->index().begin(), reader->index().end());
+    for (std::uint32_t index = 0; index < writer.index_.size(); ++index) {
+        writer.table_.insert(writer.index_, index);
+    }
+
+    if (options.codec == CodecId::Zstd) {
+        auto encoder = ZstdEncoder::create();
+        if (!encoder) {
+            return std::unexpected(encoder.error());
+        }
+        writer.encoder_.emplace(std::move(*encoder));
+        writer.compressionBuffer_.resize(ZstdEncoder::compressBound(options.chunkSize));
     }
     return writer;
 }
@@ -575,6 +628,9 @@ Result<WriteSummary> Writer::finish() {
     }
 
     Commit commit;
+    commit.generation = generation_;
+    commit.previous = previousCommit_;
+    commit.previousFooterOffset = previousFooterOffset_;
     auto manifest = writeManifest(commit.manifest.digest);
     if (!manifest) {
         return std::unexpected(manifest.error());

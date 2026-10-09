@@ -9,6 +9,7 @@ It's early. The native format isn't frozen: `bale create` writes `.bale` files s
 ```sh
 bale create backup.bale ./project
 bale create --codec zstd backup.bale ./project
+bale update backup.bale ./project
 bale test backup.bale
 bale list archive.zip
 bale list --long backup.tar
@@ -18,6 +19,8 @@ bale formats
 ```
 
 `extract` never writes outside the output directory. Paths with `..`, absolute paths, drive letters and Windows device names are refused. So are symlinks, unless you pass `--allow-symlinks`, and then only links that stay inside the output get created. Existing files are left alone unless you ask for `--replace` or `--skip-existing`. Every file is written to a temporary name first. It only moves into place once all of it is written and, if the format has a checksum, the checksum matches. A corrupt entry never shows up half-written under its real name.
+
+`update` adds a new snapshot from the directory you pass. The snapshot becomes the archive's visible contents, and chunks already in the archive are reused when their contents match. Earlier snapshots stay in the file for now; compaction is not implemented yet.
 
 Names from the archive are escaped before they reach your terminal. A file called `\x1b[31m...` can't recolor your shell or hide behind a bidi override.
 

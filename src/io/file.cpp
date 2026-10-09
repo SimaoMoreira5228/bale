@@ -3,6 +3,7 @@
 #include "base/checked.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <utility>
 
 #ifdef _WIN32
@@ -84,6 +85,32 @@ Result<File> File::openRead(const std::filesystem::path& path) {
         return systemFailure("cannot open file for reading");
     }
     return File(handle);
+}
+
+Result<File> File::openAppend(const std::filesystem::path& path) {
+    HANDLE handle = CreateFileW(
+        path.c_str(),
+        GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+        nullptr
+    );
+    if (handle == INVALID_HANDLE_VALUE) {
+        return systemFailure("cannot open file for appending");
+    }
+    File file(handle);
+
+    BY_HANDLE_FILE_INFORMATION information{};
+    if (!GetFileInformationByHandle(handle, &information)) {
+        return systemFailure("cannot query file information");
+    }
+    constexpr DWORD notRegular = FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT;
+    if ((information.dwFileAttributes & notRegular) != 0 || GetFileType(handle) != FILE_TYPE_DISK) {
+        return fail(ErrorKind::Unsupported, "not a regular file");
+    }
+    return file;
 }
 
 Result<File> File::openRegularNoFollow(const std::filesystem::path& path) {
@@ -185,6 +212,18 @@ Result<void> File::append(std::span<const std::byte> data) {
     return {};
 }
 
+Result<void> File::truncate(std::uint64_t size) {
+    if (size > static_cast<std::uint64_t>(std::numeric_limits<LONGLONG>::max())) {
+        return fail(ErrorKind::Io, "file size exceeds platform limit", size);
+    }
+    LARGE_INTEGER position{};
+    position.QuadPart = static_cast<LONGLONG>(size);
+    if (!SetFilePointerEx(handle_, position, nullptr, FILE_BEGIN) || !SetEndOfFile(handle_)) {
+        return systemFailure("cannot truncate file", size);
+    }
+    return {};
+}
+
 Result<void> File::sync() {
     if (!FlushFileBuffers(handle_)) {
         return systemFailure("flush failed");
@@ -204,6 +243,27 @@ Result<File> File::openRead(const std::filesystem::path& path) {
         return systemFailure("cannot open file for reading");
     }
     return File(fd);
+}
+
+Result<File> File::openAppend(const std::filesystem::path& path) {
+    int fd = -1;
+    do {
+        fd = ::open(path.c_str(), O_RDWR | O_APPEND | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    } while (fd < 0 && errno == EINTR);
+
+    if (fd < 0) {
+        return systemFailure("cannot open file for appending");
+    }
+    File file(fd);
+
+    struct stat status{};
+    if (::fstat(fd, &status) != 0) {
+        return systemFailure("cannot query file status");
+    }
+    if (!S_ISREG(status.st_mode)) {
+        return fail(ErrorKind::Unsupported, "not a regular file");
+    }
+    return file;
 }
 
 Result<File> File::openRegularNoFollow(const std::filesystem::path& path) {
@@ -294,6 +354,17 @@ Result<void> File::append(std::span<const std::byte> data) {
         }
 
         data = data.subspan(static_cast<std::size_t>(count));
+    }
+    return {};
+}
+
+Result<void> File::truncate(std::uint64_t size) {
+    auto length = checkedCast<off_t>(size);
+    if (!length) {
+        return fail(ErrorKind::Io, "file size exceeds platform limit", size);
+    }
+    if (::ftruncate(handle_, *length) != 0) {
+        return systemFailure("cannot truncate file", size);
     }
     return {};
 }

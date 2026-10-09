@@ -12,6 +12,7 @@ namespace bale {
 class File {
   public:
     [[nodiscard]] static Result<File> openRead(const std::filesystem::path& path);
+    [[nodiscard]] static Result<File> openAppend(const std::filesystem::path& path);
 
     // SECURITY: refuses symlinks, reparse points and anything else that is not a regular file, so
     // a path swapped for a link after it was inspected is never followed.
@@ -34,6 +35,7 @@ class File {
     [[nodiscard]] Result<void> readExactAt(std::uint64_t offset, std::span<std::byte> out) const;
 
     [[nodiscard]] Result<void> append(std::span<const std::byte> data);
+    [[nodiscard]] Result<void> truncate(std::uint64_t size);
     [[nodiscard]] Result<void> sync();
 
   private:

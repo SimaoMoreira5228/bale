@@ -21,6 +21,8 @@
 
 namespace bale::archive {
 
+class Reader;
+
 struct EntryAttributes {
     std::optional<std::int64_t> mtimeNanoseconds{};
     std::optional<std::uint32_t> mode{};
@@ -54,6 +56,7 @@ struct WriteSummary {
 class Writer {
   public:
     [[nodiscard]] static Result<Writer> create(File file, const WriterOptions& options = {});
+    [[nodiscard]] static Result<Writer> append(File file, const WriterOptions& options = {});
 
     [[nodiscard]] Result<void>
     addDirectory(std::string_view path, const EntryAttributes& attributes = {});
@@ -155,6 +158,9 @@ class Writer {
     std::uint64_t contentBytes_ = 0;
     std::optional<Error> failure_;
     bool finished_ = false;
+    std::uint64_t generation_ = 1;
+    Blake3Digest previousCommit_{};
+    std::uint64_t previousFooterOffset_ = 0;
     std::vector<std::byte> buffer_;
     std::vector<std::byte> compressionBuffer_;
     std::optional<ZstdEncoder> encoder_;
