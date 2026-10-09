@@ -100,6 +100,21 @@ TEST_CASE("zstd writing compresses useful chunks and keeps incompressible chunks
     CHECK(contents(*reader, *patternEntry) == incompressible);
     CHECK(reader->verify(VerifyMode::Content));
 
+    TempPath compactedPath;
+    auto compactedFile = File::createNew(compactedPath.path());
+    REQUIRE(compactedFile);
+    auto compactedSummary = Writer::compact(std::move(*compactedFile), *reader);
+    REQUIRE(compactedSummary);
+    CHECK(compactedSummary->dataRecords == 2);
+
+    auto compactedInput = File::openRead(compactedPath.path());
+    REQUIRE(compactedInput);
+    auto compacted = Reader::open(std::move(*compactedInput));
+    REQUIRE(compacted);
+    CHECK(std::ranges::count(compacted->index(), CodecId::Zstd, &IndexEntry::codec) == 1);
+    CHECK(std::ranges::count(compacted->index(), CodecId::Raw, &IndexEntry::codec) == 1);
+    CHECK(compacted->verify(VerifyMode::Content));
+
     auto corrupted = readAll(temp.path());
     auto compressedEntry = std::ranges::find(reader->index(), CodecId::Zstd, &IndexEntry::codec);
     REQUIRE(compressedEntry != reader->index().end());

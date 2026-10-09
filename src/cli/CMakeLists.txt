@@ -1,5 +1,6 @@
 add_library(bale_cli STATIC
     archive_commands.cpp
+    compact_command.cpp
     create_command.cpp
     extract_command.cpp
     terminal_text.cpp

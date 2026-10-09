@@ -97,6 +97,8 @@ class Reader {
     [[nodiscard]] Result<VerifyReport> verify(VerifyMode mode);
 
   private:
+    friend class Writer;
+
     struct Generation {
         Footer footer;
         Commit commit;
