@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+"""Generate src/security/unicode_table.cpp from the Unicode Character Database.
+
+usage: tools/gen_case_fold.py UnicodeData.txt CaseFolding.txt > src/security/unicode_table.cpp
+
+The table drives canonical caseless matching with simple case folding,
+NFD(fold(NFD(s))), for the case-fold collision check: canonical decomposition
+(Hangul syllables are left to the algorithm), canonical combining classes, and
+CaseFolding.txt status C and S mappings.
+"""
+
+import re
+import sys
+
+BLOCK_SHIFT = 5
+HANGUL_FIRST = 0xAC00
+HANGUL_LAST = 0xD7A3
+
+
+def parse_unicode_data(path):
+    combining = {}
+    decomposition = {}
+    with open(path, encoding="utf-8") as source:
+        for line in source:
+            fields = line.rstrip("\n").split(";")
+            if len(fields) < 15:
+                continue
+            code = int(fields[0], 16)
+            if int(fields[3]) != 0:
+                combining[code] = int(fields[3])
+            mapping = fields[5].strip()
+            if mapping and not mapping.startswith("<"):
+                decomposition[code] = [int(part, 16) for part in mapping.split()]
+    return combining, decomposition
+
+
+def parse_case_folding(path):
+    folding = {}
+    with open(path, encoding="utf-8") as source:
+        for line in source:
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            code, status, mapping = [field.strip() for field in line.split(";")[:3]]
+            if status in ("C", "S"):
+                folding[int(code, 16)] = int(mapping, 16)
+    return folding
+
+
+def unicode_version(path):
+    with open(path, encoding="utf-8") as source:
+        match = re.match(r"# CaseFolding-([0-9.]+)\.txt", source.readline())
+    if not match:
+        sys.exit("CaseFolding.txt has no version header")
+    return match.group(1)
+
+
+def full_decomposition(code, decomposition):
+    if code not in decomposition:
+        return [code]
+    result = []
+    for part in decomposition[code]:
+        result.extend(full_decomposition(part, decomposition))
+    return result
+
+
+def check_invariants(combining, decomposition, folding):
+    for code, target in folding.items():
+        if HANGUL_FIRST <= code <= HANGUL_LAST or HANGUL_FIRST <= target <= HANGUL_LAST:
+            sys.exit(f"folding touches Hangul syllables at {code:04X}")
+        if folding.get(target, target) != target:
+            sys.exit(f"simple folding of {code:04X} is not idempotent")
+        if code in decomposition:
+            continue
+        if target in decomposition:
+            sys.exit(f"{code:04X} is decomposition-stable but folds to decomposable {target:04X}")
+        source_class = combining.get(code, 0)
+        target_class = combining.get(target, 0)
+        if target_class not in (0, source_class):
+            sys.exit(f"folding {code:04X} changes its combining class to a non-starter")
+    for code in decomposition:
+        if HANGUL_FIRST <= code <= HANGUL_LAST:
+            sys.exit("UnicodeData.txt unexpectedly lists Hangul syllable decompositions")
+
+
+def build_tables(combining, decomposition, folding):
+    sequences = []
+    sequence_offsets = {}
+    records = [(0, 0, 0, 0)]
+    record_ids = {records[0]: 0}
+    limit = max(max(combining), max(decomposition), max(folding)) + 1
+    limit = (limit + (1 << BLOCK_SHIFT) - 1) >> BLOCK_SHIFT << BLOCK_SHIFT
+
+    per_code = []
+    for code in range(limit):
+        if code in decomposition:
+            expanded = tuple(full_decomposition(code, decomposition))
+            if expanded not in sequence_offsets:
+                sequence_offsets[expanded] = len(sequences)
+                sequences.extend(expanded)
+            record = (0, sequence_offsets[expanded], len(expanded), 0)
+        else:
+            record = (folding.get(code, code) - code, 0, 0, combining.get(code, 0))
+        if record not in record_ids:
+            record_ids[record] = len(records)
+            records.append(record)
+        per_code.append(record_ids[record])
+
+    blocks = []
+    block_ids = {}
+    stage1 = []
+    for start in range(0, limit, 1 << BLOCK_SHIFT):
+        block = tuple(per_code[start : start + (1 << BLOCK_SHIFT)])
+        if block not in block_ids:
+            block_ids[block] = len(blocks)
+            blocks.append(block)
+        stage1.append(block_ids[block])
+
+    if len(sequences) >= 1 << 16 or len(records) >= 1 << 16 or len(blocks) >= 1 << 16:
+        sys.exit("table indices no longer fit in 16 bits")
+    stage2 = [value for block in blocks for value in block]
+    return limit, stage1, stage2, records, sequences
+
+
+def emit_values(out, values, width):
+    line = "   "
+    for value in values:
+        item = f" {value},"
+        if len(line) + len(item) > width:
+            out.append(line)
+            line = "   "
+        line += item
+    if line.strip():
+        out.append(line)
+
+
+def emit(version, limit, stage1, stage2, records, sequences):
+    out = [
+        f"// Generated by tools/gen_case_fold.py from Unicode {version} UnicodeData.txt and",
+        "// CaseFolding.txt; do not edit. Regenerate with:",
+        "//   tools/gen_case_fold.py UnicodeData.txt CaseFolding.txt > src/security/unicode_table.cpp",
+        "",
+        '#include "security/unicode_table.hpp"',
+        "",
+        "#include <array>",
+        "#include <cstddef>",
+        "#include <cstdint>",
+        "",
+        "namespace bale {",
+        "",
+        "namespace {",
+        "",
+        "struct Record {",
+        "    std::int32_t foldDelta;",
+        "    std::uint16_t decompositionOffset;",
+        "    std::uint8_t decompositionLength;",
+        "    std::uint8_t combiningClass;",
+        "};",
+        "",
+        f"constexpr unsigned blockShift = {BLOCK_SHIFT};",
+        f"constexpr char32_t tableLimit = 0x{limit:X};",
+        "",
+        "// clang-format off",
+        f"constexpr std::array<std::uint16_t, {len(stage1)}> blockIndex{{",
+    ]
+    emit_values(out, stage1, 100)
+    out += ["};", "", f"constexpr std::array<std::uint16_t, {len(stage2)}> recordIndex{{"]
+    emit_values(out, stage2, 100)
+    out += ["};", "", f"constexpr std::array<Record, {len(records)}> records{{{{"]
+    emit_values(out, [f"{{{a}, {b}, {c}, {d}}}" for a, b, c, d in records], 100)
+    out += ["}};", "", f"constexpr std::array<char32_t, {len(sequences)}> decompositions{{"]
+    emit_values(out, [f"0x{code:X}" for code in sequences], 100)
+    out += [
+        "};",
+        "// clang-format on",
+        "",
+        "}",
+        "",
+        "CodePointProperties codePointProperties(char32_t codePoint) {",
+        "    if (codePoint >= tableLimit) {",
+        "        return {};",
+        "    }",
+        "",
+        "    const std::size_t block = blockIndex[codePoint >> blockShift];",
+        "    const std::size_t within = codePoint & ((1U << blockShift) - 1);",
+        "    const Record& record = records[recordIndex[(block << blockShift) | within]];",
+        "    return {",
+        "        .decomposition = std::span(decompositions)",
+        "                             .subspan(record.decompositionOffset, record.decompositionLength),",
+        "        .foldDelta = record.foldDelta,",
+        "        .combiningClass = record.combiningClass,",
+        "    };",
+        "}",
+        "",
+        "}",
+    ]
+    return "\n".join(out) + "\n"
+
+
+def main():
+    if len(sys.argv) != 3:
+        sys.exit(__doc__)
+    combining, decomposition = parse_unicode_data(sys.argv[1])
+    folding = parse_case_folding(sys.argv[2])
+    check_invariants(combining, decomposition, folding)
+    tables = build_tables(combining, decomposition, folding)
+    sys.stdout.write(emit(unicode_version(sys.argv[2]), *tables))
+
+
+if __name__ == "__main__":
+    main()
