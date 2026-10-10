@@ -34,9 +34,14 @@ struct Tally {
 
 class Session {
   public:
-    Session(Extractor extractor, const ExtractPolicy& policy, PathPolicy pathPolicy) :
-        extractor_(std::move(extractor)), limits_(policy.limits), pathPolicy_(pathPolicy),
-        scratch_(extractChunkSize) {
+    Session(
+        Extractor extractor,
+        std::string_view destination,
+        const ExtractPolicy& policy,
+        PathPolicy pathPolicy
+    ) :
+        extractor_(std::move(extractor)), destination_(destination), limits_(policy.limits),
+        pathPolicy_(pathPolicy), scratch_(extractChunkSize) {
     }
 
     [[nodiscard]] Extractor& extractor() {
@@ -94,7 +99,12 @@ class Session {
         reportError(escapeForTerminal(name, escaped_), error);
     }
 
-    [[nodiscard]] ExitCode finish() const {
+    [[nodiscard]] ExitCode finish() {
+        auto times = extractor_.finish();
+        if (!times) {
+            fail(destination_, times.error());
+        }
+
         std::println(
             "extracted {}, skipped {}, failed {}",
             tally_.extracted,
@@ -106,6 +116,7 @@ class Session {
 
   private:
     Extractor extractor_;
+    std::string_view destination_;
     Limits limits_;
     PathPolicy pathPolicy_;
     std::vector<std::byte> scratch_;
@@ -411,16 +422,16 @@ ExitCode extractArchive(
 
     PathPolicy pathPolicy;
     if (archive->format.container == Container::Bale) {
-        Session session(std::move(*extractor), policy, pathPolicy);
+        Session session(std::move(*extractor), destination, policy, pathPolicy);
         return extractBale(argument, std::move(archive->file), session);
     }
     if (archive->format.container == Container::Zip) {
         pathPolicy.backslash = Backslash::Separator;
-        Session session(std::move(*extractor), policy, pathPolicy);
+        Session session(std::move(*extractor), destination, policy, pathPolicy);
         return extractZip(argument, std::move(archive->file), session);
     }
 
-    Session session(std::move(*extractor), policy, pathPolicy);
+    Session session(std::move(*extractor), destination, policy, pathPolicy);
     if (archive->format.container == Container::SingleFile) {
         return extractSingleFile(argument, std::move(*archive), session);
     }

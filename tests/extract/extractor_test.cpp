@@ -1,12 +1,12 @@
-#ifndef _WIN32
-
 #include "extract/extractor.hpp"
 
+#include "base/endian.hpp"
 #include "io/temp_file.hpp"
 
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -17,7 +17,12 @@
 #include <utility>
 #include <vector>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <winioctl.h>
+#else
 #include <sys/stat.h>
+#endif
 
 using namespace bale;
 using namespace std::literals;
@@ -75,10 +80,105 @@ std::vector<std::string> listing(const fs::path& directory) {
     return names;
 }
 
+#ifdef _WIN32
+
+HANDLE openNoFollow(const fs::path& path, DWORD access) {
+    return CreateFileW(
+        path.c_str(),
+        access,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+        nullptr
+    );
+}
+
+bool existsNoFollow(const fs::path& path) {
+    return GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
+bool isLink(const fs::path& path) {
+    const DWORD attributes = GetFileAttributesW(path.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES &&
+        (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+}
+
+std::string linkTarget(const fs::path& path) {
+    HANDLE handle = openNoFollow(path, FILE_READ_ATTRIBUTES);
+    REQUIRE(handle != INVALID_HANDLE_VALUE);
+
+    std::vector<std::byte> buffer(std::size_t{16} * 1024);
+    DWORD returned = 0;
+    const BOOL ok = DeviceIoControl(
+        handle,
+        FSCTL_GET_REPARSE_POINT,
+        nullptr,
+        0,
+        buffer.data(),
+        static_cast<DWORD>(buffer.size()),
+        &returned,
+        nullptr
+    );
+    CloseHandle(handle);
+    REQUIRE(ok);
+    REQUIRE(loadLe<std::uint32_t>(buffer.data()) == IO_REPARSE_TAG_SYMLINK);
+    CHECK(loadLe<std::uint32_t>(buffer.data() + 16) == 1);
+
+    const auto offset = loadLe<std::uint16_t>(buffer.data() + 8);
+    const auto size = loadLe<std::uint16_t>(buffer.data() + 10);
+    std::wstring wide(size / sizeof(wchar_t), L'\0');
+    std::memcpy(wide.data(), buffer.data() + 20 + offset, size);
+    std::ranges::replace(wide, L'\\', L'/');
+    return fs::path(wide).string();
+}
+
+std::int64_t mtimeOf(const fs::path& path) {
+    HANDLE handle = openNoFollow(path, FILE_READ_ATTRIBUTES);
+    REQUIRE(handle != INVALID_HANDLE_VALUE);
+
+    FILETIME written{};
+    const BOOL ok = GetFileTime(handle, nullptr, nullptr, &written);
+    CloseHandle(handle);
+    REQUIRE(ok);
+
+    const auto ticks =
+        (static_cast<std::int64_t>(written.dwHighDateTime) << 32) | written.dwLowDateTime;
+    return (ticks - 116'444'736'000'000'000) * 100;
+}
+
+#else
+
+bool existsNoFollow(const fs::path& path) {
+    return fs::exists(fs::symlink_status(path));
+}
+
+bool isLink(const fs::path& path) {
+    return fs::is_symlink(fs::symlink_status(path));
+}
+
+std::string linkTarget(const fs::path& path) {
+    return fs::read_symlink(path).string();
+}
+
+std::int64_t mtimeOf(const fs::path& path) {
+    struct stat status{};
+    REQUIRE(::lstat(path.c_str(), &status) == 0);
+    return std::int64_t{status.st_mtim.tv_sec} * 1'000'000'000 + status.st_mtim.tv_nsec;
+}
+
 std::uint32_t modeOf(const fs::path& path) {
     struct stat status{};
     REQUIRE(::lstat(path.c_str(), &status) == 0);
     return static_cast<std::uint32_t>(status.st_mode) & 07777;
+}
+
+#endif
+
+EntryMetadata withMtime(std::int64_t nanoseconds) {
+    EntryMetadata metadata;
+    metadata.mtimeNanoseconds = nanoseconds;
+    return metadata;
 }
 
 Result<EntryResult> extractFile(
@@ -144,18 +244,20 @@ TEST_CASE("Extractor writes nested entries with masked modes and restored mtimes
 
     const fs::path file = tree.root() / "docs/guide/intro.txt";
     CHECK(readFile(file) == "hello world");
-    CHECK(modeOf(file) == 0644);
     CHECK(listing(tree.root() / "docs/guide") == std::vector<std::string>{"intro.txt"});
-
-    struct stat status{};
-    REQUIRE(::stat(file.c_str(), &status) == 0);
-    CHECK(status.st_mtim.tv_sec == -2);
-    CHECK(status.st_mtim.tv_nsec == 500'000'000);
+#ifdef _WIN32
+    CHECK(mtimeOf(file) == -1'500'000'000);
+#else
+    CHECK(modeOf(file) == 0644);
+    CHECK(mtimeOf(file) == -1'500'000'000);
+#endif
 
     auto again = extractor.createDirectory(at("docs"), withMode(0750));
     REQUIRE(again);
     CHECK(again->outcome == EntryOutcome::Extracted);
+#ifndef _WIN32
     CHECK(modeOf(tree.root() / "docs") == 0750);
+#endif
 
     auto overFile = extractor.createDirectory(at("docs/guide/intro.txt"));
     REQUIRE_FALSE(overFile);
@@ -169,6 +271,7 @@ TEST_CASE("Extractor writes nested entries with masked modes and restored mtimes
     CHECK(extractor.budget().totalBytes() == 11);
 }
 
+#ifndef _WIN32
 TEST_CASE("Extractor never follows a symlink planted in the destination") {
     TempTree tree;
     fs::create_directory_symlink(tree.outside(), tree.root() / "escape");
@@ -215,6 +318,7 @@ TEST_CASE("Extractor never follows a symlink planted in the destination") {
     CHECK(fs::is_symlink(tree.root() / "secret-link"));
     CHECK(listing(tree.root()) == std::vector<std::string>{"escape", "secret-link"});
 }
+#endif
 
 TEST_CASE("Extractor refuses symlink entries by default so an archive cannot plant one") {
     TempTree tree;
@@ -229,7 +333,8 @@ TEST_CASE("Extractor refuses symlink entries by default so an archive cannot pla
     CHECK(contained.error().kind == ErrorKind::UnsafePath);
 
     REQUIRE(extractFile(extractor, "escape/file", "data"));
-    CHECK(fs::is_directory(fs::symlink_status(tree.root() / "escape")));
+    CHECK(fs::is_directory(tree.root() / "escape"));
+    CHECK_FALSE(isLink(tree.root() / "escape"));
     CHECK(readFile(tree.root() / "escape/file") == "data");
     CHECK(listing(tree.outside()).empty());
 
@@ -240,7 +345,7 @@ TEST_CASE("Extractor refuses symlink entries by default so an archive cannot pla
     REQUIRE(skipped);
     CHECK(skipped->outcome == EntryOutcome::Skipped);
     CHECK_FALSE(skipped->reason.empty());
-    CHECK_FALSE(fs::exists(fs::symlink_status(tree.root() / "other")));
+    CHECK_FALSE(existsNoFollow(tree.root() / "other"));
 }
 
 TEST_CASE("Extractor does not follow a contained symlink created by an earlier entry") {
@@ -253,7 +358,8 @@ TEST_CASE("Extractor does not follow a contained symlink created by an earlier e
     auto link = extractor.createSymlink(at("alias"), "real");
     REQUIRE(link);
     CHECK(link->outcome == EntryOutcome::Extracted);
-    CHECK(fs::read_symlink(tree.root() / "alias") == "real");
+    CHECK(isLink(tree.root() / "alias"));
+    CHECK(linkTarget(tree.root() / "alias") == "real");
 
     auto through = extractor.beginFile(at("alias/file"));
     REQUIRE_FALSE(through);
@@ -305,12 +411,12 @@ TEST_CASE("Extractor keeps contained symlink targets inside the root") {
         if (!test.stored) {
             REQUIRE_FALSE(result);
             CHECK(result.error().kind == ErrorKind::UnsafePath);
-            CHECK_FALSE(fs::exists(fs::symlink_status(where)));
+            CHECK_FALSE(existsNoFollow(where));
             continue;
         }
 
         REQUIRE(result);
-        CHECK(fs::read_symlink(where).string() == *test.stored);
+        CHECK(linkTarget(where) == *test.stored);
     }
 
     CHECK(listing(tree.root() / "dir") == std::vector<std::string>{"deep", "detour", "sibling"});
@@ -409,6 +515,7 @@ TEST_CASE("Uncommitted or failed pending files leave nothing behind") {
     CHECK(listing(tree.root() / "dir") == std::vector<std::string>{"fits"});
 }
 
+#ifndef _WIN32
 TEST_CASE("Extractor strips privileged mode bits unless the policy allows them") {
     TempTree tree;
     auto extractor = openExtractor(tree);
@@ -427,20 +534,25 @@ TEST_CASE("Extractor strips privileged mode bits unless the policy allows them")
     REQUIRE(extractFile(permissive, "kept", "x", withMode(04777)));
     CHECK(modeOf(tree.root() / "kept") == 04777);
 }
+#endif
 
 TEST_CASE("Extractor links only to regular files it extracted in this session") {
     TempTree tree;
     writeFile(tree.root() / "preexisting", "theirs");
-    fs::create_symlink("original", tree.root() / "symlink");
-    auto extractor = openExtractor(tree);
+    auto extractor = openExtractor(tree, [](ExtractPolicy& policy) {
+        policy.symlinks = SymlinkPolicy::AllowContained;
+    });
 
     REQUIRE(extractFile(extractor, "dir/original", "shared"));
     REQUIRE(extractor.createDirectory(at("folder")));
+    REQUIRE(extractor.createSymlink(at("symlink"), "dir/original"));
 
     auto linked = extractor.createHardLink(at("other/copy"), at("dir/original"));
     REQUIRE(linked);
     CHECK(linked->outcome == EntryOutcome::Extracted);
     CHECK(fs::equivalent(tree.root() / "other/copy", tree.root() / "dir/original"));
+    CHECK(fs::hard_link_count(tree.root() / "dir/original") == 2);
+    CHECK(readFile(tree.root() / "other/copy") == "shared");
     CHECK(listing(tree.root() / "other") == std::vector<std::string>{"copy"});
 
     for (std::string_view target :
@@ -450,7 +562,7 @@ TEST_CASE("Extractor links only to regular files it extracted in this session") 
         REQUIRE_FALSE(refused);
         CHECK(refused.error().kind == ErrorKind::UnsafePath);
     }
-    CHECK_FALSE(fs::exists(fs::symlink_status(tree.root() / "refused")));
+    CHECK_FALSE(existsNoFollow(tree.root() / "refused"));
 
     auto existing = extractor.createHardLink(at("other/copy"), at("dir/original"));
     REQUIRE_FALSE(existing);
@@ -517,11 +629,64 @@ TEST_CASE("Extractor reports case-fold collisions when the target ignores case")
     REQUIRE_FALSE(repeat);
     CHECK(repeat.error().kind == ErrorKind::AlreadyExists);
 
+#ifndef _WIN32
     auto sensitive = openExtractor(tree, [&](ExtractPolicy& policy) {
         policy.caseInsensitive = false;
     });
     REQUIRE(extractFile(sensitive, "Docs/README.TXT", "second"));
     CHECK(readFile(tree.root() / "Docs/Readme.txt") == "first");
+#endif
 }
 
+TEST_CASE("Extractor restores directory mtimes after the entries written inside them") {
+    TempTree tree;
+    auto extractor = openExtractor(tree);
+
+    constexpr std::int64_t outer = 1'000'000'000'000'000'000;
+    constexpr std::int64_t inner = 1'100'000'000'000'000'000;
+    REQUIRE(extractor.createDirectory(at("a"), withMtime(outer)));
+    REQUIRE(extractor.createDirectory(at("a/b"), withMtime(inner)));
+    REQUIRE(extractFile(extractor, "a/b/file", "data"));
+    REQUIRE(extractFile(extractor, "a/sibling", "data"));
+    REQUIRE(extractor.createDirectory(at("a/b/c")));
+    CHECK(mtimeOf(tree.root() / "a") != outer);
+
+    REQUIRE(extractor.finish());
+    CHECK(mtimeOf(tree.root() / "a") == outer);
+    CHECK(mtimeOf(tree.root() / "a/b") == inner);
+
+    REQUIRE(extractor.createDirectory(at("late"), withMtime(-1)));
+    REQUIRE(extractor.createDirectory(at("late"), withMtime(outer)));
+    REQUIRE(extractor.finish());
+    CHECK(mtimeOf(tree.root() / "late") == outer);
+    REQUIRE(extractor.finish());
+}
+
+TEST_CASE("The deferred mtime pass leaves a swapped directory untouched") {
+    TempTree tree;
+    auto extractor = openExtractor(tree);
+
+    constexpr std::int64_t archived = 1'000'000'000'000'000'000;
+    REQUIRE(extractor.createDirectory(at("swapped"), withMtime(archived)));
+    REQUIRE(extractor.createDirectory(at("gone/deep"), withMtime(archived)));
+
+    fs::rename(tree.root() / "swapped", tree.outside() / "moved");
+    fs::create_directory(tree.root() / "swapped");
+    fs::remove_all(tree.root() / "gone");
+    const std::int64_t replacement = mtimeOf(tree.root() / "swapped");
+
+    REQUIRE(extractor.finish());
+    CHECK(mtimeOf(tree.root() / "swapped") == replacement);
+    CHECK(mtimeOf(tree.outside() / "moved") != archived);
+    CHECK_FALSE(existsNoFollow(tree.root() / "gone"));
+
+#ifndef _WIN32
+    REQUIRE(extractor.createDirectory(at("linked"), withMtime(archived)));
+    fs::remove(tree.root() / "linked");
+    fs::create_directory_symlink(tree.outside(), tree.root() / "linked");
+    const std::int64_t outside = mtimeOf(tree.outside());
+
+    REQUIRE(extractor.finish());
+    CHECK(mtimeOf(tree.outside()) == outside);
 #endif
+}

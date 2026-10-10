@@ -168,6 +168,13 @@ class PendingFile {
 // place until every PendingFile it returned is committed or destroyed.
 class Extractor {
   public:
+    struct FileId {
+        std::uint64_t device = 0;
+        std::uint64_t inode = 0;
+
+        friend bool operator==(const FileId&, const FileId&) = default;
+    };
+
     [[nodiscard]] static Result<Extractor>
     open(const std::filesystem::path& destinationRoot, const ExtractPolicy& policy = {});
 
@@ -195,19 +202,16 @@ class Extractor {
     [[nodiscard]] Result<EntryResult>
     skipOrRefuseSpecialFile(const ArchivePath& path, SpecialFileKind kind);
 
+    // NOTE: writing an entry moves its parent directory's mtime, so directory times are recorded
+    // during extraction and applied here, after the last entry.
+    [[nodiscard]] Result<void> finish();
+
     [[nodiscard]] const Budget& budget() const {
         return budget_;
     }
 
   private:
     friend class PendingFile;
-
-    struct FileId {
-        std::uint64_t device = 0;
-        std::uint64_t inode = 0;
-
-        friend bool operator==(const FileId&, const FileId&) = default;
-    };
 
     class FileIdSet {
       public:
@@ -227,6 +231,14 @@ class Extractor {
         std::uint32_t parentDepth = 0;
     };
 
+    struct DeferredTime {
+        FileId id;
+        std::int64_t mtimeNanoseconds = 0;
+        std::size_t pathOffset = 0;
+        std::uint32_t pathSize = 0;
+        std::uint32_t depth = 0;
+    };
+
     using TempName = std::array<char, 32>;
 
     Extractor(OsHandle root, const ExtractPolicy& policy);
@@ -238,6 +250,8 @@ class Extractor {
     [[nodiscard]] std::uint32_t fileMode(const EntryMetadata& metadata) const;
     [[nodiscard]] std::uint32_t directoryMode(const EntryMetadata& metadata) const;
     void nextTempName(TempName& name);
+    void deferDirectoryTime(const ArchivePath& path, FileId id, std::int64_t mtimeNanoseconds);
+    [[nodiscard]] Result<void> applyDeferredTime(std::string_view path, const DeferredTime& time);
 
     [[nodiscard]] Result<OsHandle> openParent(std::string_view path, bool create);
     [[nodiscard]] Result<OsHandle> openTemporary(const OsHandle& directory, TempName& name);
@@ -256,6 +270,8 @@ class Extractor {
     Budget budget_;
     CaseFoldSet caseFold_;
     FileIdSet extractedFiles_;
+    std::vector<DeferredTime> deferredTimes_;
+    std::string deferredPaths_;
     std::string component_;
     std::string linkTarget_;
     std::uint64_t tempSeed_ = 0;
