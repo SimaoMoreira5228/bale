@@ -7,7 +7,12 @@
 #include <unordered_map>
 #include <utility>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
 #include <cerrno>
 #include <sys/stat.h>
 #endif
@@ -49,6 +54,7 @@ struct NodeInfo {
 struct Child {
     std::string name;
     fs::path path;
+    bool validName = true;
 };
 
 std::unexpected<Error> systemError(std::string_view what, const std::error_code& code) {
@@ -57,13 +63,43 @@ std::unexpected<Error> systemError(std::string_view what, const std::error_code&
     return failure;
 }
 
-// TODO: Windows names that are not valid UTF-16 make the conversion throw; skip them instead.
-std::string pathBytes(const fs::path& path) {
 #ifdef _WIN32
-    auto text = path.generic_u8string();
-    return {text.begin(), text.end()};
+
+[[nodiscard]] bool appendUtf8(std::wstring_view wide, DWORD flags, std::string& out) {
+    if (wide.empty()) {
+        return true;
+    }
+
+    const auto size = static_cast<int>(wide.size());
+    const int count =
+        WideCharToMultiByte(CP_UTF8, flags, wide.data(), size, nullptr, 0, nullptr, nullptr);
+    if (count <= 0) {
+        return false;
+    }
+
+    out.resize(static_cast<std::size_t>(count));
+    WideCharToMultiByte(CP_UTF8, flags, wide.data(), size, out.data(), count, nullptr, nullptr);
+    return true;
+}
+
+#endif
+
+// NOTE: false means the name has no UTF-8 form (an unpaired UTF-16 surrogate on Windows); `out`
+// then holds a lossy form with U+FFFD for reporting only.
+[[nodiscard]] bool pathBytes(const fs::path& path, std::string& out) {
+    out.clear();
+#ifdef _WIN32
+    const std::wstring wide = path.generic_wstring();
+    if (appendUtf8(wide, WC_ERR_INVALID_CHARS, out)) {
+        return true;
+    }
+
+    out.clear();
+    static_cast<void>(appendUtf8(wide, 0, out));
+    return false;
 #else
-    return path.native();
+    out = path.native();
+    return true;
 #endif
 }
 
@@ -186,12 +222,9 @@ Result<void> Writer::walkDirectory(Walk& walk, const fs::path& directory) {
     std::error_code error;
     for (fs::directory_iterator it(directory, error), end; !error && it != end;
          it.increment(error)) {
-        children.push_back(
-            Child{
-                .name = pathBytes(it->path().filename()),
-                .path = it->path(),
-            }
-        );
+        Child& child = children.emplace_back();
+        child.path = it->path();
+        child.validName = pathBytes(child.path.filename(), child.name);
     }
     if (error) {
         return systemError("cannot read directory", error);
@@ -206,7 +239,8 @@ Result<void> Writer::walkDirectory(Walk& walk, const fs::path& directory) {
         }
         walk.relative.append(child.name);
 
-        auto added = addNode(walk, child.path);
+        auto added = child.validName ? addNode(walk, child.path)
+                                     : skipNode(walk, "name is not valid UTF-16");
         walk.relative.resize(mark);
         if (!added) {
             return added;
@@ -216,15 +250,19 @@ Result<void> Writer::walkDirectory(Walk& walk, const fs::path& directory) {
     return {};
 }
 
+Result<void> Writer::skipNode(const Walk& walk, std::string_view reason) {
+    skipped_.push_back(
+        SkippedPath{
+            .path = walk.relative,
+            .reason = reason,
+        }
+    );
+    return {};
+}
+
 Result<void> Writer::addNode(Walk& walk, const fs::path& node) {
-    auto skip = [this, &walk](std::string_view reason) -> Result<void> {
-        skipped_.push_back(
-            SkippedPath{
-                .path = walk.relative,
-                .reason = reason,
-            }
-        );
-        return {};
+    auto skip = [this, &walk](std::string_view reason) {
+        return skipNode(walk, reason);
     };
 
     auto valid = validateEntryPath(walk.relative, options_.limits, scratch_);
@@ -269,7 +307,10 @@ Result<void> Writer::addNode(Walk& walk, const fs::path& node) {
         if (linkError) {
             return systemError("cannot read symlink", linkError);
         }
-        auto bytes = pathBytes(target);
+        std::string bytes;
+        if (!pathBytes(target, bytes)) {
+            return skip("symlink target is not valid UTF-16");
+        }
         if (bytes.empty() || bytes.size() > options_.limits.maxPathBytes) {
             return skip("symlink target empty or too long");
         }
