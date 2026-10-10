@@ -90,7 +90,7 @@ Result<File> File::openRead(const std::filesystem::path& path) {
 Result<File> File::openAppend(const std::filesystem::path& path) {
     HANDLE handle = CreateFileW(
         path.c_str(),
-        GENERIC_READ | GENERIC_WRITE,
+        GENERIC_READ | FILE_APPEND_DATA,
         FILE_SHARE_READ,
         nullptr,
         OPEN_EXISTING,
