@@ -1,6 +1,7 @@
 #pragma once
 
 #include "archive/chunk.hpp"
+#include "archive/writer_profile.hpp"
 #include "base/error.hpp"
 #include "extract/extractor.hpp"
 #include "format/record.hpp"
@@ -57,7 +58,7 @@ struct ListOptions {
 
 struct CreateOptions {
     std::uint32_t chunkSize = archive::defaultChunkSize;
-    CodecId codec = CodecId::Raw;
+    archive::CompressionProfile compression = archive::profileFor(archive::Preset::Balanced);
     bool durable = false;
 };
 
@@ -75,6 +76,8 @@ struct CreateOptions {
 
 [[nodiscard]] ExitCode
 compactArchive(std::string_view archivePath, std::string_view outputPath, bool durable);
+
+[[nodiscard]] ExitCode describeArchive(std::string_view argument);
 
 [[nodiscard]] ExitCode createArchiveFromPath(std::string_view input);
 

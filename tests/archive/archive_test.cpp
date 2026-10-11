@@ -32,8 +32,8 @@ namespace {
 
 constexpr std::int64_t fileTime = 1700000000123456789;
 
-// NOTE: produced by the independent Python encoder from the schema description: directory "d",
-// files "d/f" and "d/g" holding "hello" (one shared DATA record) and an empty file "e".
+// NOTE: output of `tools/reference/bale_reference.py golden`, an independent encoder; regenerate it
+// there when the schema changes.
 std::vector<std::byte> goldenArchive() {
     return fromHex(
         "42 41 4C 45 0D 0A 1A 0A 01 00 00 00 40 00 00 00 00 00 00 00 00 00 00 00 "
@@ -43,8 +43,8 @@ std::vector<std::byte> goldenArchive() {
         "00 00 00 00 82 DC 92 39 00 00 00 00 00 00 00 00 28 03 01 01 05 20 5F CC "
         "12 22 12 22 F9 D8 0C B3 E5 1A 1A D8 A1 5D 63 79 DF 45 5C A2 CA 07 46 F3 "
         "C7 99 BB D0 7B 90 07 01 05 68 65 6C 6C 6F C3 48 70 85 45 4E 44 31 42 4C "
-        "52 31 02 00 00 00 B8 00 00 00 00 00 00 00 B8 00 00 00 00 00 00 00 01 00 "
-        "00 00 00 00 00 00 00 00 00 00 C0 57 1C F2 00 00 00 00 00 00 00 00 03 01 "
+        "52 31 02 00 00 00 D5 00 00 00 00 00 00 00 D5 00 00 00 00 00 00 00 01 00 "
+        "00 00 00 00 00 00 00 00 00 00 80 B0 30 38 00 00 00 00 00 00 00 00 03 01 "
         "01 05 AC 01 04 14 03 01 64 05 01 02 0A 08 00 00 00 00 00 00 00 00 0C 02 "
         "ED 03 45 03 03 64 2F 66 05 01 01 07 01 05 09 2A 01 28 03 01 01 05 20 5F "
         "CC 12 22 12 22 F9 D8 0C B3 E5 1A 1A D8 A1 5D 63 79 DF 45 5C A2 CA 07 46 "
@@ -52,24 +52,25 @@ std::vector<std::byte> goldenArchive() {
         "45 03 03 64 2F 67 05 01 01 07 01 05 09 2A 01 28 03 01 01 05 20 5F CC 12 "
         "22 12 22 F9 D8 0C B3 E5 1A 1A D8 A1 5D 63 79 DF 45 5C A2 CA 07 46 F3 C7 "
         "99 BB D0 7B 90 07 01 05 0A 08 15 CD 85 3D FE 9C 97 17 0C 02 A4 03 09 03 "
-        "01 65 05 01 01 07 01 00 08 04 62 61 6C 65 D6 F4 4F 5D 45 4E 44 31 42 4C "
-        "52 31 03 00 00 00 38 00 00 00 00 00 00 00 38 00 00 00 00 00 00 00 02 00 "
-        "00 00 00 00 00 00 00 00 00 00 1D C9 AB F7 00 00 00 00 00 00 00 00 03 01 "
-        "01 05 33 01 31 03 01 01 05 20 5F CC 12 22 12 22 F9 D8 0C B3 E5 1A 1A D8 "
-        "A1 5D 63 79 DF 45 5C A2 CA 07 46 F3 C7 99 BB D0 7B 90 07 01 05 09 01 40 "
-        "0B 01 66 0D 01 00 46 C5 4C 64 45 4E 44 31 42 4C 52 31 04 00 00 00 7E 00 "
-        "00 00 00 00 00 00 7E 00 00 00 00 00 00 00 03 00 00 00 00 00 00 00 00 00 "
-        "00 00 C5 8E AA F6 00 00 00 00 00 00 00 00 03 01 01 05 01 01 07 20 00 00 "
-        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 "
-        "00 00 00 00 00 00 09 01 00 0B 02 A6 01 0D 02 F0 01 0F 20 40 7F 14 6A EB "
-        "60 7E E6 84 BE 84 0A D3 AC 88 0A FC 11 1E 44 29 F8 6B 5D C4 32 E5 DA 90 "
-        "15 2F A8 11 02 96 03 13 01 70 15 20 22 5C C6 0B BE 6B AF 43 80 76 01 A6 "
-        "7A AC 42 2E 36 22 9C 7F 6F F5 1A 17 E9 1D 19 21 87 D1 FD AD 55 6B D6 C3 "
-        "45 4E 44 31 42 41 4C 45 46 54 52 31 06 02 00 00 00 00 00 00 B6 00 00 00 "
-        "00 00 00 00 01 00 00 00 00 00 00 00 45 29 EC C8 9D 03 34 7B 22 42 B9 DB "
-        "3C 06 B9 F9 45 DA 5F 9C D1 72 5A 3D 1F BB 28 EB 1D 2C BD EF 96 CF 88 8C "
-        "00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 "
-        "00 00 00 00"
+        "01 65 05 01 01 07 01 00 08 21 02 04 62 61 6C 65 04 01 02 06 01 01 08 08 "
+        "03 00 00 00 00 00 00 00 0A 01 01 0C 03 80 80 40 10 01 01 5F 40 7F 33 45 "
+        "4E 44 31 42 4C 52 31 03 00 00 00 38 00 00 00 00 00 00 00 38 00 00 00 00 "
+        "00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 1D C9 AB F7 00 00 00 00 00 "
+        "00 00 00 03 01 01 05 33 01 31 03 01 01 05 20 5F CC 12 22 12 22 F9 D8 0C "
+        "B3 E5 1A 1A D8 A1 5D 63 79 DF 45 5C A2 CA 07 46 F3 C7 99 BB D0 7B 90 07 "
+        "01 05 09 01 40 0B 01 66 0D 01 00 46 C5 4C 64 45 4E 44 31 42 4C 52 31 04 "
+        "00 00 00 7E 00 00 00 00 00 00 00 7E 00 00 00 00 00 00 00 03 00 00 00 00 "
+        "00 00 00 00 00 00 00 C5 8E AA F6 00 00 00 00 00 00 00 00 03 01 01 05 01 "
+        "01 07 20 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 "
+        "00 00 00 00 00 00 00 00 00 00 00 09 01 00 0B 02 A6 01 0D 02 8D 02 0F 20 "
+        "68 62 52 55 CF 9B ED 4F CC A3 F1 2D 5B 79 C0 01 97 CA 6A 20 E4 BF E2 0A "
+        "F6 CC DE 15 37 08 9F 70 11 02 B3 03 13 01 70 15 20 22 5C C6 0B BE 6B AF "
+        "43 80 76 01 A6 7A AC 42 2E 36 22 9C 7F 6F F5 1A 17 E9 1D 19 21 87 D1 FD "
+        "AD 40 B6 1B B2 45 4E 44 31 42 41 4C 45 46 54 52 31 23 02 00 00 00 00 00 "
+        "00 B6 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 82 2F A4 E4 5D D5 AC "
+        "56 38 41 A3 C8 27 5C 72 9B 38 FE 8B AD 1A 8E F7 D5 D9 77 C0 A5 A5 6D 5C "
+        "B0 20 59 13 14 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 "
+        "00 00 00 00 00 00 00 00 00"
     );
 }
 
@@ -359,7 +360,7 @@ TEST_CASE("an empty archive has only metadata records and verifies") {
     auto writer = newWriter(temp.path());
     auto summary = writer.finish();
     REQUIRE(summary);
-    CHECK(summary->archiveSize == 470);
+    CHECK(summary->archiveSize == 499);
     CHECK(writer.addBytes("late", bytesOf("x")).error().kind == ErrorKind::Malformed);
 
     auto file = File::openRead(temp.path());

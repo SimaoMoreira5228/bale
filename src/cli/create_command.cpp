@@ -21,7 +21,7 @@ ExitCode writeArchive(
 ) {
     archive::WriterOptions writerOptions;
     writerOptions.chunkSize = options.chunkSize;
-    writerOptions.codec = options.codec;
+    writerOptions.compression = options.compression;
     writerOptions.durable = options.durable;
     auto writer = archive::Writer::create(std::move(file), writerOptions);
     if (!writer) {
@@ -92,7 +92,7 @@ ExitCode updateArchive(
 
     archive::WriterOptions writerOptions;
     writerOptions.chunkSize = options.chunkSize;
-    writerOptions.codec = options.codec;
+    writerOptions.compression = options.compression;
     writerOptions.durable = options.durable;
     auto writer = archive::Writer::append(std::move(*file), writerOptions);
     if (!writer) {
@@ -165,7 +165,6 @@ ExitCode createArchiveFromPath(std::string_view input) {
 
     auto write = [&]() -> Result<archive::WriteSummary> {
         archive::WriterOptions writerOptions;
-        writerOptions.codec = CodecId::Zstd;
         auto writer = archive::Writer::create(std::move(*file), writerOptions);
         if (!writer) {
             return std::unexpected(writer.error());

@@ -45,7 +45,8 @@ std::vector<std::byte> goldenManifestBytes() {
         "0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 07 01 "
         "05 0A 08 FF FF FF FF FF FF FF FF 0C 02 A4 03 0D 03 03 64 2F 67 05 01 04 "
         "15 03 64 2F 66 15 03 01 6C 05 01 03 0A 08 01 00 00 00 00 00 00 00 13 03 "
-        "64 2F 66 06 02 68 69 08 04 62 61 6C 65"
+        "64 2F 66 06 02 68 69 08 21 02 04 62 61 6C 65 04 01 03 06 01 01 08 08 13 00 "
+        "00 00 00 00 00 00 0A 01 01 0C 03 80 80 04 10 01 01"
     );
 }
 
@@ -91,7 +92,7 @@ Manifest goldenManifest() {
         },
     };
     manifest.comment = "hi";
-    manifest.writer = "bale";
+    manifest.writer = describeWriter("bale", profileFor(Preset::Small), 65536);
     return manifest;
 }
 
@@ -387,7 +388,13 @@ TEST_CASE("MANIFEST golden bytes cover every entry kind, optional fields and met
     REQUIRE(decodeManifest(golden, 0, {}, decoded));
     REQUIRE(decoded.entries.size() == 4);
     CHECK(decoded.comment == "hi");
-    CHECK(decoded.writer == "bale");
+    CHECK(decoded.writer.name == "bale");
+    CHECK(decoded.writer.preset == static_cast<std::uint64_t>(Preset::Small));
+    CHECK(decoded.writer.codec == static_cast<std::uint64_t>(CodecId::Zstd));
+    CHECK(decoded.writer.level == 19);
+    CHECK(decoded.writer.chunkPolicy == static_cast<std::uint64_t>(ChunkPolicy::Fixed));
+    CHECK(decoded.writer.chunkSize == 65536);
+    CHECK(decoded.writer.workers == 1);
 
     const auto& dir = decoded.entries[0];
     CHECK(dir.path == "d");
@@ -654,4 +661,51 @@ TEST_CASE("COMMIT golden bytes, digest and schema checks") {
     auto shortDigest = golden;
     shortDigest[7] = std::byte{0x1F};
     CHECK_FALSE(decodeCommit(shortDigest, 0));
+}
+
+namespace {
+
+Result<WriterMetadata> decodeWriter(const std::vector<std::byte>& encoded) {
+    TlvReader reader(encoded);
+    TlvField field;
+    auto more = reader.next(field);
+    REQUIRE(more);
+    REQUIRE(*more);
+    return decodeWriterMetadata(field);
+}
+
+std::vector<std::byte> writerField(std::initializer_list<RawField> fields) {
+    return tlv({RawField{4, Criticality::Noncritical, tlv(fields)}});
+}
+
+}
+
+TEST_CASE("writer metadata keeps values from later writers but enforces framing and criticality") {
+    auto later = writerField({
+        RawField{2, Criticality::Noncritical, uleb(9)},
+        RawField{5, Criticality::Noncritical, uleb(2)},
+        RawField{20, Criticality::Noncritical, text("future")},
+    });
+    auto decoded = decodeWriter(later);
+    REQUIRE(decoded);
+    CHECK(decoded->preset == 9);
+    CHECK(decoded->chunkPolicy == 2);
+    CHECK_FALSE(decoded->codec);
+
+    auto unknownCritical =
+        writerField({RawField{20, Criticality::Critical, text("must understand")}});
+    auto rejected = decodeWriter(unknownCritical);
+    REQUIRE_FALSE(rejected);
+    CHECK(rejected.error().kind == ErrorKind::Unsupported);
+
+    auto criticalKnown = writerField({RawField{3, Criticality::Critical, uleb(1)}});
+    CHECK_FALSE(decodeWriter(criticalKnown));
+
+    auto shortLevel = writerField({RawField{4, Criticality::Noncritical, uleb(3)}});
+    CHECK_FALSE(decodeWriter(shortLevel));
+
+    auto empty = writerField({});
+    auto emptyResult = decodeWriter(empty);
+    REQUIRE_FALSE(emptyResult);
+    CHECK(emptyResult.error().kind == ErrorKind::Malformed);
 }

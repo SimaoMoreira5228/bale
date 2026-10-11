@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string_view>
 
 namespace bale {
 
@@ -23,6 +24,16 @@ enum class CodecId : std::uint32_t {
     Raw = 0,
     Zstd = 1,
 };
+
+[[nodiscard]] constexpr std::string_view codecName(CodecId codec) {
+    switch (codec) {
+    case CodecId::Raw:
+        return "raw";
+    case CodecId::Zstd:
+        return "zstd";
+    }
+    return "unknown";
+}
 
 inline constexpr std::size_t recordPrefixSize = 48;
 inline constexpr std::size_t recordTrailerSize = 8;

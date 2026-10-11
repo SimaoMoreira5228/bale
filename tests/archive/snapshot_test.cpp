@@ -70,6 +70,7 @@ TEST_CASE("compaction keeps the current snapshot and drops obsolete chunks") {
         REQUIRE(file);
         WriterOptions options;
         options.comment = "snapshot comment";
+        options.compression = profileFor(Preset::Small);
         auto writer = Writer::append(std::move(*file), options);
         REQUIRE(writer);
         REQUIRE(writer->addDirectory("dir", {.mtimeNanoseconds = 0, .mode = 0755}));
@@ -103,6 +104,8 @@ TEST_CASE("compaction keeps the current snapshot and drops obsolete chunks") {
     CHECK(compacted->superblock().archiveId == source->superblock().archiveId);
     CHECK(compacted->superblock().creationTimeNs == source->superblock().creationTimeNs);
     CHECK(compacted->manifest().comment == "snapshot comment");
+    CHECK(compacted->manifest().writer.preset == static_cast<std::uint64_t>(Preset::Small));
+    CHECK(compacted->manifest().writer.level == 19);
     CHECK(compacted->manifest().entries.size() == 5);
     CHECK(compacted->index().size() == 1);
     CHECK(compacted->manifest().entries[0].path == "copy");

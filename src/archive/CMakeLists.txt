@@ -8,6 +8,7 @@ add_library(bale_archive STATIC
     reader_commit.cpp
     tree_walk.cpp
     writer.cpp
+    writer_profile.cpp
 )
 target_link_libraries(bale_archive
     PUBLIC bale_base bale_checksum bale_format bale_io bale_security

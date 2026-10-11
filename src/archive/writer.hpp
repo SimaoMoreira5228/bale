@@ -3,6 +3,7 @@
 #include "archive/chunk.hpp"
 #include "archive/index.hpp"
 #include "archive/manifest.hpp"
+#include "archive/writer_profile.hpp"
 #include "base/error.hpp"
 #include "codecs/zstd_encoder.hpp"
 #include "format/record.hpp"
@@ -30,7 +31,7 @@ struct EntryAttributes {
 
 struct WriterOptions {
     std::uint32_t chunkSize = defaultChunkSize;
-    CodecId codec = CodecId::Raw;
+    CompressionProfile compression = profileFor(Preset::Balanced);
     std::optional<std::array<std::byte, 16>> archiveId;
     std::optional<std::int64_t> creationTimeNanoseconds;
     std::string_view comment;
@@ -164,6 +165,7 @@ class Writer {
     std::uint64_t generation_ = 1;
     Blake3Digest previousCommit_{};
     std::uint64_t previousFooterOffset_ = 0;
+    std::optional<WriterMetadata> inheritedWriter_;
     std::vector<std::byte> buffer_;
     std::vector<std::byte> compressionBuffer_;
     std::optional<ZstdEncoder> encoder_;
