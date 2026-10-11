@@ -2,6 +2,7 @@
 
 #include "base/endian.hpp"
 #include "checksum/crc.hpp"
+#include "codecs/deflate_encoder.hpp"
 
 #include <array>
 #include <cstddef>
@@ -10,7 +11,6 @@
 #include <string_view>
 #include <vector>
 
-#include <zlib-ng.h>
 #include <zstd.h>
 
 namespace bale::test {
@@ -34,19 +34,14 @@ inline std::vector<std::byte> goldenDeflate() {
 }
 
 inline std::vector<std::byte> deflateRaw(std::span<const std::byte> data) {
-    zng_stream stream{};
-    if (zng_deflateInit2(&stream, 9, Z_DEFLATED, -15, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
+    auto encoder = DeflateEncoder::create(9);
+    if (!encoder) {
         return {};
     }
 
-    std::vector<std::byte> out(zng_deflateBound(&stream, static_cast<unsigned long>(data.size())));
-    stream.next_in = reinterpret_cast<const std::uint8_t*>(data.data());
-    stream.avail_in = static_cast<std::uint32_t>(data.size());
-    stream.next_out = reinterpret_cast<std::uint8_t*>(out.data());
-    stream.avail_out = static_cast<std::uint32_t>(out.size());
-    int status = zng_deflate(&stream, Z_FINISH);
-    out.resize(status == Z_STREAM_END ? stream.total_out : 0);
-    zng_deflateEnd(&stream);
+    std::vector<std::byte> out(DeflateEncoder::compressBound(data.size()));
+    auto size = encoder->compress(data, out);
+    out.resize(size ? *size : 0);
     return out;
 }
 

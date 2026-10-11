@@ -67,6 +67,18 @@ under **Show more options**.
 
 `./dev` wraps the usual chores: `sanitize` runs the tests under ASan and UBSan, `cover` gives a coverage summary, `lint` runs clang-tidy, `format` runs clang-format, and `check` does format, lint and tests in one go. Configuring also links `compile_commands.json` into the repo root, so clangd works in any editor without extra setup.
 
+## Benchmarks
+
+Presets are supposed to be picked from measurements, not hunches, so there's a harness for that. Build it with `-DBALE_BUILD_BENCHMARKS=ON` in a Release build, make a corpus, and run it:
+
+```sh
+python3 tools/bench/make_corpus.py corpus --add source=../some-repo
+python3 tools/bench/run_codec_bench.py --bench build/release/bench/bale_bench_codecs \
+    --bale build/release/src/cli/bale --corpus corpus --out results --cpu 3
+```
+
+The corpus generator writes deterministic synthetic groups (prose, lots of small JSON files, shifted repeats, structured records, random bytes) and hashes everything into `corpus.json`. `--add` copies real directories in as extra groups, which matters: synthetic data only tells you so much. Codecs are compared on identical fixed chunks with deduplication off, each in its own process, with medians and spread over repeated runs. A second pass times `bale create` and `bale extract` for every preset with deduplication on. `results/summary.md` is the readable version and `results.json` keeps everything, including the machine description. Numbers from different machines shouldn't be merged into one ranking.
+
 ## Layout
 
 ```text
