@@ -8,3 +8,4 @@ build/
 *.prn
 compile_commands.json
 .claude/worktrees/
+__pycache__/
