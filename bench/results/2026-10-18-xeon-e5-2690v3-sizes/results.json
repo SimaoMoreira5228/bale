@@ -1,0 +1,1125 @@
+{
+  "environment": {
+    "date_utc": "2026-10-18T11:20:44+00:00",
+    "platform": "Linux-7.2.11-200.fc44.x86_64-x86_64-with-glibc2.43",
+    "machine": "x86_64",
+    "cpu_model": "Intel(R) Xeon(R) CPU E5-2690 v3 @ 2.60GHz",
+    "logical_cpus": 24,
+    "governor": "performance",
+    "smt_active": "1",
+    "load_average": [
+      0.74658203125,
+      0.43359375,
+      0.59326171875
+    ],
+    "pinned_cpu": 5,
+    "python": "3.14.8",
+    "bench_sha256": "5d5ade597504e45049645709d1f28bd5ed86216e97f981317ea50063d2fe4236",
+    "bale_sha256": "a88206b22f1e51de0124760450f54e3e863529cbfa71ccb88a9cfcf723876850",
+    "git_commit": "171095e6f30e9c483fd1bd7b6f0ed3550dee2997",
+    "corpus_sha256": "7bcddc28a3846c3ac37c04975aa80ff2f029f03a62c596451d1e3442fbebe952",
+    "corpus_version": 1,
+    "chunk_size": 1048576,
+    "runs": 3,
+    "e2e_runs": 2,
+    "work_dir": "build/bench/work"
+  },
+  "codecs": [
+    {
+      "codec": "raw",
+      "group": "size-100M",
+      "files": 1,
+      "chunks": 100,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 104857600,
+      "stored_bytes": 104867500,
+      "raw_fallback_chunks": 100,
+      "encode_mb_s": {
+        "median": 14952.49,
+        "min": 14655.65,
+        "max": 15086.39
+      },
+      "decode_mb_s": {
+        "median": 15025.47,
+        "min": 14668.77,
+        "max": 15204.5
+      },
+      "peak_rss_kb": 7592
+    },
+    {
+      "codec": "raw",
+      "group": "size-10M",
+      "files": 1,
+      "chunks": 10,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 10485760,
+      "stored_bytes": 10486750,
+      "raw_fallback_chunks": 10,
+      "encode_mb_s": {
+        "median": 13246.99,
+        "min": 13095.04,
+        "max": 13253.97
+      },
+      "decode_mb_s": {
+        "median": 15235.35,
+        "min": 15162.32,
+        "max": 15267.32
+      },
+      "peak_rss_kb": 7592
+    },
+    {
+      "codec": "raw",
+      "group": "size-1G",
+      "files": 1,
+      "chunks": 1024,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 1073741824,
+      "stored_bytes": 1073843200,
+      "raw_fallback_chunks": 1024,
+      "encode_mb_s": {
+        "median": 13182.94,
+        "min": 12838.86,
+        "max": 13189.17
+      },
+      "decode_mb_s": {
+        "median": 14829.15,
+        "min": 14475.64,
+        "max": 14833.31
+      },
+      "peak_rss_kb": 7592
+    },
+    {
+      "codec": "raw",
+      "group": "size-1M",
+      "files": 1,
+      "chunks": 1,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 1048576,
+      "stored_bytes": 1048675,
+      "raw_fallback_chunks": 1,
+      "encode_mb_s": {
+        "median": 13374.01,
+        "min": 12505.23,
+        "max": 13497.62
+      },
+      "decode_mb_s": {
+        "median": 15279.8,
+        "min": 15271.12,
+        "max": 15320.65
+      },
+      "peak_rss_kb": 7592
+    },
+    {
+      "codec": "raw",
+      "group": "size-500M",
+      "files": 1,
+      "chunks": 500,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 524288000,
+      "stored_bytes": 524337500,
+      "raw_fallback_chunks": 500,
+      "encode_mb_s": {
+        "median": 13188.74,
+        "min": 13027.89,
+        "max": 13283.28
+      },
+      "decode_mb_s": {
+        "median": 14764.06,
+        "min": 14671.08,
+        "max": 14881.04
+      },
+      "peak_rss_kb": 7592
+    },
+    {
+      "codec": "zstd:1",
+      "group": "size-100M",
+      "files": 1,
+      "chunks": 100,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 104857600,
+      "stored_bytes": 48202797,
+      "raw_fallback_chunks": 7,
+      "encode_mb_s": {
+        "median": 343.07,
+        "min": 335.03,
+        "max": 343.92
+      },
+      "decode_mb_s": {
+        "median": 998.45,
+        "min": 992.28,
+        "max": 999.42
+      },
+      "peak_rss_kb": 8508
+    },
+    {
+      "codec": "zstd:1",
+      "group": "size-10M",
+      "files": 1,
+      "chunks": 10,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 10485760,
+      "stored_bytes": 4903699,
+      "raw_fallback_chunks": 0,
+      "encode_mb_s": {
+        "median": 402.55,
+        "min": 398.72,
+        "max": 402.6
+      },
+      "decode_mb_s": {
+        "median": 1152.55,
+        "min": 1140.87,
+        "max": 1153.56
+      },
+      "peak_rss_kb": 8508
+    },
+    {
+      "codec": "zstd:1",
+      "group": "size-1G",
+      "files": 1,
+      "chunks": 1024,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 1073741824,
+      "stored_bytes": 503099343,
+      "raw_fallback_chunks": 105,
+      "encode_mb_s": {
+        "median": 328.56,
+        "min": 327.7,
+        "max": 331.24
+      },
+      "decode_mb_s": {
+        "median": 963.64,
+        "min": 961.32,
+        "max": 969.2
+      },
+      "peak_rss_kb": 8508
+    },
+    {
+      "codec": "zstd:1",
+      "group": "size-1M",
+      "files": 1,
+      "chunks": 1,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 1048576,
+      "stored_bytes": 436646,
+      "raw_fallback_chunks": 0,
+      "encode_mb_s": {
+        "median": 264.04,
+        "min": 256.5,
+        "max": 271.62
+      },
+      "decode_mb_s": {
+        "median": 712.02,
+        "min": 680.14,
+        "max": 715.11
+      },
+      "peak_rss_kb": 8508
+    },
+    {
+      "codec": "zstd:1",
+      "group": "size-500M",
+      "files": 1,
+      "chunks": 500,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 524288000,
+      "stored_bytes": 242815849,
+      "raw_fallback_chunks": 43,
+      "encode_mb_s": {
+        "median": 329.08,
+        "min": 323.73,
+        "max": 331.58
+      },
+      "decode_mb_s": {
+        "median": 964.43,
+        "min": 945.37,
+        "max": 967.56
+      },
+      "peak_rss_kb": 8508
+    },
+    {
+      "codec": "zstd:3",
+      "group": "size-100M",
+      "files": 1,
+      "chunks": 100,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 104857600,
+      "stored_bytes": 43986474,
+      "raw_fallback_chunks": 7,
+      "encode_mb_s": {
+        "median": 196.72,
+        "min": 194.14,
+        "max": 198.95
+      },
+      "decode_mb_s": {
+        "median": 883.84,
+        "min": 865.99,
+        "max": 891.19
+      },
+      "peak_rss_kb": 9124
+    },
+    {
+      "codec": "zstd:3",
+      "group": "size-10M",
+      "files": 1,
+      "chunks": 10,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 10485760,
+      "stored_bytes": 4141323,
+      "raw_fallback_chunks": 0,
+      "encode_mb_s": {
+        "median": 210.12,
+        "min": 209.11,
+        "max": 211.49
+      },
+      "decode_mb_s": {
+        "median": 977.83,
+        "min": 954.94,
+        "max": 986.64
+      },
+      "peak_rss_kb": 9124
+    },
+    {
+      "codec": "zstd:3",
+      "group": "size-1G",
+      "files": 1,
+      "chunks": 1024,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 1073741824,
+      "stored_bytes": 464495428,
+      "raw_fallback_chunks": 105,
+      "encode_mb_s": {
+        "median": 194.25,
+        "min": 194.23,
+        "max": 194.68
+      },
+      "decode_mb_s": {
+        "median": 862.82,
+        "min": 862.53,
+        "max": 864.82
+      },
+      "peak_rss_kb": 9124
+    },
+    {
+      "codec": "zstd:3",
+      "group": "size-1M",
+      "files": 1,
+      "chunks": 1,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 1048576,
+      "stored_bytes": 435654,
+      "raw_fallback_chunks": 0,
+      "encode_mb_s": {
+        "median": 128.33,
+        "min": 120.67,
+        "max": 129.26
+      },
+      "decode_mb_s": {
+        "median": 588.64,
+        "min": 576.18,
+        "max": 589.05
+      },
+      "peak_rss_kb": 9124
+    },
+    {
+      "codec": "zstd:3",
+      "group": "size-500M",
+      "files": 1,
+      "chunks": 500,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 524288000,
+      "stored_bytes": 224337963,
+      "raw_fallback_chunks": 43,
+      "encode_mb_s": {
+        "median": 191.92,
+        "min": 190.33,
+        "max": 192.33
+      },
+      "decode_mb_s": {
+        "median": 856.72,
+        "min": 847.99,
+        "max": 860.0
+      },
+      "peak_rss_kb": 9124
+    },
+    {
+      "codec": "zstd:9",
+      "group": "size-100M",
+      "files": 1,
+      "chunks": 100,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 104857600,
+      "stored_bytes": 43012761,
+      "raw_fallback_chunks": 7,
+      "encode_mb_s": {
+        "median": 52.03,
+        "min": 50.9,
+        "max": 52.16
+      },
+      "decode_mb_s": {
+        "median": 1039.1,
+        "min": 1022.56,
+        "max": 1042.8
+      },
+      "peak_rss_kb": 18892
+    },
+    {
+      "codec": "zstd:9",
+      "group": "size-10M",
+      "files": 1,
+      "chunks": 10,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 10485760,
+      "stored_bytes": 4110826,
+      "raw_fallback_chunks": 0,
+      "encode_mb_s": {
+        "median": 60.4,
+        "min": 58.81,
+        "max": 60.9
+      },
+      "decode_mb_s": {
+        "median": 1149.2,
+        "min": 1138.24,
+        "max": 1156.08
+      },
+      "peak_rss_kb": 18892
+    },
+    {
+      "codec": "zstd:9",
+      "group": "size-1G",
+      "files": 1,
+      "chunks": 1024,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 1073741824,
+      "stored_bytes": 454314206,
+      "raw_fallback_chunks": 105,
+      "encode_mb_s": {
+        "median": 49.46,
+        "min": 49.29,
+        "max": 49.48
+      },
+      "decode_mb_s": {
+        "median": 1017.34,
+        "min": 1012.73,
+        "max": 1018.22
+      },
+      "peak_rss_kb": 18892
+    },
+    {
+      "codec": "zstd:9",
+      "group": "size-1M",
+      "files": 1,
+      "chunks": 1,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 1048576,
+      "stored_bytes": 421797,
+      "raw_fallback_chunks": 0,
+      "encode_mb_s": {
+        "median": 38.66,
+        "min": 37.56,
+        "max": 40.72
+      },
+      "decode_mb_s": {
+        "median": 698.66,
+        "min": 698.52,
+        "max": 698.83
+      },
+      "peak_rss_kb": 18892
+    },
+    {
+      "codec": "zstd:9",
+      "group": "size-500M",
+      "files": 1,
+      "chunks": 500,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 524288000,
+      "stored_bytes": 219357398,
+      "raw_fallback_chunks": 43,
+      "encode_mb_s": {
+        "median": 49.57,
+        "min": 49.36,
+        "max": 49.58
+      },
+      "decode_mb_s": {
+        "median": 1002.5,
+        "min": 998.88,
+        "max": 1002.98
+      },
+      "peak_rss_kb": 18892
+    },
+    {
+      "codec": "zstd:19",
+      "group": "size-100M",
+      "files": 1,
+      "chunks": 100,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 104857600,
+      "stored_bytes": 36782801,
+      "raw_fallback_chunks": 7,
+      "encode_mb_s": {
+        "median": 3.95,
+        "min": 3.94,
+        "max": 3.95
+      },
+      "decode_mb_s": {
+        "median": 800.05,
+        "min": 795.87,
+        "max": 800.54
+      },
+      "peak_rss_kb": 25580
+    },
+    {
+      "codec": "zstd:19",
+      "group": "size-10M",
+      "files": 1,
+      "chunks": 10,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 10485760,
+      "stored_bytes": 3418060,
+      "raw_fallback_chunks": 0,
+      "encode_mb_s": {
+        "median": 4.7,
+        "min": 4.68,
+        "max": 4.7
+      },
+      "decode_mb_s": {
+        "median": 791.14,
+        "min": 771.57,
+        "max": 812.34
+      },
+      "peak_rss_kb": 25580
+    },
+    {
+      "codec": "zstd:19",
+      "group": "size-1G",
+      "files": 1,
+      "chunks": 1024,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 1073741824,
+      "stored_bytes": 391454186,
+      "raw_fallback_chunks": 105,
+      "encode_mb_s": {
+        "median": 3.8,
+        "min": 3.8,
+        "max": 3.8
+      },
+      "decode_mb_s": {
+        "median": 794.09,
+        "min": 794.02,
+        "max": 794.93
+      },
+      "peak_rss_kb": 25580
+    },
+    {
+      "codec": "zstd:19",
+      "group": "size-1M",
+      "files": 1,
+      "chunks": 1,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 1048576,
+      "stored_bytes": 286361,
+      "raw_fallback_chunks": 0,
+      "encode_mb_s": {
+        "median": 3.28,
+        "min": 3.21,
+        "max": 3.35
+      },
+      "decode_mb_s": {
+        "median": 424.64,
+        "min": 361.75,
+        "max": 425.06
+      },
+      "peak_rss_kb": 25580
+    },
+    {
+      "codec": "zstd:19",
+      "group": "size-500M",
+      "files": 1,
+      "chunks": 500,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 524288000,
+      "stored_bytes": 187170631,
+      "raw_fallback_chunks": 43,
+      "encode_mb_s": {
+        "median": 3.83,
+        "min": 3.83,
+        "max": 3.83
+      },
+      "decode_mb_s": {
+        "median": 761.6,
+        "min": 760.9,
+        "max": 762.68
+      },
+      "peak_rss_kb": 25580
+    },
+    {
+      "codec": "deflate:1",
+      "group": "size-100M",
+      "files": 1,
+      "chunks": 100,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 104857600,
+      "stored_bytes": 73449556,
+      "raw_fallback_chunks": 32,
+      "encode_mb_s": {
+        "median": 121.46,
+        "min": 120.26,
+        "max": 122.32
+      },
+      "decode_mb_s": {
+        "median": 744.8,
+        "min": 738.04,
+        "max": 750.71
+      },
+      "peak_rss_kb": 8084
+    },
+    {
+      "codec": "deflate:1",
+      "group": "size-10M",
+      "files": 1,
+      "chunks": 10,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 10485760,
+      "stored_bytes": 7841257,
+      "raw_fallback_chunks": 4,
+      "encode_mb_s": {
+        "median": 111.97,
+        "min": 111.57,
+        "max": 112.17
+      },
+      "decode_mb_s": {
+        "median": 792.51,
+        "min": 792.18,
+        "max": 794.2
+      },
+      "peak_rss_kb": 8084
+    },
+    {
+      "codec": "deflate:1",
+      "group": "size-1G",
+      "files": 1,
+      "chunks": 1024,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 1073741824,
+      "stored_bytes": 740145977,
+      "raw_fallback_chunks": 309,
+      "encode_mb_s": {
+        "median": 124.93,
+        "min": 124.82,
+        "max": 125.17
+      },
+      "decode_mb_s": {
+        "median": 728.89,
+        "min": 726.81,
+        "max": 730.92
+      },
+      "peak_rss_kb": 8084
+    },
+    {
+      "codec": "deflate:1",
+      "group": "size-1M",
+      "files": 1,
+      "chunks": 1,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 1048576,
+      "stored_bytes": 644439,
+      "raw_fallback_chunks": 0,
+      "encode_mb_s": {
+        "median": 130.25,
+        "min": 129.97,
+        "max": 136.28
+      },
+      "decode_mb_s": {
+        "median": 445.76,
+        "min": 427.29,
+        "max": 447.64
+      },
+      "peak_rss_kb": 8084
+    },
+    {
+      "codec": "deflate:1",
+      "group": "size-500M",
+      "files": 1,
+      "chunks": 500,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 524288000,
+      "stored_bytes": 361546233,
+      "raw_fallback_chunks": 147,
+      "encode_mb_s": {
+        "median": 124.63,
+        "min": 123.9,
+        "max": 124.68
+      },
+      "decode_mb_s": {
+        "median": 711.21,
+        "min": 706.0,
+        "max": 711.74
+      },
+      "peak_rss_kb": 8084
+    },
+    {
+      "codec": "deflate:6",
+      "group": "size-100M",
+      "files": 1,
+      "chunks": 100,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 104857600,
+      "stored_bytes": 58949784,
+      "raw_fallback_chunks": 32,
+      "encode_mb_s": {
+        "median": 37.4,
+        "min": 37.35,
+        "max": 37.48
+      },
+      "decode_mb_s": {
+        "median": 986.25,
+        "min": 983.64,
+        "max": 986.95
+      },
+      "peak_rss_kb": 8160
+    },
+    {
+      "codec": "deflate:6",
+      "group": "size-10M",
+      "files": 1,
+      "chunks": 10,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 10485760,
+      "stored_bytes": 6611117,
+      "raw_fallback_chunks": 4,
+      "encode_mb_s": {
+        "median": 41.35,
+        "min": 41.12,
+        "max": 41.36
+      },
+      "decode_mb_s": {
+        "median": 981.35,
+        "min": 972.11,
+        "max": 988.98
+      },
+      "peak_rss_kb": 8160
+    },
+    {
+      "codec": "deflate:6",
+      "group": "size-1G",
+      "files": 1,
+      "chunks": 1024,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 1073741824,
+      "stored_bytes": 586446356,
+      "raw_fallback_chunks": 309,
+      "encode_mb_s": {
+        "median": 37.84,
+        "min": 37.73,
+        "max": 37.85
+      },
+      "decode_mb_s": {
+        "median": 980.81,
+        "min": 980.6,
+        "max": 981.66
+      },
+      "peak_rss_kb": 8160
+    },
+    {
+      "codec": "deflate:6",
+      "group": "size-1M",
+      "files": 1,
+      "chunks": 1,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 1048576,
+      "stored_bytes": 452974,
+      "raw_fallback_chunks": 0,
+      "encode_mb_s": {
+        "median": 43.1,
+        "min": 42.98,
+        "max": 43.13
+      },
+      "decode_mb_s": {
+        "median": 523.88,
+        "min": 523.61,
+        "max": 524.4
+      },
+      "peak_rss_kb": 8160
+    },
+    {
+      "codec": "deflate:6",
+      "group": "size-500M",
+      "files": 1,
+      "chunks": 500,
+      "chunk_size": 1048576,
+      "runs": 3,
+      "input_bytes": 524288000,
+      "stored_bytes": 286374260,
+      "raw_fallback_chunks": 147,
+      "encode_mb_s": {
+        "median": 38.25,
+        "min": 38.19,
+        "max": 38.31
+      },
+      "decode_mb_s": {
+        "median": 942.57,
+        "min": 940.6,
+        "max": 944.1
+      },
+      "peak_rss_kb": 8160
+    }
+  ],
+  "presets": [
+    {
+      "target": "size-1M",
+      "preset": "fast",
+      "input_bytes": 1048576,
+      "archive_bytes": 437283,
+      "create_seconds": {
+        "median": 0.009093277999454585,
+        "min": 0.008583303999330383,
+        "max": 0.009603251999578788
+      },
+      "extract_seconds": {
+        "median": 0.005920601998695929,
+        "min": 0.005834275998495286,
+        "max": 0.006006927998896572
+      },
+      "create_peak_rss_kb": 7648,
+      "extract_peak_rss_kb": 6848
+    },
+    {
+      "target": "size-1M",
+      "preset": "balanced",
+      "input_bytes": 1048576,
+      "archive_bytes": 436291,
+      "create_seconds": {
+        "median": 0.01350027050011704,
+        "min": 0.013463745000990457,
+        "max": 0.013536795999243623
+      },
+      "extract_seconds": {
+        "median": 0.006336336500680773,
+        "min": 0.0063319000000774395,
+        "max": 0.006340773001284106
+      },
+      "create_peak_rss_kb": 8424,
+      "extract_peak_rss_kb": 6656
+    },
+    {
+      "target": "size-1M",
+      "preset": "small",
+      "input_bytes": 1048576,
+      "archive_bytes": 286998,
+      "create_seconds": {
+        "median": 0.32980557949940703,
+        "min": 0.3292878739994194,
+        "max": 0.3303232849993947
+      },
+      "extract_seconds": {
+        "median": 0.007374389499091194,
+        "min": 0.00725956399946881,
+        "max": 0.007489214998713578
+      },
+      "create_peak_rss_kb": 24360,
+      "extract_peak_rss_kb": 6660
+    },
+    {
+      "target": "size-10M",
+      "preset": "fast",
+      "input_bytes": 10485760,
+      "archive_bytes": 4905240,
+      "create_seconds": {
+        "median": 0.03820622000057483,
+        "min": 0.03774975899978017,
+        "max": 0.03866268100136949
+      },
+      "extract_seconds": {
+        "median": 0.02052974200069002,
+        "min": 0.020423547000973485,
+        "max": 0.020635937000406557
+      },
+      "create_peak_rss_kb": 7840,
+      "extract_peak_rss_kb": 7616
+    },
+    {
+      "target": "size-10M",
+      "preset": "balanced",
+      "input_bytes": 10485760,
+      "archive_bytes": 4142864,
+      "create_seconds": {
+        "median": 0.06066137800007709,
+        "min": 0.06034974499925738,
+        "max": 0.060973011000896804
+      },
+      "extract_seconds": {
+        "median": 0.0217977799993605,
+        "min": 0.0217873330002476,
+        "max": 0.0218082269984734
+      },
+      "create_peak_rss_kb": 8412,
+      "extract_peak_rss_kb": 7200
+    },
+    {
+      "target": "size-10M",
+      "preset": "small",
+      "input_bytes": 10485760,
+      "archive_bytes": 3419599,
+      "create_seconds": {
+        "median": 2.286703235999994,
+        "min": 2.249190432999967,
+        "max": 2.324216039000021
+      },
+      "extract_seconds": {
+        "median": 0.025409090500033926,
+        "min": 0.024939029999586637,
+        "max": 0.025879151000481215
+      },
+      "create_peak_rss_kb": 24544,
+      "extract_peak_rss_kb": 7232
+    },
+    {
+      "target": "size-100M",
+      "preset": "fast",
+      "input_bytes": 104857600,
+      "archive_bytes": 48213338,
+      "create_seconds": {
+        "median": 0.3694094455004233,
+        "min": 0.36890049199973873,
+        "max": 0.3699183990011079
+      },
+      "extract_seconds": {
+        "median": 0.17062483550125762,
+        "min": 0.1702134750012192,
+        "max": 0.17103619600129605
+      },
+      "create_peak_rss_kb": 7840,
+      "extract_peak_rss_kb": 8064
+    },
+    {
+      "target": "size-100M",
+      "preset": "balanced",
+      "input_bytes": 104857600,
+      "archive_bytes": 43997015,
+      "create_seconds": {
+        "median": 0.5956439985011457,
+        "min": 0.5911983630012401,
+        "max": 0.6000896340010513
+      },
+      "extract_seconds": {
+        "median": 0.1851990900004239,
+        "min": 0.18438932200115232,
+        "max": 0.18600885799969546
+      },
+      "create_peak_rss_kb": 8608,
+      "extract_peak_rss_kb": 8388
+    },
+    {
+      "target": "size-100M",
+      "preset": "small",
+      "input_bytes": 104857600,
+      "archive_bytes": 36793341,
+      "create_seconds": {
+        "median": 26.577085390500542,
+        "min": 26.571700004000377,
+        "max": 26.582470777000708
+      },
+      "extract_seconds": {
+        "median": 0.1968719010001223,
+        "min": 0.19661753800028237,
+        "max": 0.19712626399996225
+      },
+      "create_peak_rss_kb": 24680,
+      "extract_peak_rss_kb": 8256
+    },
+    {
+      "target": "size-500M",
+      "preset": "fast",
+      "input_bytes": 524288000,
+      "archive_bytes": 242866398,
+      "create_seconds": {
+        "median": 1.8822081650005202,
+        "min": 1.874455332999787,
+        "max": 1.8899609970012534
+      },
+      "extract_seconds": {
+        "median": 0.8365331004997643,
+        "min": 0.8306271029996424,
+        "max": 0.8424390979998861
+      },
+      "create_peak_rss_kb": 8032,
+      "extract_peak_rss_kb": 8528
+    },
+    {
+      "target": "size-500M",
+      "preset": "balanced",
+      "input_bytes": 524288000,
+      "archive_bytes": 224388512,
+      "create_seconds": {
+        "median": 3.0350353920002817,
+        "min": 3.034554637000838,
+        "max": 3.0355161469997256
+      },
+      "extract_seconds": {
+        "median": 0.9108642589999363,
+        "min": 0.9098935999991227,
+        "max": 0.9118349180007499
+      },
+      "create_peak_rss_kb": 8608,
+      "extract_peak_rss_kb": 8324
+    },
+    {
+      "target": "size-500M",
+      "preset": "small",
+      "input_bytes": 524288000,
+      "archive_bytes": 187221179,
+      "create_seconds": {
+        "median": 137.43926236649986,
+        "min": 137.10046366999995,
+        "max": 137.77806106299977
+      },
+      "extract_seconds": {
+        "median": 0.9960591125000064,
+        "min": 0.9803562600009172,
+        "max": 1.0117619649990957
+      },
+      "create_peak_rss_kb": 24744,
+      "extract_peak_rss_kb": 8600
+    },
+    {
+      "target": "size-1G",
+      "preset": "fast",
+      "input_bytes": 1073741824,
+      "archive_bytes": 503202772,
+      "create_seconds": {
+        "median": 3.864974787000392,
+        "min": 3.821649219000392,
+        "max": 3.9083003550003923
+      },
+      "extract_seconds": {
+        "median": 1.692956155000502,
+        "min": 1.692126604000805,
+        "max": 1.6937857060001988
+      },
+      "create_peak_rss_kb": 8232,
+      "extract_peak_rss_kb": 8500
+    },
+    {
+      "target": "size-1G",
+      "preset": "balanced",
+      "input_bytes": 1073741824,
+      "archive_bytes": 464598811,
+      "create_seconds": {
+        "median": 6.060452034500486,
+        "min": 6.059527311999773,
+        "max": 6.061376757001199
+      },
+      "extract_seconds": {
+        "median": 1.8445970969996779,
+        "min": 1.8347965869998006,
+        "max": 1.8543976069995551
+      },
+      "create_peak_rss_kb": 8992,
+      "extract_peak_rss_kb": 8464
+    },
+    {
+      "target": "size-1G",
+      "preset": "small",
+      "input_bytes": 1073741824,
+      "archive_bytes": 391557464,
+      "create_seconds": {
+        "median": 282.6087853424997,
+        "min": 282.5136560209994,
+        "max": 282.70391466399997
+      },
+      "extract_seconds": {
+        "median": 1.9543233379999947,
+        "min": 1.952894471000036,
+        "max": 1.9557522049999534
+      },
+      "create_peak_rss_kb": 25120,
+      "extract_peak_rss_kb": 8272
+    },
+    {
+      "target": "all",
+      "preset": "fast",
+      "input_bytes": 1714423176,
+      "archive_bytes": 799624593,
+      "create_seconds": {
+        "median": 6.129593220000061,
+        "min": 6.122295627999847,
+        "max": 6.136890812000274
+      },
+      "extract_seconds": {
+        "median": 2.704513987999235,
+        "min": 2.702848709999671,
+        "max": 2.7061792659987987
+      },
+      "create_peak_rss_kb": 8416,
+      "extract_peak_rss_kb": 8488
+    },
+    {
+      "target": "all",
+      "preset": "balanced",
+      "input_bytes": 1714423176,
+      "archive_bytes": 737563052,
+      "create_seconds": {
+        "median": 9.745403930000066,
+        "min": 9.745295275000899,
+        "max": 9.745512584999233
+      },
+      "extract_seconds": {
+        "median": 2.9713800199988327,
+        "min": 2.951096023998616,
+        "max": 2.9916640159990493
+      },
+      "create_peak_rss_kb": 9128,
+      "extract_peak_rss_kb": 8876
+    },
+    {
+      "target": "all",
+      "preset": "small",
+      "input_bytes": 1714423176,
+      "archive_bytes": 619278108,
+      "create_seconds": {
+        "median": 448.49640897000063,
+        "min": 448.3201591870002,
+        "max": 448.6726587530011
+      },
+      "extract_seconds": {
+        "median": 3.176332574999833,
+        "min": 3.126666225000008,
+        "max": 3.225998924999658
+      },
+      "create_peak_rss_kb": 25320,
+      "extract_peak_rss_kb": 8644
+    }
+  ]
+}
