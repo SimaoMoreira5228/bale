@@ -63,6 +63,7 @@ Result<WriteSummary> Writer::compact(File file, Reader& source, bool durable) {
     options.limits = source.options_.limits;
     options.durable = durable;
     options.compression.codec = CodecId::Raw;
+    options.workers = 1;
     auto created = create(std::move(file), options);
     if (!created) {
         return std::unexpected(created.error());

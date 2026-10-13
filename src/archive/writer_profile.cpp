@@ -112,7 +112,8 @@ bool WriterMetadata::empty() const {
 WriterMetadata describeWriter(
     std::string_view name,
     const CompressionProfile& compression,
-    std::uint32_t chunkSize
+    std::uint32_t chunkSize,
+    std::uint32_t workers
 ) {
     WriterMetadata metadata;
     metadata.name = name;
@@ -123,7 +124,7 @@ WriterMetadata describeWriter(
     metadata.level = compression.level;
     metadata.chunkPolicy = static_cast<std::uint64_t>(ChunkPolicy::Fixed);
     metadata.chunkSize = chunkSize;
-    metadata.workers = 1;
+    metadata.workers = workers;
     return metadata;
 }
 

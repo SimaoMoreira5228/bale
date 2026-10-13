@@ -61,7 +61,8 @@ struct WriterMetadata {
 [[nodiscard]] WriterMetadata describeWriter(
     std::string_view name,
     const CompressionProfile& compression,
-    std::uint32_t chunkSize
+    std::uint32_t chunkSize,
+    std::uint32_t workers
 );
 
 [[nodiscard]] Result<void> encodeWriterMetadata(

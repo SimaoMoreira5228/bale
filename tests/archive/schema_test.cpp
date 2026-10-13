@@ -92,7 +92,7 @@ Manifest goldenManifest() {
         },
     };
     manifest.comment = "hi";
-    manifest.writer = describeWriter("bale", profileFor(Preset::Small), 65536);
+    manifest.writer = describeWriter("bale", profileFor(Preset::Small), 65536, 1);
     return manifest;
 }
 

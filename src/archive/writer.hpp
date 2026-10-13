@@ -1,7 +1,6 @@
 #pragma once
 
 #include "archive/chunk.hpp"
-#include "archive/chunk_codec.hpp"
 #include "archive/index.hpp"
 #include "archive/manifest.hpp"
 #include "archive/writer_profile.hpp"
@@ -14,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -23,6 +23,13 @@
 namespace bale::archive {
 
 class Reader;
+class ChunkPipeline;
+struct ChunkSlot;
+struct PipelineEvent;
+
+inline constexpr std::uint32_t maxWorkers = 64;
+
+[[nodiscard]] std::uint32_t defaultWorkers();
 
 struct EntryAttributes {
     std::optional<std::int64_t> mtimeNanoseconds{};
@@ -37,6 +44,7 @@ struct WriterOptions {
     std::string_view comment;
     Limits limits;
     bool durable = false;
+    std::uint32_t workers = defaultWorkers();
 };
 
 struct SkippedPath {
@@ -60,6 +68,10 @@ class Writer {
     [[nodiscard]] static Result<Writer> append(File file, const WriterOptions& options = {});
     [[nodiscard]] static Result<WriteSummary>
     compact(File file, Reader& source, bool durable = false);
+
+    Writer(Writer&& other) noexcept;
+    Writer& operator=(Writer&& other) noexcept;
+    ~Writer();
 
     [[nodiscard]] Result<void>
     addDirectory(std::string_view path, const EntryAttributes& attributes = {});
@@ -132,11 +144,15 @@ class Writer {
 
     Writer(File file, const WriterOptions& options);
 
+    [[nodiscard]] static Result<void> checkOptions(const WriterOptions& options);
+    [[nodiscard]] static Result<void> checkAttributes(const EntryAttributes& attributes);
+    [[nodiscard]] Result<void> startPipeline();
     [[nodiscard]] Result<void> check() const;
     [[nodiscard]] Result<void> poison(const Error& error);
     [[nodiscard]] NameRef storeName(std::string_view path);
     [[nodiscard]] Result<PendingEntry*> beginEntry(std::string_view path, EntryKind kind);
     [[nodiscard]] Result<void> appendRaw(std::span<const std::byte> data);
+    [[nodiscard]] Result<void> flushOutput();
     [[nodiscard]] Result<RecordSpan> writeRecord(
         RecordType type,
         std::span<const std::byte> head,
@@ -144,7 +160,12 @@ class Writer {
         CodecId codec = CodecId::Raw,
         std::uint64_t decodedLength = 0
     );
-    [[nodiscard]] Result<void> storeChunk(std::span<const std::byte> chunk);
+    [[nodiscard]] Result<ChunkSlot*> acquireSlot();
+    [[nodiscard]] Result<void> submitChunk(std::size_t size);
+    [[nodiscard]] Result<void> pump(bool drain);
+    [[nodiscard]] Result<void> handle(const PipelineEvent& event);
+    [[nodiscard]] Result<void> appendChunk(ChunkSlot& slot);
+    [[nodiscard]] Result<void> failInOrder(const Error& error);
     [[nodiscard]] std::string_view nameAt(std::size_t offset, std::size_t size) const;
     [[nodiscard]] Result<void> sortEntries();
     [[nodiscard]] Result<void> resolveHardLinks();
@@ -166,8 +187,8 @@ class Writer {
     Blake3Digest previousCommit_{};
     std::uint64_t previousFooterOffset_ = 0;
     std::optional<WriterMetadata> inheritedWriter_;
-    std::vector<std::byte> buffer_;
-    ChunkEncoder chunkEncoder_;
+    std::unique_ptr<ChunkPipeline> pipeline_;
+    std::vector<std::byte> output_;
     std::vector<std::byte> descriptor_;
     std::vector<std::byte> payload_;
     std::string names_;
