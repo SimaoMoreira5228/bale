@@ -9,7 +9,9 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace bale;
@@ -132,4 +134,121 @@ TEST_CASE("zstd writing compresses useful chunks and keeps incompressible chunks
     auto damagedReader = openBytes(corrupted);
     REQUIRE(damagedReader);
     CHECK_FALSE(damagedReader->loadChunk(compressedEntry->key));
+}
+
+TEST_CASE("an archive mixing raw, zstd and lz4 chunks verifies and streams every file") {
+    TempPath temp;
+    WriterOptions options;
+    options.chunkSize = minChunkSize;
+    options.compression.codec = CodecId::Zstd;
+    std::string text(minChunkSize, 't');
+    std::string incompressible = noise(minChunkSize);
+    {
+        auto file = File::createNew(temp.path());
+        REQUIRE(file);
+        auto writer = Writer::create(std::move(*file), options);
+        REQUIRE(writer);
+        REQUIRE(writer->addBytes("text", bytesOf(text)));
+        REQUIRE(writer->addBytes("noise", bytesOf(incompressible)));
+        REQUIRE(writer->finish());
+    }
+
+    options.compression.codec = CodecId::Lz4;
+    options.compression.level = 9;
+    std::string spread;
+    for (std::size_t index = 0; index < 3 * minChunkSize + 1; ++index) {
+        spread.push_back(static_cast<char>('a' + (index * 7) % 26));
+    }
+    {
+        auto file = File::openAppend(temp.path());
+        REQUIRE(file);
+        auto writer = Writer::append(std::move(*file), options);
+        REQUIRE(writer);
+        REQUIRE(writer->addBytes("text", bytesOf(text)));
+        REQUIRE(writer->addBytes("noise", bytesOf(incompressible)));
+        REQUIRE(writer->addBytes("spread", bytesOf(spread)));
+        REQUIRE(writer->finish());
+    }
+
+    auto readFile = File::openRead(temp.path());
+    REQUIRE(readFile);
+    auto reader = Reader::open(std::move(*readFile));
+    REQUIRE(reader);
+    CHECK(std::ranges::count(reader->index(), CodecId::Zstd, &IndexEntry::codec) == 1);
+    CHECK(std::ranges::count(reader->index(), CodecId::Raw, &IndexEntry::codec) == 2);
+    CHECK(std::ranges::count(reader->index(), CodecId::Lz4, &IndexEntry::codec) == 3);
+    CHECK(reader->verify(VerifyMode::Content));
+
+    for (auto [name, expected] : {
+             std::pair{"text", &text},
+             std::pair{"noise", &incompressible},
+             std::pair{"spread", &spread},
+         }) {
+        auto entry = findEntry(reader->manifest().entries, name);
+        REQUIRE(entry != nullptr);
+        CHECK(contents(*reader, *entry) == *expected);
+    }
+}
+
+TEST_CASE("the reader rejects hostile lz4 chunks behind a valid record checksum") {
+    TempPath temp;
+    WriterOptions options;
+    options.chunkSize = minChunkSize;
+    options.compression.codec = CodecId::Lz4;
+    options.compression.level = 0;
+    std::string text(minChunkSize, 'x');
+    {
+        auto file = File::createNew(temp.path());
+        REQUIRE(file);
+        auto writer = Writer::create(std::move(*file), options);
+        REQUIRE(writer);
+        REQUIRE(writer->addBytes("text", bytesOf(text)));
+        REQUIRE(writer->finish());
+    }
+
+    auto original = readAll(temp.path());
+    auto readFile = File::openRead(temp.path());
+    REQUIRE(readFile);
+    auto reader = Reader::open(std::move(*readFile));
+    REQUIRE(reader);
+    REQUIRE(reader->index().size() == 1);
+    const IndexEntry entry = reader->index().front();
+    REQUIRE(entry.codec == CodecId::Lz4);
+
+    auto payloadOffset = entry.recordOffset + recordPrefixSize;
+    auto payload = std::span(original).subspan(
+        static_cast<std::size_t>(payloadOffset),
+        static_cast<std::size_t>(entry.recordLength - recordFramingSize)
+    );
+    auto data = decodeDataPayload(payload, payloadOffset);
+    REQUIRE(data);
+    auto frameAt = static_cast<std::size_t>(payloadOffset + data->descriptorSize);
+    auto frameSize = data->encoded.size();
+
+    auto rejects = [&](auto damage) {
+        auto bytes = original;
+        damage(std::span(bytes).subspan(frameAt, frameSize));
+        rewriteCrc(bytes, entry.recordOffset, entry.recordLength);
+        auto damaged = openBytes(bytes);
+        REQUIRE(damaged);
+        CHECK_FALSE(damaged->loadChunk(entry.key));
+        CHECK_FALSE(damaged->verify(VerifyMode::Content));
+    };
+
+    // NOTE: 0x58 and 0x45 are the LZ4 header checksums for content sizes 4096 and 4097.
+    REQUIRE(loadLe<std::uint64_t>(original.data() + frameAt + 6) == minChunkSize);
+    REQUIRE(original[frameAt + 14] == std::byte{0x58});
+    rejects([](std::span<std::byte> frame) {
+        storeLe(frame.data() + 6, std::uint64_t{minChunkSize + 1});
+        frame[14] = std::byte{0x45};
+    });
+    rejects([](std::span<std::byte> frame) {
+        frame[4] |= std::byte{0x10};
+    });
+    rejects([](std::span<std::byte> frame) {
+        std::ranges::fill(frame.subspan(15), std::byte{0xFF});
+    });
+    rejects([](std::span<std::byte> frame) {
+        std::ranges::fill(frame, std::byte{0x00});
+    });
 }

@@ -11,16 +11,17 @@ include(${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake)
 
 add_executable(bale_tests
     archive/archive_test.cpp
+    archive/compression_test.cpp
     archive/schema_test.cpp
     archive/snapshot_test.cpp
     archive/tree_walk_test.cpp
-    archive/zstd_test.cpp
     base/checked_test.cpp
     checksum/blake3_test.cpp
     checksum/crc_test.cpp
     cli/single_file_test.cpp
     cli/terminal_text_test.cpp
     codecs/decoders_test.cpp
+    codecs/lz4_frame_test.cpp
     extract/extractor_test.cpp
     format/envelope_test.cpp
     format/tlv_test.cpp
@@ -52,6 +53,7 @@ target_link_libraries(bale_tests PRIVATE
     bale_formats_zstd
     bale_io
     bale_security
+    bale_lz4
     bale_warnings
     bale_zlib_ng
     bale_zstd

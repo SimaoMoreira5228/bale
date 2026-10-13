@@ -23,14 +23,17 @@ namespace {
 
 using bale::cli::ExitCode;
 
+constexpr std::int32_t defaultZstdLevel = 3;
+constexpr std::int32_t defaultLz4Level = 0;
+
 constexpr std::string_view usage = R"(usage: bale <command> [arguments]
 
 commands:
   create <archive.bale> <dir> [options]
       --chunk-size <n>        chunk size in bytes, K or M suffix allowed (default 1M)
       --preset <name>         fast, balanced (default), small, restore-fast or portable
-      --codec <raw|zstd>      explicit chunk codec instead of a preset
-      --level <1-22>          explicit zstd level instead of a preset
+      --codec <raw|zstd|lz4>  explicit chunk codec instead of a preset
+      --level <n>             level for the chosen codec: zstd 1-22, lz4 0-12
       --sync                  flush the archive to disk before writing its footer
   update <archive.bale> <dir> [options]
       append a new snapshot of the directory, reusing unchanged chunks; takes create's options
@@ -109,17 +112,34 @@ std::optional<std::uint32_t> parseSize(std::string_view text) {
 std::optional<std::int32_t> parseLevel(std::string_view text) {
     std::int32_t value = 0;
     auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
-    if (error != std::errc{} || end != text.data() + text.size() || value < 1 || value > 22) {
+    if (error != std::errc{} || end != text.data() + text.size()) {
         return std::nullopt;
     }
     return value;
 }
 
+std::optional<std::string_view> checkLevel(bale::CodecId codec, std::int32_t level) {
+    switch (codec) {
+    case bale::CodecId::Raw:
+        return "--level does not apply to --codec raw";
+    case bale::CodecId::Zstd:
+        if (level < 1 || level > 22) {
+            return "--level must be between 1 and 22 for zstd";
+        }
+        return std::nullopt;
+    case bale::CodecId::Lz4:
+        if (level < 0 || level > 12) {
+            return "--level must be between 0 and 12 for lz4";
+        }
+        return std::nullopt;
+    }
+    return "codec has no levels";
+}
+
 int runCreate(std::span<const std::string_view> arguments, bool update = false) {
     bale::cli::CreateOptions options;
     std::vector<std::string_view> positional;
-    bool explicitCodec = false;
-    bool explicitLevel = false;
+    std::optional<std::int32_t> explicitLevel;
     for (std::size_t index = 0; index < arguments.size(); ++index) {
         std::string_view argument = arguments[index];
         if (argument == "--chunk-size") {
@@ -154,7 +174,7 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
         }
         if (argument == "--codec") {
             if (index + 1 == arguments.size()) {
-                return usageError("--codec needs raw or zstd");
+                return usageError("--codec needs raw, zstd or lz4");
             }
             ++index;
             if (arguments[index] == "raw") {
@@ -162,11 +182,14 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
                 options.compression.level = 0;
             } else if (arguments[index] == "zstd") {
                 options.compression.codec = bale::CodecId::Zstd;
+                options.compression.level = defaultZstdLevel;
+            } else if (arguments[index] == "lz4") {
+                options.compression.codec = bale::CodecId::Lz4;
+                options.compression.level = defaultLz4Level;
             } else {
-                return usageError("--codec must be raw or zstd");
+                return usageError("--codec must be raw, zstd or lz4");
             }
             options.compression.preset.reset();
-            explicitCodec = true;
             continue;
         }
         if (argument == "--level") {
@@ -174,13 +197,10 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
                 return usageError("--level needs a number");
             }
             ++index;
-            auto level = parseLevel(arguments[index]);
-            if (!level) {
-                return usageError("--level must be between 1 and 22");
+            explicitLevel = parseLevel(arguments[index]);
+            if (!explicitLevel) {
+                return usageError("--level needs a number");
             }
-            options.compression.level = *level;
-            options.compression.preset.reset();
-            explicitLevel = true;
             continue;
         }
         if (argument.starts_with('-')) {
@@ -189,11 +209,12 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
         positional.push_back(argument);
     }
 
-    if (explicitLevel && options.compression.codec == bale::CodecId::Raw) {
-        return usageError("--level does not apply to --codec raw");
-    }
-    if (explicitLevel && !explicitCodec) {
-        options.compression.codec = bale::CodecId::Zstd;
+    if (explicitLevel) {
+        if (auto problem = checkLevel(options.compression.codec, *explicitLevel)) {
+            return usageError(*problem);
+        }
+        options.compression.level = *explicitLevel;
+        options.compression.preset.reset();
     }
 
     if (positional.size() != 2) {
