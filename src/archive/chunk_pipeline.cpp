@@ -7,9 +7,6 @@ namespace bale::archive {
 
 namespace {
 
-// PERF: two chunks of ring space per worker keep every worker busy on large files, and sixteen
-// slots per worker let small files queue behind a large chunk instead of stalling the writer; see
-// bench/results/2026-10-18-xeon-e5-2690v3-threads.
 constexpr std::size_t ringChunksPerWorker = 2;
 constexpr std::size_t slotsPerWorker = 16;
 

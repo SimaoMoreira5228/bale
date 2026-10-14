@@ -35,11 +35,8 @@ class CompressedStream {
 
     [[nodiscard]] std::uint64_t outputBytes() const;
 
-    // NOTE: 0 means the end of the stream, with every codec checksum verified.
     [[nodiscard]] Result<std::size_t> read(std::span<std::byte> out);
 
-    // SECURITY: chunks reach the sink before the codec checksums are verified; output is untrusted
-    // until the call returns success.
     template <ChunkSink Sink>
     [[nodiscard]] Result<void> readAll(std::span<std::byte> scratch, Sink&& sink) {
         while (true) {

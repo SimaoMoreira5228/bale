@@ -58,7 +58,6 @@ Result<void> checkUtf8(std::string_view text) {
     std::size_t i = 0;
 
     while (i < size) {
-        // PERF: names are overwhelmingly ASCII, so skip eight bytes at a time while possible.
         while (size - i >= 8 && (loadLe<std::uint64_t>(bytes + i) & 0x8080808080808080) == 0) {
             i += 8;
         }

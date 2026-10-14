@@ -44,7 +44,6 @@ struct DosDateTime {
     std::uint8_t second = 0;
 };
 
-// NOTE: DOS timestamps carry no time zone, so they are decoded to fields, never to unix time.
 [[nodiscard]] DosDateTime decodeDosDateTime(std::uint16_t date, std::uint16_t time);
 
 struct Entry {
@@ -127,8 +126,6 @@ class Reader {
 
     [[nodiscard]] Result<std::uint64_t> dataOffset(const Entry& entry) const;
 
-    // SECURITY: chunks reach the sink before the CRC-32 is known; output is untrusted until the
-    // call returns success.
     template <ChunkSink Sink>
     [[nodiscard]] Result<void>
     streamEntry(const Entry& entry, std::span<std::byte> scratch, Sink&& sink) {
@@ -190,7 +187,6 @@ class Reader {
     bool zip64_ = false;
 };
 
-// NOTE: head is the start of the file and tail its last bytes ending at EOF (up to maxEndSearch).
 [[nodiscard]] bool looksLikeZip(std::span<const std::byte> head, std::span<const std::byte> tail);
 
 }

@@ -10,8 +10,6 @@
 
 namespace bale {
 
-// SECURITY: slots are placed by a randomly keyed SipHash so hostile names cannot force long probe
-// chains.
 class CaseFoldSet {
   public:
     CaseFoldSet();

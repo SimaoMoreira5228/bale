@@ -19,8 +19,7 @@ enum class HashDomain : std::uint8_t {
     Commit,
 };
 
-// NOTE: these BLAKE3 derive-key contexts are part of the wire format; changing one changes every
-// digest of that kind. They follow the BLAKE3 "[application] [date] [purpose]" convention.
+// NOTE: these contexts are part of the wire format; changing one changes every digest of that kind.
 [[nodiscard]] constexpr std::string_view hashContext(HashDomain domain) {
     switch (domain) {
     case HashDomain::Chunk:
@@ -48,8 +47,6 @@ class Blake3 {
     [[nodiscard]] static Blake3Digest of(HashDomain domain, std::span<const std::byte> data);
 
   private:
-    // NOTE: opaque storage for blake3_hasher so blake3.h stays out of our headers; blake3.cpp
-    // checks the size and alignment at compile time.
     alignas(8) std::array<std::byte, 1920> state_{};
 };
 

@@ -219,8 +219,6 @@ constexpr std::string_view hardwareKernelName = "armv8-crc";
 
 #endif
 
-// PERF: the CRC instruction has a latency of about three words but issues one per cycle, so three
-// independent streams keep it busy; the streams are joined by appending zeros to the earlier ones.
 template <std::size_t Block>
 BALE_CRC32C_TARGET inline std::uint32_t
 crc32cThreeWay(std::uint32_t state, const std::byte*& cursor, std::size_t& length) {

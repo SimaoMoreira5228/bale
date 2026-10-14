@@ -31,8 +31,6 @@ class FileInput {
         pending_ = pending_.subspan(count);
     }
 
-    // NOTE: reads until at least `minimum` bytes (capped at the buffer size) are pending or the
-    // file ends; reaching the end is not an error.
     [[nodiscard]] Result<void> fill(std::size_t minimum);
 
   private:

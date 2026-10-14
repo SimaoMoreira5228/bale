@@ -72,7 +72,6 @@ class Reader {
         return fileSize_ - footerOffset_ - footerSize;
     }
 
-    // NOTE: the returned span lives in a buffer reused by the next call.
     [[nodiscard]] Result<std::span<const std::byte>> loadChunk(const ChunkKey& key);
 
     template <ChunkSink Sink>

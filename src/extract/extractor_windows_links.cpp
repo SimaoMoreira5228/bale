@@ -137,8 +137,6 @@ Result<EntryResult> Extractor::createSymlink(
         return std::unexpected(reparseSize.error());
     }
 
-    // NOTE: Windows links are typed as file or directory links when created. The type follows
-    // what the target is now; a target extracted later than its link gets a file link.
     auto resolved = resolveTarget(path.path, *normalized, component_);
     bool directory = resolved.empty();
     if (!directory) {
@@ -247,8 +245,6 @@ Extractor::createHardLink(const ArchivePath& path, const ArchivePath& existingPa
         return std::unexpected(sourceName.error());
     }
 
-    // SECURITY: the link is made from this handle, so the file checked below is the file linked;
-    // a name swapped after the open cannot redirect it.
     auto opened = openRelative(
         sourceParent->get(),
         *sourceName,
@@ -288,9 +284,8 @@ Extractor::createHardLink(const ArchivePath& path, const ArchivePath& existingPa
         return std::unexpected(parent.error());
     }
 
-    // WORKAROUND: Wine renames with POSIX semantics, where renaming one link of a file over
-    // another link of the same file succeeds without replacing anything; checking first keeps the
-    // overwrite policy for a repeated link there. The rename still refuses a later collision.
+    // WORKAROUND: Wine silently succeeds when renaming one link of a file over another link of the
+    // same file, so the destination is checked first.
     if (policy_.overwrite != OverwritePolicy::Replace) {
         auto leafName = widen(entry->leaf, wide);
         if (!leafName) {
@@ -340,8 +335,6 @@ Extractor::createHardLink(const ArchivePath& path, const ArchivePath& existingPa
         return statusFailure(ErrorKind::Io, "cannot create hard link", status);
     }
 
-    // SECURITY: the temporary name lives in a directory others may write to, so the name is
-    // reopened and must still be the linked file before it is moved into place.
     auto linked = openRelative(
         parent->get(),
         tempWide,

@@ -77,8 +77,6 @@ Result<std::size_t> Stream::decode(std::span<std::byte> out) {
             return 0;
         }
 
-        // SECURITY: an exhausted budget leaves a one-byte probe window whose output is never passed
-        // on, so a bomb stops after a single byte past the limit.
         auto budget = limits_.maxOutputBytes - outputBytes_;
         auto window = budget == 0
             ? out.first(1)

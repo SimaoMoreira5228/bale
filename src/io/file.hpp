@@ -14,11 +14,8 @@ class File {
     [[nodiscard]] static Result<File> openRead(const std::filesystem::path& path);
     [[nodiscard]] static Result<File> openAppend(const std::filesystem::path& path);
 
-    // SECURITY: refuses symlinks, reparse points and anything else that is not a regular file, so
-    // a path swapped for a link after it was inspected is never followed.
     [[nodiscard]] static Result<File> openRegularNoFollow(const std::filesystem::path& path);
 
-    // SECURITY: fails if the path already exists, so a planted file or symlink is never reused.
     [[nodiscard]] static Result<File> createNew(const std::filesystem::path& path);
 
     File(const File&) = delete;

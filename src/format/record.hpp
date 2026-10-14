@@ -18,7 +18,6 @@ enum class RecordType : std::uint8_t {
     Extension = 5,
 };
 
-// NOTE: matches the wire width so unregistered codec IDs survive framing for later rejection.
 // NOTE: each ID names one exact stream per chunk: Zstd is one zstd frame; Lz4 is one LZ4 frame
 // (frame format v1.6.x) with independent blocks, the content size and no checksums or dictionary.
 // NOLINTNEXTLINE(performance-enum-size)

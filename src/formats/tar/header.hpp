@@ -38,7 +38,6 @@ struct Limits {
     std::uint64_t maxEntries = 10'000'000;
 };
 
-// NOTE: the string views point into the parsed block and are only valid while it is.
 struct Header {
     std::string_view name;
     std::string_view prefix;
@@ -94,7 +93,6 @@ parseNumber(std::span<const std::byte> field, std::uint64_t offset);
 
 [[nodiscard]] std::optional<std::uint64_t> paddedSize(std::uint64_t size);
 
-// NOTE: records are applied in order onto `values`; an empty value removes that key from it.
 [[nodiscard]] Result<void> parsePaxRecords(
     std::string_view data,
     std::uint64_t offset,

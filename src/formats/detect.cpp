@@ -17,8 +17,6 @@ namespace {
 
 constexpr std::size_t sniffChunkBytes = std::size_t{4} << 10;
 
-// NOTE: decompresses at most one tar block; anything that fails to decode that far, short of an
-// I/O error, is left for the real reader to report and counts as a single compressed file.
 Result<Container> sniffCompressed(const File& file, Compression compression) {
     auto copy = file.duplicate();
     if (!copy) {

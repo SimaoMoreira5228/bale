@@ -49,7 +49,6 @@ inline std::vector<std::byte> deflateRaw(std::string_view text) {
     return deflateRaw(std::as_bytes(std::span(text.data(), text.size())));
 }
 
-// NOTE: one gzip member with an optional FNAME; GNU gzip writes the same layout.
 inline std::vector<std::byte>
 gzipMember(std::span<const std::byte> data, std::string_view name = {}, std::uint32_t mtime = 0) {
     std::vector<std::byte> out{
@@ -79,8 +78,6 @@ gzipMember(std::span<const std::byte> data, std::string_view name = {}, std::uin
     return out;
 }
 
-// NOTE: the size is never pledged, so the frame header carries the full window instead of a
-// window shrunk to the content size.
 inline std::vector<std::byte> zstdCompress(std::span<const std::byte> data, int windowLog) {
     ZSTD_CCtx* context = ZSTD_createCCtx();
     ZSTD_CCtx_setParameter(context, ZSTD_c_windowLog, windowLog);

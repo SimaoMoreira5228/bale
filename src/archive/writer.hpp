@@ -49,7 +49,6 @@ struct WriterOptions {
 
 struct SkippedPath {
     std::string path;
-    // NOTE: a string literal.
     std::string_view reason;
 };
 
@@ -61,7 +60,6 @@ struct WriteSummary {
     std::uint64_t archiveSize = 0;
 };
 
-// NOTE: never seeks or queries the file position, so the output can later be a pipe.
 class Writer {
   public:
     [[nodiscard]] static Result<Writer> create(File file, const WriterOptions& options = {});

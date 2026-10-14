@@ -37,18 +37,12 @@ struct Entry {
     char typeflag = '0';
 };
 
-// NOTE: offsets count bytes of the tar data, which for a compressed archive is the decompressed
-// stream.
 class Reader {
   public:
     explicit Reader(Source source, const Limits& limits = {}) :
         source_(std::move(source)), limits_(limits) {
     }
 
-    // NOTE: returns nullptr at the end of the archive, after a compressed source was drained and
-    // verified. The entry and its string views stay valid only until the next call to next() or
-    // until the reader is moved or destroyed. After an error every later call returns the same
-    // error.
     [[nodiscard]] Result<const Entry*> next();
 
     template <ChunkSink Sink>

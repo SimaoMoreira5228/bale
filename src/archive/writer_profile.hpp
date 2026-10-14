@@ -44,8 +44,6 @@ enum class ChunkPolicy : std::uint8_t {
 
 [[nodiscard]] std::optional<Preset> parsePreset(std::string_view name);
 
-// NOTE: advisory metadata a reader never needs for decoding. Values are kept as stored, so a
-// preset or chunk policy added by a later writer is shown as unknown instead of rejected.
 struct WriterMetadata {
     std::string_view name;
     std::optional<std::uint64_t> preset;

@@ -129,8 +129,6 @@ block(SCOPE_FOR VARIABLES)
     set(LZ4_BUILD_CLI OFF)
     set(LZ4_BUNDLED_MODE ON)
 
-    # NOTE: BLAKE3 picks its SIMD kernels at run time through CPUID, so the default amd64
-    # assembly and NEON builds stay portable; no -march flags are involved.
     set(BLAKE3_USE_TBB OFF)
     set(BLAKE3_FETCH_TBB OFF)
     set(BLAKE3_EXAMPLES OFF)

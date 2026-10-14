@@ -41,11 +41,6 @@ extern "C" NTSTATUS NTAPI NtSetInformationFile(
 
 namespace bale::nt {
 
-// SECURITY: every component is opened with NtCreateFile relative to the handle of its already
-// verified parent, with FILE_OPEN_REPARSE_POINT so junctions and symlinks are opened rather than
-// followed and then refused. No full path is ever resolved after the root, so there is no window
-// in which a swapped component could redirect the walk.
-
 using WideName = std::array<wchar_t, maxLeafBytes + 1>;
 
 inline constexpr NTSTATUS statusNameNotFound = static_cast<NTSTATUS>(0xC0000034L);
