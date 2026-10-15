@@ -2,7 +2,7 @@
 
 #include "base/endian.hpp"
 #include "checksum/crc.hpp"
-#include "codecs/deflate_encoder.hpp"
+#include "codecs/encoders.hpp"
 
 #include <array>
 #include <cstddef>
