@@ -31,6 +31,7 @@ add_executable(bale_tests
     formats/tar/compressed_reader_test.cpp
     formats/tar/header_test.cpp
     formats/tar/reader_test.cpp
+    formats/tar/writer_test.cpp
     formats/zip/reader_test.cpp
     formats/zstd/stream_test.cpp
     io/byte_reader_test.cpp

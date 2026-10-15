@@ -9,32 +9,6 @@ namespace bale::tar {
 
 namespace {
 
-struct Field {
-    std::size_t offset;
-    std::size_t length;
-};
-
-constexpr Field nameField{0, 100};
-constexpr Field modeField{100, 8};
-constexpr Field uidField{108, 8};
-constexpr Field gidField{116, 8};
-constexpr Field sizeField{124, 12};
-constexpr Field mtimeField{136, 12};
-constexpr Field checksumField{148, 8};
-constexpr std::size_t typeflagOffset = 156;
-constexpr Field linkNameField{157, 100};
-constexpr Field magicField{257, 8};
-constexpr Field unameField{265, 32};
-constexpr Field gnameField{297, 32};
-constexpr Field devMajorField{329, 8};
-constexpr Field devMinorField{337, 8};
-constexpr Field prefixField{345, 155};
-
-constexpr std::string_view ustarMagic{
-    "ustar\0"
-    "00",
-    8
-};
 constexpr std::string_view gnuMagic{"ustar  \0", 8};
 
 std::span<const std::byte> bytesOf(Block block, Field field) {
