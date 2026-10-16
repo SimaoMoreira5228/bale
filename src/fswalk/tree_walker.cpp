@@ -348,8 +348,6 @@ Result<bool> TreeWalker::visit(const Child& child) {
         if (found != links_.end()) {
             entry_.kind = WalkKind::HardLink;
             entry_.target = found->second;
-            entry_.mode.reset();
-            entry_.mtimeNanoseconds.reset();
             return true;
         }
     }

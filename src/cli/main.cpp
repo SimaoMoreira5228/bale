@@ -29,15 +29,20 @@ constexpr std::int32_t defaultLz4Level = 0;
 constexpr std::string_view usage = R"(usage: bale <command> [arguments]
 
 commands:
-  create <archive.bale> <dir> [options]
+  create <archive> <dir> [options]
+      --format <name>         bale, zip, tar, tar.gz or tar.zst (default: from the extension)
+      --level <n>             zip 0-9 (0 stores), tar.gz 1-9, tar.zst 1-22, bale: see --codec
+      --sync                  flush the archive to disk before finishing
+    native .bale only:
       --chunk-size <n>        chunk size in bytes, K or M suffix allowed (default 1M)
       --preset <name>         fast, balanced (default), small, restore-fast or portable
       --codec <raw|zstd|lz4>  explicit chunk codec instead of a preset
-      --level <n>             level for the chosen codec: zstd 1-22, lz4 0-12
+      --codec <...> --level   zstd levels 1-22, lz4 levels 0-12
       --threads <1-64>        compression worker threads (default: CPU count, at most 8)
-      --sync                  flush the archive to disk before writing its footer
   update <archive.bale> <dir> [options]
       append a new snapshot of the directory, reusing unchanged chunks; takes create's options
+  convert <input> <output> [--format <name>] [--level <n>]
+      rewrite a bale, zip or tar archive entry by entry in another format
   compact <archive.bale> <output.bale> [--sync]
       write the current snapshot to a new archive and keep the source
   list <archive> [--long]   list entries, --long adds type, size and modification time
@@ -52,7 +57,7 @@ commands:
   context add <path>         create <path>.bale from a file or directory
   context extract-here <archive.bale>
   context extract-folder <archive.bale>
-  formats                   show which formats bale can read
+  formats                   show which formats bale can read and create
   help                      show this message
 )";
 
@@ -151,8 +156,25 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
     bale::cli::CreateOptions options;
     std::vector<std::string_view> positional;
     std::optional<std::int32_t> explicitLevel;
+    std::optional<bale::cli::OutputFormat> explicitFormat;
+    std::string_view nativeOption;
     for (std::size_t index = 0; index < arguments.size(); ++index) {
         std::string_view argument = arguments[index];
+        if (argument == "--chunk-size" || argument == "--threads" || argument == "--preset" ||
+            argument == "--codec") {
+            nativeOption = argument;
+        }
+        if (argument == "--format") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--format needs a name");
+            }
+            ++index;
+            explicitFormat = bale::cli::parseOutputFormat(arguments[index]);
+            if (!explicitFormat) {
+                return usageError("--format must be bale, zip, tar, tar.gz or tar.zst");
+            }
+            continue;
+        }
         if (argument == "--chunk-size") {
             if (index + 1 == arguments.size()) {
                 return usageError("--chunk-size needs a size");
@@ -232,7 +254,37 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
         positional.push_back(argument);
     }
 
-    if (explicitLevel) {
+    if (positional.size() != 2) {
+        return usageError(
+            update ? "update takes an archive and a directory"
+                   : "create takes an archive and a directory"
+        );
+    }
+
+    if (update) {
+        if (explicitFormat) {
+            return usageError("update only appends to .bale archives");
+        }
+    } else {
+        auto format =
+            explicitFormat ? explicitFormat : bale::cli::outputFormatFromName(positional[0]);
+        if (!format) {
+            return usageError("cannot tell the format from the archive name; pass --format");
+        }
+        options.format = *format;
+    }
+
+    if (options.format != bale::cli::OutputFormat::Bale) {
+        if (!nativeOption.empty()) {
+            return usageError("--chunk-size, --threads, --preset and --codec apply only to bale");
+        }
+        if (explicitLevel) {
+            if (auto problem = bale::cli::checkOutputLevel(options.format, *explicitLevel)) {
+                return usageError(*problem);
+            }
+            options.level = explicitLevel;
+        }
+    } else if (explicitLevel) {
         if (auto problem = checkLevel(options.compression.codec, *explicitLevel)) {
             return usageError(*problem);
         }
@@ -240,16 +292,61 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
         options.compression.preset.reset();
     }
 
-    if (positional.size() != 2) {
-        return usageError(
-            update ? "update takes an archive and a directory"
-                   : "create takes an archive and a directory"
-        );
-    }
     if (update) {
         return exitWith(bale::cli::updateArchive(positional[0], positional[1], options));
     }
     return exitWith(bale::cli::createArchive(positional[0], positional[1], options));
+}
+
+int runConvert(std::span<const std::string_view> arguments) {
+    bale::cli::ConvertOptions options;
+    std::optional<bale::cli::OutputFormat> explicitFormat;
+    std::optional<std::int32_t> explicitLevel;
+    std::vector<std::string_view> positional;
+    for (std::size_t index = 0; index < arguments.size(); ++index) {
+        std::string_view argument = arguments[index];
+        if (argument == "--format" || argument == "--level") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--format and --level need a value");
+            }
+            ++index;
+            if (argument == "--format") {
+                explicitFormat = bale::cli::parseOutputFormat(arguments[index]);
+                if (!explicitFormat) {
+                    return usageError("--format must be bale, zip, tar, tar.gz or tar.zst");
+                }
+            } else {
+                explicitLevel = parseLevel(arguments[index]);
+                if (!explicitLevel) {
+                    return usageError("--level needs a number");
+                }
+            }
+            continue;
+        }
+        if (argument.starts_with('-')) {
+            return usageError("unknown option for convert");
+        }
+        positional.push_back(argument);
+    }
+
+    if (positional.size() != 2) {
+        return usageError("convert takes an input archive and a new output path");
+    }
+    auto format = explicitFormat ? explicitFormat : bale::cli::outputFormatFromName(positional[1]);
+    if (!format) {
+        return usageError("cannot tell the format from the output name; pass --format");
+    }
+    options.format = *format;
+    if (explicitLevel) {
+        if (*format == bale::cli::OutputFormat::Bale) {
+            return usageError("convert to bale uses the default profile and takes no --level");
+        }
+        if (auto problem = bale::cli::checkOutputLevel(*format, *explicitLevel)) {
+            return usageError(*problem);
+        }
+        options.level = explicitLevel;
+    }
+    return exitWith(bale::cli::convertArchive(positional[0], positional[1], options));
 }
 
 int runCompact(std::span<const std::string_view> arguments) {
@@ -340,19 +437,35 @@ int runContext(std::span<const std::string_view> arguments) {
     return usageError("unknown context action");
 }
 
-void printFormat(std::string_view format, std::string_view notes) {
-    std::println("{:<8} {:<5} {:<5} {:<8} {}", format, "yes", "yes", "yes", notes);
+void printFormat(std::string_view format, bool create, std::string_view notes) {
+    std::println(
+        "{:<8} {:<5} {:<5} {:<8} {:<7} {}",
+        format,
+        "yes",
+        "yes",
+        "yes",
+        create ? "yes" : "no",
+        notes
+    );
 }
 
 int runFormats() {
-    std::println("{:<8} {:<5} {:<5} {:<8} {}", "format", "list", "test", "extract", "notes");
-    printFormat("zip", "stored and deflate, ZIP64, no encryption");
-    printFormat("tar", "ustar, pax, GNU long names; no sparse files");
-    printFormat("tar.gz", "tar inside gzip, recognized by content; read as one stream");
-    printFormat("tar.zst", "tar inside zstd, recognized by content; read as one stream");
-    printFormat("gzip", "one compressed file, multi-member; named by FNAME or archive name");
-    printFormat("zstd", "one compressed file, multi-frame, window up to 128 MiB");
-    printFormat("bale", "native format, raw and zstd chunks, presets; not frozen");
+    std::println(
+        "{:<8} {:<5} {:<5} {:<8} {:<7} {}",
+        "format",
+        "list",
+        "test",
+        "extract",
+        "create",
+        "notes"
+    );
+    printFormat("zip", true, "stored and deflate, ZIP64, no encryption");
+    printFormat("tar", true, "ustar, pax, GNU long names; no sparse files");
+    printFormat("tar.gz", true, "tar inside gzip, recognized by content; read as one stream");
+    printFormat("tar.zst", true, "tar inside zstd, recognized by content; read as one stream");
+    printFormat("gzip", false, "one compressed file, multi-member; named by FNAME or archive name");
+    printFormat("zstd", false, "one compressed file, multi-frame, window up to 128 MiB");
+    printFormat("bale", true, "native format, raw and zstd chunks, presets; not frozen");
     return exitWith(ExitCode::Ok);
 }
 
@@ -374,6 +487,9 @@ int run(std::span<const std::string_view> argv) {
     }
     if (command == "compact") {
         return runCompact(rest);
+    }
+    if (command == "convert") {
+        return runConvert(rest);
     }
     if (command == "info") {
         if (rest.size() != 1 || rest[0].starts_with('-')) {
