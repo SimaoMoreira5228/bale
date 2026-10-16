@@ -258,4 +258,132 @@ Result<void> Writer::addBytes(
     return {};
 }
 
+Result<void> Writer::beginFile(std::string_view path, const EntryAttributes& attributes) {
+    auto attributesValid = checkAttributes(attributes);
+    if (!attributesValid) {
+        return attributesValid;
+    }
+
+    auto entry = beginEntry(path, EntryKind::Regular);
+    if (!entry) {
+        return std::unexpected(entry.error());
+    }
+    (*entry)->mtimeNanoseconds = attributes.mtimeNanoseconds;
+    (*entry)->mode = attributes.mode;
+    openFile_ = OpenFile{.position = entries_.size() - 1};
+    return {};
+}
+
+Result<void> Writer::writeFile(std::span<const std::byte> data) {
+    auto usable = check();
+    if (!usable) {
+        return usable;
+    }
+    if (!openFile_) {
+        return fail(ErrorKind::Malformed, "no file entry is open");
+    }
+
+    OpenFile& open = *openFile_;
+    while (!data.empty()) {
+        auto slot = acquireSlot();
+        if (!slot) {
+            return std::unexpected(slot.error());
+        }
+
+        std::span<std::byte> buffer = (*slot)->input;
+        auto room = std::min(data.size(), buffer.size() - open.filled);
+        std::ranges::copy(
+            data.first(room),
+            buffer.begin() + static_cast<std::ptrdiff_t>(open.filled)
+        );
+        open.filled += room;
+        open.length += room;
+        data = data.subspan(room);
+
+        if (open.filled == buffer.size()) {
+            open.filled = 0;
+            auto submitted = submitChunk(buffer.size());
+            if (!submitted) {
+                return submitted;
+            }
+        }
+    }
+    return {};
+}
+
+Result<void> Writer::endFile() {
+    auto usable = check();
+    if (!usable) {
+        return usable;
+    }
+    if (!openFile_) {
+        return fail(ErrorKind::Malformed, "no file entry is open");
+    }
+
+    OpenFile open = *openFile_;
+    openFile_.reset();
+    if (open.filled != 0) {
+        auto submitted = submitChunk(open.filled);
+        if (!submitted) {
+            return submitted;
+        }
+    }
+
+    PendingEntry& stored = entries_[open.position];
+    stored.length = open.length;
+    stored.chunkCount = static_cast<std::uint32_t>(chunks_.size() - stored.firstChunk);
+    return {};
+}
+
+Result<void> Writer::addWalked(const WalkEntry& entry) {
+    EntryAttributes attributes{
+        .mtimeNanoseconds = entry.mtimeNanoseconds,
+        .mode = entry.mode,
+    };
+    switch (entry.kind) {
+    case WalkKind::Directory:
+        return addDirectory(entry.path, attributes);
+    case WalkKind::Regular:
+        return addFile(entry.path, *entry.file, attributes);
+    case WalkKind::Symlink:
+        return addSymlink(entry.path, entry.target, attributes);
+    case WalkKind::HardLink:
+        return addHardLink(entry.path, entry.target);
+    }
+    return fail(ErrorKind::Unsupported, "unknown walked entry kind");
+}
+
+Result<void>
+Writer::addTree(const std::filesystem::path& root, const std::filesystem::path& exclude) {
+    auto usable = check();
+    if (!usable) {
+        return usable;
+    }
+
+    WalkOptions walkOptions{
+        .limits = options_.limits,
+        .exclude = exclude,
+    };
+    auto walker = TreeWalker::open(root, walkOptions);
+    if (!walker) {
+        return std::unexpected(walker.error());
+    }
+
+    Result<void> result;
+    while (result) {
+        auto next = walker->next();
+        if (!next) {
+            result = std::unexpected(next.error());
+            break;
+        }
+        if (*next == nullptr) {
+            break;
+        }
+        result = addWalked(**next);
+    }
+
+    skipped_.insert(skipped_.end(), walker->skipped().begin(), walker->skipped().end());
+    return result;
+}
+
 }

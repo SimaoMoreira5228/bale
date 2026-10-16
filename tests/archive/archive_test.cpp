@@ -355,6 +355,27 @@ TEST_CASE("writing the same tree twice with fixed identity produces identical by
     CHECK(outputs[0] == outputs[1]);
 }
 
+TEST_CASE("a file written in pieces produces the same archive as one written whole") {
+    TempPath temp;
+    fs::create_directories(temp.path());
+    std::string content = pattern(minChunkSize * 3 + 123);
+
+    auto whole = newWriter(temp.path() / "whole.bale", fixedOptions(minChunkSize));
+    REQUIRE(whole.addBytes("f", bytesOf(content)));
+    REQUIRE(whole.finish());
+
+    auto pieces = newWriter(temp.path() / "pieces.bale", fixedOptions(minChunkSize));
+    REQUIRE(pieces.beginFile("f"));
+    CHECK(pieces.addDirectory("d").error().kind == ErrorKind::Malformed);
+    for (std::size_t at = 0; at < content.size(); at += 1000) {
+        REQUIRE(pieces.writeFile(bytesOf(std::string_view(content).substr(at, 1000))));
+    }
+    REQUIRE(pieces.endFile());
+    REQUIRE(pieces.finish());
+
+    CHECK(readAll(temp.path() / "whole.bale") == readAll(temp.path() / "pieces.bale"));
+}
+
 TEST_CASE("an empty archive has only metadata records and verifies") {
     TempPath temp;
     auto writer = newWriter(temp.path());

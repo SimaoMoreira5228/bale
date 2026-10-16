@@ -1,10 +1,11 @@
-#include "archive/writer.hpp"
+#include "fswalk/tree_walker.hpp"
+
+#include "security/archive_path.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <limits>
 #include <system_error>
-#include <unordered_map>
 #include <utility>
 
 #ifdef _WIN32
@@ -17,11 +18,18 @@
 #include <sys/stat.h>
 #endif
 
-namespace bale::archive {
+namespace bale {
 
 namespace {
 
 namespace fs = std::filesystem;
+
+constexpr PathPolicy walkPathPolicy{
+    .backslash = Backslash::Reject,
+    .syntax = PathSyntax::Strict,
+    .windowsSafe = false,
+    .allowRawNames = false,
+};
 
 enum class NodeType : std::uint8_t {
     Regular,
@@ -30,31 +38,13 @@ enum class NodeType : std::uint8_t {
     Special,
 };
 
-struct FileIdentity {
-    std::uint64_t device = 0;
-    std::uint64_t inode = 0;
-
-    friend bool operator==(const FileIdentity&, const FileIdentity&) = default;
-};
-
-struct FileIdentityHash {
-    std::size_t operator()(const FileIdentity& identity) const {
-        return static_cast<std::size_t>(identity.inode * 0x9E3779B97F4A7C15 ^ identity.device);
-    }
-};
-
 struct NodeInfo {
     NodeType type = NodeType::Special;
     std::optional<std::int64_t> mtimeNanoseconds;
     std::uint32_t mode = 0;
-    FileIdentity identity;
+    std::uint64_t device = 0;
+    std::uint64_t inode = 0;
     std::uint64_t links = 1;
-};
-
-struct Child {
-    std::string name;
-    fs::path path;
-    bool validName = true;
 };
 
 std::unexpected<Error> systemError(std::string_view what, const std::error_code& code) {
@@ -111,7 +101,7 @@ Result<NodeInfo> inspect(const fs::path& path) {
     }
 
     NodeInfo info;
-    info.mode = static_cast<std::uint32_t>(status.permissions()) & maxPermissionBits;
+    info.mode = static_cast<std::uint32_t>(status.permissions()) & walkPermissionBits;
     switch (status.type()) {
     case fs::file_type::regular:
         info.type = NodeType::Regular;
@@ -162,9 +152,9 @@ Result<NodeInfo> inspect(const fs::path& path) {
     } else if (S_ISLNK(status.st_mode)) {
         info.type = NodeType::Symlink;
     }
-    info.mode = static_cast<std::uint32_t>(status.st_mode) & maxPermissionBits;
-    info.identity.device = static_cast<std::uint64_t>(status.st_dev);
-    info.identity.inode = static_cast<std::uint64_t>(status.st_ino);
+    info.mode = static_cast<std::uint32_t>(status.st_mode) & walkPermissionBits;
+    info.device = static_cast<std::uint64_t>(status.st_dev);
+    info.inode = static_cast<std::uint64_t>(status.st_ino);
     info.links = static_cast<std::uint64_t>(status.st_nlink);
 #ifdef __APPLE__
     info.mtimeNanoseconds = combineTime(status.st_mtimespec.tv_sec, status.st_mtimespec.tv_nsec);
@@ -178,20 +168,7 @@ Result<NodeInfo> inspect(const fs::path& path) {
 
 }
 
-struct Writer::Walk {
-    std::string relative;
-    std::uint32_t depth = 0;
-    std::optional<FileIdentity> exclude;
-    fs::path excludePath;
-    std::unordered_map<FileIdentity, NameRef, FileIdentityHash> links;
-};
-
-Result<void> Writer::addTree(const fs::path& root, const fs::path& exclude) {
-    auto usable = check();
-    if (!usable) {
-        return usable;
-    }
-
+Result<TreeWalker> TreeWalker::open(const fs::path& root, const WalkOptions& options) {
     auto info = inspect(root);
     if (!info) {
         return std::unexpected(info.error());
@@ -200,75 +177,120 @@ Result<void> Writer::addTree(const fs::path& root, const fs::path& exclude) {
         return fail(ErrorKind::Unsupported, "tree root is not a directory");
     }
 
-    Walk walk;
-    if (!exclude.empty()) {
-        auto excluded = inspect(exclude);
+    TreeWalker walker(options);
+    if (!options.exclude.empty()) {
+        auto excluded = inspect(options.exclude);
         if (excluded && excluded->type == NodeType::Regular) {
-            walk.exclude = excluded->identity;
-            walk.excludePath = exclude;
+            walker.exclude_ = FileIdentity{.device = excluded->device, .inode = excluded->inode};
+        } else {
+            walker.options_.exclude.clear();
         }
     }
-    return walkDirectory(walk, root);
+
+    auto listed = walker.descend(root);
+    if (!listed) {
+        return std::unexpected(listed.error());
+    }
+    return walker;
 }
 
-Result<void> Writer::walkDirectory(Walk& walk, const fs::path& directory) {
-    if (walk.depth >= options_.limits.maxDepth) {
+Result<void> TreeWalker::descend(const fs::path& directory) {
+    if (depth_ >= options_.limits.maxDepth) {
         return fail(ErrorKind::LimitExceeded, "directory tree exceeds maximum depth");
     }
+    if (frames_.size() == depth_) {
+        frames_.emplace_back();
+    }
 
-    std::vector<Child> children;
+    Frame& frame = frames_[depth_];
+    frame.children.clear();
+    frame.next = 0;
+    frame.mark = relative_.size();
+
     std::error_code error;
     for (fs::directory_iterator it(directory, error), end; !error && it != end;
          it.increment(error)) {
-        Child& child = children.emplace_back();
+        Child& child = frame.children.emplace_back();
         child.path = it->path();
         child.validName = pathBytes(child.path.filename(), child.name);
     }
     if (error) {
         return systemError("cannot read directory", error);
     }
-    std::ranges::sort(children, {}, &Child::name);
+    std::ranges::sort(frame.children, {}, &Child::name);
 
-    ++walk.depth;
-    for (const auto& child : children) {
-        std::size_t mark = walk.relative.size();
-        if (mark != 0) {
-            walk.relative.push_back('/');
-        }
-        walk.relative.append(child.name);
-
-        auto added = child.validName ? addNode(walk, child.path)
-                                     : skipNode(walk, "name is not valid UTF-16");
-        walk.relative.resize(mark);
-        if (!added) {
-            return added;
-        }
-    }
-    --walk.depth;
+    ++depth_;
     return {};
 }
 
-Result<void> Writer::skipNode(const Walk& walk, std::string_view reason) {
+Result<const WalkEntry*> TreeWalker::next() {
+    file_.reset();
+    if (pendingDescend_) {
+        pendingDescend_ = false;
+        const Frame& parent = frames_[depth_ - 1];
+        fs::path directory = parent.children[parent.next - 1].path;
+        auto listed = descend(directory);
+        if (!listed) {
+            return std::unexpected(listed.error());
+        }
+    }
+
+    while (depth_ > 0) {
+        Frame& frame = frames_[depth_ - 1];
+        if (frame.next == frame.children.size()) {
+            relative_.resize(frame.mark);
+            --depth_;
+            continue;
+        }
+
+        const Child& child = frame.children[frame.next];
+        ++frame.next;
+        relative_.resize(frame.mark);
+        if (!relative_.empty()) {
+            relative_.push_back('/');
+        }
+        relative_.append(child.name);
+
+        auto produced = visit(child);
+        if (!produced) {
+            return std::unexpected(produced.error());
+        }
+        if (*produced) {
+            return &entry_;
+        }
+    }
+    return nullptr;
+}
+
+Result<bool> TreeWalker::skip(std::string_view reason) {
     skipped_.push_back(
         SkippedPath{
-            .path = walk.relative,
+            .path = relative_,
             .reason = reason,
         }
     );
-    return {};
+    return false;
 }
 
-Result<void> Writer::addNode(Walk& walk, const fs::path& node) {
-    auto skip = [this, &walk](std::string_view reason) {
-        return skipNode(walk, reason);
-    };
-
-    auto valid = validateEntryPath(walk.relative, options_.limits, scratch_);
-    if (!valid) {
-        return skip(valid.error().what);
+Result<bool> TreeWalker::visit(const Child& child) {
+    if (!child.validName) {
+        return skip("name is not valid UTF-16");
     }
 
-    auto info = inspect(node);
+    auto normalized = normalizeArchivePath(
+        std::as_bytes(std::span(relative_)),
+        walkPathPolicy,
+        options_.limits,
+        scratch_
+    );
+    if (!normalized) {
+        return skip(normalized.error().what);
+    }
+    if (normalized->path != relative_) {
+        return skip("path is not canonical");
+    }
+
+    auto info = inspect(child.path);
     if (!info) {
         return std::unexpected(info.error());
     }
@@ -276,78 +298,82 @@ Result<void> Writer::addNode(Walk& walk, const fs::path& node) {
     bool excluded = false;
 #ifdef _WIN32
     std::error_code error;
-    excluded = info->type == NodeType::Regular && !walk.excludePath.empty() &&
-        fs::equivalent(node, walk.excludePath, error);
+    excluded = info->type == NodeType::Regular && !options_.exclude.empty() &&
+        fs::equivalent(child.path, options_.exclude, error);
 #else
-    excluded = walk.exclude && info->identity == *walk.exclude;
+    excluded = exclude_ && info->device == exclude_->device && info->inode == exclude_->inode;
 #endif
     if (excluded) {
         return skip("the archive being written");
     }
 
-    EntryAttributes attributes{
+    entry_ = WalkEntry{
+        .path = relative_,
         .mtimeNanoseconds = info->mtimeNanoseconds,
         .mode = info->mode,
     };
     switch (info->type) {
     case NodeType::Special:
         return skip("special file: device, FIFO or socket");
-    case NodeType::Directory: {
-        auto added = addDirectory(walk.relative, attributes);
-        if (!added) {
-            return added;
-        }
-        return walkDirectory(walk, node);
-    }
+    case NodeType::Directory:
+        entry_.kind = WalkKind::Directory;
+        pendingDescend_ = true;
+        return true;
     case NodeType::Symlink: {
         std::error_code linkError;
-        auto target = fs::read_symlink(node, linkError);
+        auto target = fs::read_symlink(child.path, linkError);
         if (linkError) {
             return systemError("cannot read symlink", linkError);
         }
-        std::string bytes;
-        if (!pathBytes(target, bytes)) {
+        if (!pathBytes(target, target_)) {
             return skip("symlink target is not valid UTF-16");
         }
-        if (bytes.empty() || bytes.size() > options_.limits.maxPathBytes) {
+        if (target_.empty() || target_.size() > options_.limits.maxPathBytes ||
+            target_.find('\0') != std::string::npos) {
             return skip("symlink target empty or too long");
         }
-        attributes.mode.reset();
-        return addSymlink(walk.relative, bytes, attributes);
+        entry_.kind = WalkKind::Symlink;
+        entry_.target = target_;
+        entry_.mode.reset();
+        return true;
     }
     case NodeType::Regular:
         break;
     }
 
-    if (info->links > 1) {
-        auto found = walk.links.find(info->identity);
-        if (found != walk.links.end()) {
-            return addHardLink(walk.relative, nameAt(found->second.offset, found->second.size));
+    FileIdentity identity{.device = info->device, .inode = info->inode};
+    bool shared = options_.hardLinks && info->links > 1;
+    if (shared) {
+        auto found = links_.find(identity);
+        if (found != links_.end()) {
+            entry_.kind = WalkKind::HardLink;
+            entry_.target = found->second;
+            entry_.mode.reset();
+            entry_.mtimeNanoseconds.reset();
+            return true;
         }
     }
 
-    auto file = File::openRegularNoFollow(node);
+    auto file = File::openRegularNoFollow(child.path);
     if (!file) {
         if (file.error().kind == ErrorKind::Unsupported) {
             return skip("changed type while being archived");
         }
         return std::unexpected(file.error());
     }
+    auto size = file->size();
+    if (!size) {
+        return std::unexpected(size.error());
+    }
 
-    auto added = addFile(walk.relative, *file, attributes);
-    if (!added) {
-        return added;
+    file_.emplace(std::move(*file));
+    entry_.kind = WalkKind::Regular;
+    entry_.file = &*file_;
+    entry_.size = *size;
+    if (shared) {
+        links_.emplace(identity, relative_);
     }
-    if (info->links > 1) {
-        walk.links.emplace(
-            info->identity,
-            NameRef{
-                .offset = entries_.back().pathOffset,
-                .size = entries_.back().pathSize,
-            }
-        );
-    }
-    return {};
+    return true;
 }
 
 }
