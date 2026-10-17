@@ -18,6 +18,7 @@ enum class ExitCode : std::uint8_t {
     UnsafePath = 7,
     Io = 8,
     LimitExceeded = 9,
+    AlreadyExists = 10,
 };
 
 [[nodiscard]] ExitCode exitCodeFor(ErrorKind kind);

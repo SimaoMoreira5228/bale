@@ -14,6 +14,7 @@ enum class ErrorKind : std::uint8_t {
     Integrity,
     LimitExceeded,
     UnsafePath,
+    AlreadyExists,
     PasswordRequired,
     Io,
 };
@@ -55,6 +56,8 @@ fail(ErrorKind kind, std::string_view what, std::uint64_t offset = Error::noOffs
         return "limit exceeded";
     case ErrorKind::UnsafePath:
         return "unsafe path";
+    case ErrorKind::AlreadyExists:
+        return "already exists";
     case ErrorKind::PasswordRequired:
         return "password required";
     case ErrorKind::Io:

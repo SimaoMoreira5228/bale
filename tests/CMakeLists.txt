@@ -13,6 +13,7 @@ add_executable(bale_tests
     base/checked_test.cpp
     checksum/crc_test.cpp
     cli/terminal_text_test.cpp
+    extract/extractor_test.cpp
     format/envelope_test.cpp
     format/tlv_test.cpp
     formats/detect_test.cpp
@@ -29,6 +30,7 @@ target_include_directories(bale_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(bale_tests PRIVATE
     bale_checksum
     bale_cli
+    bale_extract
     bale_format
     bale_formats_tar
     bale_formats_zip
