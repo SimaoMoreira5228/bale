@@ -1,6 +1,8 @@
+#include "formats/gzip/header.hpp"
+
 #include "base/checked.hpp"
 #include "base/endian.hpp"
-#include "formats/gzip/decoder.hpp"
+#include "checksum/crc.hpp"
 #include "io/byte_reader.hpp"
 
 #include <algorithm>

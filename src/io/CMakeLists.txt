@@ -1,5 +1,6 @@
 add_library(bale_io STATIC
     file.cpp
+    file_input.cpp
 )
 target_link_libraries(bale_io
     PUBLIC bale_base

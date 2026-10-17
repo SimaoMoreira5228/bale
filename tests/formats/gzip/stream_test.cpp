@@ -1,4 +1,4 @@
-#include "formats/gzip/decoder.hpp"
+#include "formats/gzip/stream.hpp"
 
 #include "base/endian.hpp"
 #include "codecs/codec_fixture.hpp"
@@ -109,10 +109,30 @@ MemberSpec fullHeaderSpec(std::string data) {
     };
 }
 
+struct Summary {
+    std::uint64_t members = 0;
+    std::uint64_t outputBytes = 0;
+};
+
 struct Decoded {
     std::string output;
-    Result<gzip::Summary> summary = gzip::Summary{};
+    Result<Summary> summary = Summary{};
 };
+
+Result<std::string> drain(gzip::Stream& stream, std::size_t readSize) {
+    std::string output;
+    std::vector<std::byte> buffer(readSize);
+    while (true) {
+        auto count = stream.read(buffer);
+        if (!count) {
+            return std::unexpected(count.error());
+        }
+        if (*count == 0) {
+            return output;
+        }
+        output.append(reinterpret_cast<const char*>(buffer.data()), *count);
+    }
+}
 
 Decoded decodeBytes(const Bytes& bytes, const gzip::Limits& limits = {}) {
     Decoded decoded;
@@ -121,16 +141,28 @@ Decoded decodeBytes(const Bytes& bytes, const gzip::Limits& limits = {}) {
     auto file = temp.open();
     REQUIRE(file);
 
-    auto decoder = gzip::Decoder::open(std::move(*file), limits);
-    if (!decoder) {
-        decoded.summary = std::unexpected(decoder.error());
+    auto stream = gzip::Stream::open(std::move(*file), limits);
+    if (!stream) {
+        decoded.summary = std::unexpected(stream.error());
         return decoded;
     }
-    decoded.summary = decoder->decode([&](std::span<const std::byte> chunk) {
-        decoded.output.append(reinterpret_cast<const char*>(chunk.data()), chunk.size());
-        return Result<void>{};
-    });
-    return decoded;
+
+    std::vector<std::byte> buffer(777);
+    while (true) {
+        auto count = stream->read(buffer);
+        if (!count) {
+            decoded.summary = std::unexpected(count.error());
+            return decoded;
+        }
+        if (*count == 0) {
+            decoded.summary = Summary{
+                .members = stream->members(),
+                .outputBytes = stream->outputBytes(),
+            };
+            return decoded;
+        }
+        decoded.output.append(reinterpret_cast<const char*>(buffer.data()), *count);
+    }
 }
 
 void checkRejected(
@@ -155,37 +187,31 @@ std::string patterned(std::size_t size) {
 
 }
 
-TEST_CASE("gzip decoder reads a golden GNU gzip member and its header") {
+TEST_CASE("gzip stream reads a golden GNU gzip member and its header one byte at a time") {
     auto bytes = golden();
     CHECK(gzip::looksLikeGzip(bytes));
 
     test::TempFile temp(bytes);
     auto file = temp.open();
     REQUIRE(file);
-    auto decoder = gzip::Decoder::open(std::move(*file));
-    REQUIRE(decoder);
-    CHECK(decoder->header().name == "hello.txt");
-    CHECK(decoder->header().comment.empty());
-    CHECK(decoder->header().mtime == 0x695735a5);
-    CHECK(decoder->header().extraFlags == 2);
-    CHECK(decoder->header().os == 3);
-    CHECK(decoder->header().size == 20);
+    auto stream = gzip::Stream::open(std::move(*file));
+    REQUIRE(stream);
+    CHECK(stream->header().name == "hello.txt");
+    CHECK(stream->header().comment.empty());
+    CHECK(stream->header().mtime == 0x695735a5);
+    CHECK(stream->header().extraFlags == 2);
+    CHECK(stream->header().os == 3);
+    CHECK(stream->header().size == 20);
 
-    std::string output;
-    auto summary = decoder->decode([&](std::span<const std::byte> chunk) {
-        output.append(reinterpret_cast<const char*>(chunk.data()), chunk.size());
-        return Result<void>{};
-    });
-    REQUIRE(summary);
-    CHECK(output == "hello gzip\n");
-    CHECK(summary->members == 1);
-    CHECK(summary->outputBytes == 11);
+    auto output = drain(*stream, 1);
+    REQUIRE(output);
+    CHECK(*output == "hello gzip\n");
+    CHECK(stream->members() == 1);
+    CHECK(stream->outputBytes() == 11);
 
-    auto again = decoder->decode([](std::span<const std::byte>) {
-        return Result<void>{};
-    });
-    REQUIRE(again);
-    CHECK(again->outputBytes == 11);
+    std::array<std::byte, 4> after{};
+    CHECK(stream->read(after) == 0);
+    CHECK(stream->read(std::span<std::byte>{}).error().kind == ErrorKind::LimitExceeded);
 
     CHECK_FALSE(gzip::looksLikeGzip(std::span(bytes).first(9)));
     auto reserved = bytes;
@@ -193,7 +219,7 @@ TEST_CASE("gzip decoder reads a golden GNU gzip member and its header") {
     CHECK_FALSE(gzip::looksLikeGzip(reserved));
 }
 
-TEST_CASE("gzip decoder concatenates members and accepts only zero padding after them") {
+TEST_CASE("gzip stream concatenates members and accepts only zero padding after them") {
     auto large = patterned(200'000);
     auto bytes = golden();
     auto second = buildMember(fullHeaderSpec(large));
@@ -290,7 +316,7 @@ TEST_CASE("gzip header parser enforces flags, method, checksum and limits") {
     }
 }
 
-TEST_CASE("gzip decoder verifies the trailer and stops at the output budget") {
+TEST_CASE("gzip stream verifies the trailer and stops at the output budget") {
     auto text = patterned(5000);
 
     SUBCASE("CRC-32 mismatch") {
@@ -300,12 +326,28 @@ TEST_CASE("gzip decoder verifies the trailer and stops at the output budget") {
             "gzip member CRC-32 mismatch"
         );
     }
-    SUBCASE("ISIZE mismatch") {
-        checkRejected(
-            buildMember({.data = text, .isize = 4999}),
-            ErrorKind::Integrity,
-            "gzip member size mismatch"
-        );
+    SUBCASE("ISIZE mismatch, reported after all data and then on every read") {
+        test::TempFile temp(buildMember({.data = text, .isize = 4999}));
+        auto file = temp.open();
+        REQUIRE(file);
+        auto stream = gzip::Stream::open(std::move(*file));
+        REQUIRE(stream);
+
+        std::vector<std::byte> buffer(text.size());
+        auto first = stream->read(buffer);
+        REQUIRE(first);
+        std::size_t total = *first;
+        Result<std::size_t> last = first;
+        while (last && *last != 0) {
+            last = stream->read(buffer);
+            if (last) {
+                total += *last;
+            }
+        }
+        CHECK(total == text.size());
+        REQUIRE_FALSE(last);
+        CHECK(last.error().what == "gzip member size mismatch");
+        CHECK(stream->read(buffer).error().what == "gzip member size mismatch");
     }
     SUBCASE("corrupt deflate data") {
         auto bytes = buildMember({.data = text});
