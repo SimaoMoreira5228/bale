@@ -3,6 +3,7 @@
 #include "base/error.hpp"
 #include "checksum/crc.hpp"
 #include "io/byte_reader.hpp"
+#include "io/chunk_sink.hpp"
 #include "io/file.hpp"
 
 #include <algorithm>
@@ -11,7 +12,6 @@
 #include <optional>
 #include <span>
 #include <string_view>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -101,9 +101,6 @@ class Cursor {
     std::size_t maxNameLength_;
     std::uint64_t remaining_;
 };
-
-template <typename Sink>
-concept ChunkSink = std::is_invocable_r_v<Result<void>, Sink&, std::span<const std::byte>>;
 
 class Reader {
   public:

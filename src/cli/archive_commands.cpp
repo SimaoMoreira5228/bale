@@ -32,11 +32,6 @@ struct CivilTime {
     unsigned minute = 0;
 };
 
-struct OpenedArchive {
-    File file;
-    ArchiveFormat format = ArchiveFormat::Unknown;
-};
-
 [[nodiscard]] std::optional<CivilTime> civilFromUnix(std::int64_t seconds) {
     if (seconds < earliestPrintableTime || seconds > latestPrintableTime) {
         return std::nullopt;
@@ -83,34 +78,6 @@ void printRow(
     } else {
         std::println(" -> {}", linkTarget);
     }
-}
-
-ExitCode fail(std::string_view context, const Error& error) {
-    reportError(context, error);
-    return exitCodeFor(error.kind);
-}
-
-[[nodiscard]] Result<OpenedArchive> openArchive(std::string_view argument) {
-    auto file = File::openRead(std::filesystem::path(argument));
-    if (!file) {
-        return std::unexpected(file.error());
-    }
-
-    auto format = detectFormat(*file);
-    if (!format) {
-        return std::unexpected(format.error());
-    }
-    if (*format == ArchiveFormat::Unknown) {
-        return bale::fail(ErrorKind::Unsupported, "unrecognized archive format");
-    }
-    if (*format == ArchiveFormat::Bale) {
-        return bale::fail(ErrorKind::Unsupported, "native BALE archives cannot be read yet");
-    }
-
-    return OpenedArchive{
-        .file = std::move(*file),
-        .format = *format,
-    };
 }
 
 [[nodiscard]] bool isZipDirectory(const zip::Entry& entry) {
@@ -170,7 +137,7 @@ ExitCode fail(std::string_view context, const Error& error) {
 ExitCode listZip(std::string_view argument, File file, const ListOptions& options) {
     auto reader = zip::Reader::open(std::move(file));
     if (!reader) {
-        return fail(argument, reader.error());
+        return reportFailure(argument, reader.error());
     }
 
     auto cursor = reader->entries();
@@ -179,7 +146,7 @@ ExitCode listZip(std::string_view argument, File file, const ListOptions& option
     while (true) {
         auto more = cursor.next(entry);
         if (!more) {
-            return fail(argument, more.error());
+            return reportFailure(argument, more.error());
         }
         if (!*more) {
             return ExitCode::Ok;
@@ -197,7 +164,7 @@ ExitCode listZip(std::string_view argument, File file, const ListOptions& option
 ExitCode listTar(std::string_view argument, File file, const ListOptions& options) {
     auto reader = tar::Reader::open(std::move(file));
     if (!reader) {
-        return fail(argument, reader.error());
+        return reportFailure(argument, reader.error());
     }
 
     std::string escapedPath;
@@ -205,7 +172,7 @@ ExitCode listTar(std::string_view argument, File file, const ListOptions& option
     while (true) {
         auto next = reader->next();
         if (!next) {
-            return fail(argument, next.error());
+            return reportFailure(argument, next.error());
         }
 
         const tar::Entry* entry = *next;
@@ -232,7 +199,7 @@ ExitCode listTar(std::string_view argument, File file, const ListOptions& option
 ExitCode testZip(std::string_view argument, File file) {
     auto reader = zip::Reader::open(std::move(file));
     if (!reader) {
-        return fail(argument, reader.error());
+        return reportFailure(argument, reader.error());
     }
 
     std::vector<std::byte> scratch(testChunkSize);
@@ -248,7 +215,7 @@ ExitCode testZip(std::string_view argument, File file) {
     while (true) {
         auto more = cursor.next(entry);
         if (!more) {
-            return fail(argument, more.error());
+            return reportFailure(argument, more.error());
         }
         if (!*more) {
             break;
@@ -280,14 +247,14 @@ ExitCode testZip(std::string_view argument, File file) {
 ExitCode testTar(std::string_view argument, File file) {
     auto reader = tar::Reader::open(std::move(file));
     if (!reader) {
-        return fail(argument, reader.error());
+        return reportFailure(argument, reader.error());
     }
 
     std::uint64_t count = 0;
     while (true) {
         auto next = reader->next();
         if (!next) {
-            return fail(argument, next.error());
+            return reportFailure(argument, next.error());
         }
         if (*next == nullptr) {
             break;
@@ -335,10 +302,38 @@ void reportError(std::string_view context, const Error& error) {
     std::println(stderr, "");
 }
 
+ExitCode reportFailure(std::string_view context, const Error& error) {
+    reportError(context, error);
+    return exitCodeFor(error.kind);
+}
+
+Result<OpenedArchive> openArchive(std::string_view argument) {
+    auto file = File::openRead(std::filesystem::path(argument));
+    if (!file) {
+        return std::unexpected(file.error());
+    }
+
+    auto format = detectFormat(*file);
+    if (!format) {
+        return std::unexpected(format.error());
+    }
+    if (*format == ArchiveFormat::Unknown) {
+        return fail(ErrorKind::Unsupported, "unrecognized archive format");
+    }
+    if (*format == ArchiveFormat::Bale) {
+        return fail(ErrorKind::Unsupported, "native BALE archives cannot be read yet");
+    }
+
+    return OpenedArchive{
+        .file = std::move(*file),
+        .format = *format,
+    };
+}
+
 ExitCode listArchive(std::string_view argument, const ListOptions& options) {
     auto archive = openArchive(argument);
     if (!archive) {
-        return fail(argument, archive.error());
+        return reportFailure(argument, archive.error());
     }
 
     if (archive->format == ArchiveFormat::Zip) {
@@ -350,7 +345,7 @@ ExitCode listArchive(std::string_view argument, const ListOptions& options) {
 ExitCode testArchive(std::string_view argument) {
     auto archive = openArchive(argument);
     if (!archive) {
-        return fail(argument, archive.error());
+        return reportFailure(argument, archive.error());
     }
 
     if (archive->format == ArchiveFormat::Zip) {
