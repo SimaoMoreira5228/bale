@@ -1,0 +1,9 @@
+local/
+build/
+.vscode/
+.opencode/
+*.pdf
+*.ps
+*.eps
+*.prn
+compile_commands.json
