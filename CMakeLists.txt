@@ -49,6 +49,12 @@ else()
     )
 endif()
 
+if(MINGW AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # WORKAROUND: GCC spills AVX registers assuming 32-byte stack alignment, which the Windows x64
+    # ABI does not guarantee (GCC bug 54412); the bundled codecs crash on their AVX2 paths.
+    add_compile_options(-Wa,-muse-unaligned-vector-move)
+endif()
+
 include(cmake/Dependencies.cmake)
 
 add_subdirectory(src)

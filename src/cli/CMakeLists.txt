@@ -15,3 +15,7 @@ target_link_libraries(bale PRIVATE
     bale_cli
     bale_warnings
 )
+
+if(MINGW)
+    target_link_libraries(bale_cli PUBLIC stdc++exp)
+endif()

@@ -90,6 +90,7 @@ case "$cmd" in
         echo "Build: CMake 3.25+, GCC 14+ or Clang 18+ with C++23, Ninja (Make works too)."
         echo "Format and lint: clang-format, clang-tidy, Python 3."
         echo "Coverage report: gcovr (optional)."
+        echo "Windows cross-check: MinGW-w64 GCC and Wine (optional)."
         ;;
     configure)
         configure "$build_dir" "$@"
@@ -141,6 +142,15 @@ case "$cmd" in
             echo "gcovr not found; raw coverage data is in $cover_dir" >&2
         fi
         ;;
+    windows)
+        windows_dir="$build_root/windows"
+        configure "$windows_dir" \
+            -DBALE_LINK_COMPILE_COMMANDS=OFF \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_TOOLCHAIN_FILE="$repo_root/cmake/toolchains/mingw-w64-x86_64.cmake"
+        build "$windows_dir"
+        WINEDEBUG="${WINEDEBUG:--all}" run_tests "$windows_dir" "$@"
+        ;;
     run)
         target="${1:-bale}"
         if (($#)); then
@@ -191,6 +201,7 @@ usage: ./dev <command> [args...]
   test          build and run ctest (extra args go to ctest)
   sanitize      build and test with ASan and UBSan in build/sanitize
   cover         build and test with coverage in build/cover, summary via gcovr
+  windows       cross-build with MinGW in build/windows and run the tests under Wine
   run [target]  build and run an executable target (default: bale)
   format        format C and C++ sources in place
   format-check  fail if any source needs formatting
