@@ -8,6 +8,25 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(BALE_BUILD_TESTS "Build the bale test suite" ${PROJECT_IS_TOP_LEVEL})
 option(BALE_WERROR "Treat compiler warnings as errors" OFF)
+option(
+    BALE_LINK_COMPILE_COMMANDS
+    "Link compile_commands.json from this build into the source tree for clangd"
+    ${PROJECT_IS_TOP_LEVEL}
+)
+
+if(BALE_LINK_COMPILE_COMMANDS)
+    set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+    file(
+        CREATE_LINK
+        ${PROJECT_BINARY_DIR}/compile_commands.json
+        ${PROJECT_SOURCE_DIR}/compile_commands.json
+        RESULT link_result
+        SYMBOLIC
+    )
+    if(NOT link_result EQUAL 0)
+        message(WARNING "Could not link compile_commands.json into the source tree: ${link_result}")
+    endif()
+endif()
 
 add_library(bale_warnings INTERFACE)
 if(MSVC)
