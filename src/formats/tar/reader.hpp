@@ -37,9 +37,8 @@ struct Entry {
     char typeflag = '0';
 };
 
-// NOTE: works the same over a seekable file and a decompressed stream; entry data must be read
-// before moving on, and next() skips whatever part of it was not read. Offsets in entries and
-// errors count bytes of the tar data, which for a compressed archive is the decompressed stream.
+// NOTE: offsets count bytes of the tar data, which for a compressed archive is the decompressed
+// stream.
 class Reader {
   public:
     explicit Reader(Source source, const Limits& limits = {}) :
@@ -52,7 +51,6 @@ class Reader {
     // error.
     [[nodiscard]] Result<const Entry*> next();
 
-    // NOTE: streams the part of the current entry's data not read yet.
     template <ChunkSink Sink>
     [[nodiscard]] Result<void> streamData(std::span<std::byte> scratch, Sink&& sink) {
         if (failure_) {

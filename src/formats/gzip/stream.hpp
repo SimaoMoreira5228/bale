@@ -35,8 +35,7 @@ class Stream {
         return outputBytes_;
     }
 
-    // NOTE: decompresses into out and returns how many bytes were written; 0 means the last member
-    // ended and every trailer and the padding after it were verified.
+    // NOTE: 0 means the last member ended and every trailer and the padding after it were verified.
     // SECURITY: bytes are returned before their member's CRC-32 and ISIZE are checked; output is
     // untrusted until a read returns 0.
     [[nodiscard]] Result<std::size_t> read(std::span<std::byte> out);

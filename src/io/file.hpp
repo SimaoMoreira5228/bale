@@ -22,7 +22,6 @@ class File {
     File& operator=(File&& other) noexcept;
     ~File();
 
-    // NOTE: the copy shares the open file; reads stay positional, so both can be used freely.
     [[nodiscard]] Result<File> duplicate() const;
 
     [[nodiscard]] Result<std::uint64_t> size() const;

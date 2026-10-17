@@ -11,10 +11,8 @@
 
 namespace bale {
 
-// NOTE: reads a file front to back through one fixed buffer allocated at open.
 class FileInput {
   public:
-    // NOTE: the buffer is clipped to the file size, so small files never get a full-size buffer.
     [[nodiscard]] static Result<FileInput> open(File file, std::size_t capacity);
 
     [[nodiscard]] std::span<const std::byte> pending() const {

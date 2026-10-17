@@ -17,8 +17,6 @@ enum class Container : std::uint8_t {
     SingleFile,
 };
 
-// NOTE: a compression layer wraps a container; SingleFile is a compressed stream whose content
-// is not a recognized archive and is treated as one file.
 struct ArchiveFormat {
     Container container = Container::Unknown;
     Compression compression = Compression::None;
