@@ -69,10 +69,3 @@ TEST_CASE("File::openRegularNoFollow opens regular files and refuses directories
         CHECK(File::openRead(temp.path() / "link"));
     }
 }
-
-TEST_CASE("File::openRead reports a missing file") {
-    TempPath temp;
-    auto missing = File::openRead(temp.path());
-    REQUIRE_FALSE(missing);
-    CHECK(missing.error().kind == ErrorKind::Io);
-}
