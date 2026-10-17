@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
+#include <span>
 #include <vector>
 
 using namespace bale;
@@ -206,4 +207,68 @@ TEST_CASE("TLV unsigned values must be a single minimal ULEB128 with no trailing
 
     REQUIRE(reader.next(field) == true);
     CHECK(decodeTlvUnsigned(field).error().kind == ErrorKind::Malformed);
+}
+
+TEST_CASE("TLV lists decode count and length-prefixed elements and reject hostile framing") {
+    std::vector<std::byte> list;
+    appendLeb128(list, 2);
+    appendTlvListElement(list, bytes({0xAA}));
+    appendTlvListElement(list, {});
+    CHECK(list == bytes({0x02, 0x01, 0xAA, 0x00}));
+
+    TlvField field{.number = 1, .value = list, .offset = 50};
+    auto reader = TlvListReader::open(field, 2);
+    REQUIRE(reader);
+    CHECK(reader->count() == 2);
+    std::span<const std::byte> element;
+    std::uint64_t offset = 0;
+    REQUIRE(reader->next(element, offset) == true);
+    CHECK(element.size() == 1);
+    CHECK(offset == 52);
+    REQUIRE(reader->next(element, offset) == true);
+    CHECK(element.empty());
+    CHECK(reader->next(element, offset) == false);
+
+    CHECK(TlvListReader::open(field, 1).error().kind == ErrorKind::LimitExceeded);
+
+    std::vector<std::byte> storage;
+    auto open = [&storage](std::initializer_list<int> data) {
+        storage = bytes(data);
+        TlvField hostile{.number = 1, .value = storage};
+        return TlvListReader::open(hostile, 1000);
+    };
+    CHECK(open({0x05, 0x00, 0x00}).error().kind == ErrorKind::Truncated);
+    CHECK(open({}).error().kind == ErrorKind::Truncated);
+
+    auto drain = [&](std::initializer_list<int> data) -> ErrorKind {
+        auto hostile = open(data);
+        REQUIRE(hostile);
+        while (true) {
+            auto more = hostile->next(element, offset);
+            if (!more) {
+                return more.error().kind;
+            }
+            REQUIRE(*more);
+        }
+    };
+    CHECK(drain({0x01, 0x01, 0xAA, 0xBB}) == ErrorKind::Malformed);
+    CHECK(drain({0x01, 0x05, 0xAA}) == ErrorKind::Truncated);
+    CHECK(drain({0x02, 0x00, 0x80}) == ErrorKind::Truncated);
+}
+
+TEST_CASE("TLV signed 64-bit values are exactly eight little-endian bytes") {
+    std::vector<std::byte> out;
+    TlvWriter writer(out);
+    REQUIRE(writer.signed64(1, Criticality::Noncritical, -2));
+    CHECK(out == bytes({0x02, 0x08, 0xFE, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}));
+
+    TlvReader reader(out);
+    TlvField field;
+    REQUIRE(reader.next(field) == true);
+    CHECK(decodeTlvSigned64(field) == -2);
+    CHECK(requireCriticality(field, Criticality::Noncritical));
+    CHECK(requireCriticality(field, Criticality::Critical).error().kind == ErrorKind::Malformed);
+
+    field.value = field.value.first(7);
+    CHECK(decodeTlvSigned64(field).error().kind == ErrorKind::Malformed);
 }

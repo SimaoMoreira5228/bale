@@ -56,6 +56,34 @@ class TlvReader {
 
 [[nodiscard]] Result<std::uint64_t> decodeTlvUnsigned(const TlvField& field);
 
+[[nodiscard]] Result<std::int64_t> decodeTlvSigned64(const TlvField& field);
+
+[[nodiscard]] Result<void> requireCriticality(const TlvField& field, Criticality expected);
+
+class TlvListReader {
+  public:
+    [[nodiscard]] static Result<TlvListReader> open(const TlvField& field, std::uint64_t maxCount);
+
+    [[nodiscard]] std::uint64_t count() const {
+        return count_;
+    }
+
+    [[nodiscard]] Result<bool> next(std::span<const std::byte>& element, std::uint64_t& offset);
+
+  private:
+    TlvListReader(std::span<const std::byte> data, std::uint64_t baseOffset, std::uint64_t count) :
+        data_(data), base_(baseOffset), count_(count) {
+    }
+
+    std::span<const std::byte> data_;
+    std::uint64_t base_ = 0;
+    std::uint64_t count_ = 0;
+    std::uint64_t read_ = 0;
+    std::size_t pos_ = 0;
+};
+
+void appendTlvListElement(std::vector<std::byte>& out, std::span<const std::byte> element);
+
 class TlvWriter {
   public:
     explicit TlvWriter(std::vector<std::byte>& out) : out_(&out) {
@@ -66,6 +94,9 @@ class TlvWriter {
 
     [[nodiscard]] Result<void>
     unsignedValue(std::uint32_t number, Criticality criticality, std::uint64_t value);
+
+    [[nodiscard]] Result<void>
+    signed64(std::uint32_t number, Criticality criticality, std::int64_t value);
 
   private:
     [[nodiscard]] Result<void>

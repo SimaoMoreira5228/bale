@@ -1,3 +1,4 @@
+#include "checksum/crc.hpp"
 #include "format/envelope.hpp"
 #include "format/record.hpp"
 
@@ -62,7 +63,7 @@ std::uint32_t bitwiseCrcWithFieldZeroed(std::span<const std::byte> original, std
 std::vector<std::byte> assembleRecord(RecordHeader header, std::span<const std::byte> payload) {
     header.payloadLength = payload.size();
     auto prefix = encodeRecordPrefix(header);
-    auto trailer = encodeRecordTrailer(payload);
+    auto trailer = encodeRecordTrailer(Crc32c::of(payload));
 
     std::vector<std::byte> out(prefix.begin(), prefix.end());
     out.insert(out.end(), payload.begin(), payload.end());

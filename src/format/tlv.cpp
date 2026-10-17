@@ -1,7 +1,10 @@
 #include "format/tlv.hpp"
 
+#include "base/endian.hpp"
+
 #include <algorithm>
 #include <array>
+#include <bit>
 
 namespace bale {
 
@@ -130,6 +133,77 @@ Result<std::uint64_t> decodeTlvUnsigned(const TlvField& field) {
     return decoded->value;
 }
 
+Result<std::int64_t> decodeTlvSigned64(const TlvField& field) {
+    if (field.value.size() != sizeof(std::int64_t)) {
+        return fail(ErrorKind::Malformed, "TLV signed integer is not 8 bytes", field.offset);
+    }
+    return std::bit_cast<std::int64_t>(loadLe<std::uint64_t>(field.value.data()));
+}
+
+Result<void> requireCriticality(const TlvField& field, Criticality expected) {
+    if (field.criticality != expected) {
+        return fail(ErrorKind::Malformed, "TLV field has the wrong criticality", field.offset);
+    }
+    return {};
+}
+
+Result<TlvListReader> TlvListReader::open(const TlvField& field, std::uint64_t maxCount) {
+    auto count = decodeLeb128(field.value, field.offset);
+    if (!count) {
+        return std::unexpected(count.error());
+    }
+    if (count->value > maxCount) {
+        return fail(ErrorKind::LimitExceeded, "TLV list has too many elements", field.offset);
+    }
+    if (count->value > field.value.size() - count->size) {
+        return fail(
+            ErrorKind::Truncated,
+            "TLV list count exceeds the bytes available",
+            field.offset
+        );
+    }
+    return TlvListReader(
+        field.value.subspan(count->size),
+        field.offset + count->size,
+        count->value
+    );
+}
+
+Result<bool> TlvListReader::next(std::span<const std::byte>& element, std::uint64_t& offset) {
+    if (read_ == count_) {
+        if (pos_ != data_.size()) {
+            return fail(ErrorKind::Malformed, "trailing bytes after TLV list", base_ + pos_);
+        }
+        return false;
+    }
+
+    auto length = decodeLeb128(data_.subspan(pos_), base_ + pos_);
+    if (!length) {
+        return std::unexpected(length.error());
+    }
+
+    std::size_t elementPos = pos_ + length->size;
+    if (length->value > data_.size() - elementPos) {
+        return fail(
+            ErrorKind::Truncated,
+            "TLV list element extends past end of list",
+            base_ + elementPos
+        );
+    }
+
+    auto size = static_cast<std::size_t>(length->value);
+    element = data_.subspan(elementPos, size);
+    offset = base_ + elementPos;
+    pos_ = elementPos + size;
+    ++read_;
+    return true;
+}
+
+void appendTlvListElement(std::vector<std::byte>& out, std::span<const std::byte> element) {
+    appendLeb128(out, element.size());
+    out.insert(out.end(), element.begin(), element.end());
+}
+
 Result<void>
 TlvWriter::bytes(std::uint32_t number, Criticality criticality, std::span<const std::byte> value) {
     auto started = beginField(number, criticality, value.size());
@@ -146,6 +220,13 @@ TlvWriter::unsignedValue(std::uint32_t number, Criticality criticality, std::uin
     std::array<std::byte, maxLeb128Size> encoded{};
     std::size_t size = encodeLeb128(value, encoded);
     return bytes(number, criticality, std::span(encoded).first(size));
+}
+
+Result<void>
+TlvWriter::signed64(std::uint32_t number, Criticality criticality, std::int64_t value) {
+    std::array<std::byte, sizeof(std::int64_t)> encoded{};
+    storeLe(encoded.data(), std::bit_cast<std::uint64_t>(value));
+    return bytes(number, criticality, encoded);
 }
 
 Result<void>

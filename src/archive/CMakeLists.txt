@@ -1,0 +1,10 @@
+add_library(bale_archive STATIC
+    chunk.cpp
+    commit.cpp
+    index.cpp
+    manifest.cpp
+)
+target_link_libraries(bale_archive
+    PUBLIC bale_base bale_checksum bale_format bale_io bale_security
+    PRIVATE bale_warnings
+)
