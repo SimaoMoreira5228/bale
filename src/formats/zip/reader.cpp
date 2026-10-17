@@ -3,6 +3,7 @@
 #include "base/checked.hpp"
 #include "base/endian.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 
@@ -433,40 +434,172 @@ Result<std::uint64_t> Reader::dataOffset(const Entry& entry) const {
     return dataStart;
 }
 
-Result<std::uint64_t> Reader::storedDataOffset(const Entry& entry) const {
+Result<Reader::EntryStream> Reader::beginEntry(const Entry& entry, std::span<std::byte> scratch) {
     if (entry.encrypted()) {
         return fail(ErrorKind::Unsupported, "encrypted entries are not supported");
     }
-    if (entry.method == methodDeflate) {
-        return fail(ErrorKind::Unsupported, "deflate decompression is not implemented yet");
-    }
-    if (entry.method != methodStored) {
+
+    EntryStream stream;
+    if (entry.method == methodStored) {
+        if (entry.compressedSize != entry.uncompressedSize) {
+            return fail(ErrorKind::Malformed, "stored entry sizes differ");
+        }
+        if (scratch.empty() && entry.uncompressedSize != 0) {
+            return fail(ErrorKind::LimitExceeded, "scratch buffer is empty");
+        }
+        stream.input = scratch;
+    } else if (entry.method == methodDeflate) {
+        if (scratch.size() < 2) {
+            return fail(ErrorKind::LimitExceeded, "scratch buffer too small for deflate");
+        }
+
+        if (inflater_) {
+            auto reset = inflater_->reset();
+            if (!reset) {
+                return std::unexpected(reset.error());
+            }
+        } else {
+            auto created = Inflater::create();
+            if (!created) {
+                return std::unexpected(created.error());
+            }
+            inflater_.emplace(std::move(*created));
+        }
+
+        stream.inflater = &*inflater_;
+
+        stream.input = scratch.first(scratch.size() / 2);
+        stream.output = scratch.subspan(scratch.size() / 2);
+    } else {
         return fail(ErrorKind::Unsupported, "compression method is not supported");
     }
-    if (entry.compressedSize != entry.uncompressedSize) {
-        return fail(ErrorKind::Malformed, "stored entry sizes differ");
-    }
-    return dataOffset(entry);
-}
 
-Result<void> Reader::readStored(const Entry& entry, std::span<std::byte> out) const {
-    if (out.size() != entry.uncompressedSize) {
-        return fail(ErrorKind::LimitExceeded, "output buffer does not match entry size");
-    }
-
-    auto offset = storedDataOffset(entry);
+    auto offset = dataOffset(entry);
     if (!offset) {
         return std::unexpected(offset.error());
     }
 
-    auto read = file_.readExactAt(*offset, out);
+    stream.dataStart = *offset;
+    stream.position = *offset;
+    stream.inputLeft = entry.compressedSize;
+    stream.outputLeft = entry.uncompressedSize;
+    stream.expectedCrc = entry.crc32;
+    stream.method = entry.method;
+    return stream;
+}
+
+Result<std::span<const std::byte>> Reader::nextChunk(EntryStream& stream) {
+    if (stream.done) {
+        return std::span<const std::byte>{};
+    }
+    if (stream.method == methodStored) {
+        return nextStored(stream);
+    }
+    return nextDeflated(stream);
+}
+
+Result<std::span<const std::byte>> Reader::nextStored(EntryStream& stream) {
+    if (stream.outputLeft == 0) {
+        stream.inputLeft = 0;
+        return finishEntry(stream);
+    }
+
+    auto chunk = stream.input.first(
+        static_cast<std::size_t>(std::min<std::uint64_t>(stream.outputLeft, stream.input.size()))
+    );
+    auto read = file_.readExactAt(stream.position, chunk);
     if (!read) {
-        return read;
+        return std::unexpected(read.error());
     }
-    if (Crc32::of(out) != entry.crc32) {
-        return fail(ErrorKind::Integrity, "stored entry CRC-32 mismatch", *offset);
+
+    stream.position += chunk.size();
+    stream.outputLeft -= chunk.size();
+    stream.crc.update(chunk);
+    return std::span<const std::byte>(chunk);
+}
+
+Result<std::span<const std::byte>> Reader::nextDeflated(EntryStream& stream) {
+    if (stream.streamEnded) {
+        return finishEntry(stream);
     }
-    return {};
+
+    while (true) {
+        if (stream.pending.empty() && stream.inputLeft > 0) {
+            auto chunk = stream.input.first(
+                static_cast<std::size_t>(
+                    std::min<std::uint64_t>(stream.inputLeft, stream.input.size())
+                )
+            );
+            auto read = file_.readExactAt(stream.position, chunk);
+            if (!read) {
+                return std::unexpected(read.error());
+            }
+
+            stream.pending = chunk;
+            stream.position += chunk.size();
+            stream.inputLeft -= chunk.size();
+        }
+
+        // SECURITY: once the declared size is reached a one-byte window probes for excess output,
+        // which is never passed on, so a bomb stops after a single extra byte.
+        auto window = stream.outputLeft == 0
+            ? stream.output.first(1)
+            : stream.output.first(
+                  static_cast<std::size_t>(
+                      std::min<std::uint64_t>(stream.outputLeft, stream.output.size())
+                  )
+              );
+        auto step = stream.inflater->decompress(stream.pending, window);
+        if (!step) {
+            auto error = step.error();
+            error.offset = stream.dataStart;
+            return std::unexpected(error);
+        }
+
+        stream.pending = stream.pending.subspan(step->consumed);
+        if (step->produced > stream.outputLeft) {
+            return fail(
+                ErrorKind::LimitExceeded,
+                "deflate entry exceeds declared size",
+                stream.dataStart
+            );
+        }
+
+        stream.streamEnded = step->finished;
+        if (step->produced > 0) {
+            auto chunk = window.first(step->produced);
+            stream.outputLeft -= chunk.size();
+            stream.crc.update(chunk);
+            return std::span<const std::byte>(chunk);
+        }
+        if (step->finished) {
+            return finishEntry(stream);
+        }
+        if (step->consumed == 0) {
+            if (stream.pending.empty() && stream.inputLeft == 0) {
+                return fail(ErrorKind::Truncated, "deflate stream truncated", stream.dataStart);
+            }
+            return fail(ErrorKind::Malformed, "deflate decoder made no progress", stream.dataStart);
+        }
+    }
+}
+
+Result<std::span<const std::byte>> Reader::finishEntry(EntryStream& stream) {
+    stream.done = true;
+    if (stream.outputLeft != 0) {
+        return fail(
+            ErrorKind::Malformed,
+            "deflate entry shorter than declared size",
+            stream.dataStart
+        );
+    }
+    if (!stream.pending.empty() || stream.inputLeft != 0) {
+        return fail(ErrorKind::Malformed, "trailing data after deflate stream", stream.dataStart);
+    }
+    if (stream.crc.value() != stream.expectedCrc) {
+        return fail(ErrorKind::Integrity, "entry CRC-32 mismatch", stream.dataStart);
+    }
+    return std::span<const std::byte>{};
 }
 
 bool looksLikeZip(std::span<const std::byte> head, std::span<const std::byte> tail) {

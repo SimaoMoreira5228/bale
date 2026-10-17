@@ -49,6 +49,8 @@ else()
     )
 endif()
 
+include(cmake/Dependencies.cmake)
+
 add_subdirectory(src)
 
 if(BALE_BUILD_TESTS)

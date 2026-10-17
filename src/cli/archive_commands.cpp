@@ -224,7 +224,7 @@ ExitCode testZip(std::string_view argument, File file) {
             continue;
         }
 
-        auto checked = reader->streamStored(entry, scratch, discard);
+        auto checked = reader->streamEntry(entry, scratch, discard);
         if (checked) {
             continue;
         }
