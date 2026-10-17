@@ -15,7 +15,7 @@
 #include <string_view>
 #include <vector>
 
-namespace bale::test {
+namespace bale::zip::test {
 
 using Bytes = std::vector<std::byte>;
 

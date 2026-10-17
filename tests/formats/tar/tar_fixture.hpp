@@ -16,9 +16,9 @@
 #include <string_view>
 #include <vector>
 
-namespace bale::test {
+namespace bale::tar::test {
 
-using Block = std::array<std::byte, tarBlockSize>;
+using BlockBytes = std::array<std::byte, blockSize>;
 
 inline constexpr std::string_view ustarMagic{
     "ustar\0"
@@ -40,13 +40,14 @@ struct HeaderSpec {
     bool base256Size = false;
 };
 
-inline void putText(Block& block, std::size_t offset, std::string_view text) {
+inline void putText(BlockBytes& block, std::size_t offset, std::string_view text) {
     for (std::size_t index = 0; index < text.size(); ++index) {
         block[offset + index] = static_cast<std::byte>(text[index]);
     }
 }
 
-inline void putOctal(Block& block, std::size_t offset, std::size_t length, std::uint64_t value) {
+inline void
+putOctal(BlockBytes& block, std::size_t offset, std::size_t length, std::uint64_t value) {
     for (std::size_t index = length - 1; index-- > 0;) {
         block[offset + index] = static_cast<std::byte>('0' + (value & 7U));
         value >>= 3;
@@ -54,7 +55,8 @@ inline void putOctal(Block& block, std::size_t offset, std::size_t length, std::
     block[offset + length - 1] = std::byte{0};
 }
 
-inline void putBase256(Block& block, std::size_t offset, std::size_t length, std::uint64_t value) {
+inline void
+putBase256(BlockBytes& block, std::size_t offset, std::size_t length, std::uint64_t value) {
     for (std::size_t index = length; index-- > 1;) {
         block[offset + index] = static_cast<std::byte>(value & 0xFFU);
         value >>= 8;
@@ -62,7 +64,7 @@ inline void putBase256(Block& block, std::size_t offset, std::size_t length, std
     block[offset] = std::byte{0x80};
 }
 
-inline void sealChecksum(Block& block) {
+inline void sealChecksum(BlockBytes& block) {
     std::fill_n(block.begin() + 148, 8, std::byte{' '});
 
     std::uint64_t sum = 0;
@@ -72,8 +74,8 @@ inline void sealChecksum(Block& block) {
     putOctal(block, 148, 7, sum);
 }
 
-inline Block makeHeader(const HeaderSpec& spec) {
-    Block block{};
+inline BlockBytes makeHeader(const HeaderSpec& spec) {
+    BlockBytes block{};
     putText(block, 0, spec.name);
     putOctal(block, 100, 8, 0644);
     putOctal(block, 108, 8, spec.uid);
@@ -107,7 +109,7 @@ inline std::string paxRecord(std::string_view key, std::string_view value) {
 
 class ArchiveBuilder {
   public:
-    ArchiveBuilder& block(const Block& block) {
+    ArchiveBuilder& block(const BlockBytes& block) {
         bytes_.insert(bytes_.end(), block.begin(), block.end());
         return *this;
     }
@@ -116,7 +118,7 @@ class ArchiveBuilder {
         for (char value : data) {
             bytes_.push_back(static_cast<std::byte>(value));
         }
-        bytes_.resize((bytes_.size() + tarBlockSize - 1) / tarBlockSize * tarBlockSize);
+        bytes_.resize((bytes_.size() + blockSize - 1) / blockSize * blockSize);
         return *this;
     }
 
@@ -134,7 +136,7 @@ class ArchiveBuilder {
     }
 
     ArchiveBuilder& zeros(std::size_t count) {
-        bytes_.resize(bytes_.size() + count * tarBlockSize);
+        bytes_.resize(bytes_.size() + count * blockSize);
         return *this;
     }
 
@@ -194,7 +196,7 @@ struct Listed {
     std::string linkTarget;
     std::uint64_t size = 0;
     std::uint64_t dataOffset = 0;
-    TarEntryKind kind = TarEntryKind::Regular;
+    EntryKind kind = EntryKind::Regular;
 };
 
 struct Listing {
@@ -202,7 +204,7 @@ struct Listing {
     std::optional<Error> error;
 };
 
-inline Listing listArchive(std::span<const std::byte> bytes, const TarLimits& limits = {}) {
+inline Listing listArchive(std::span<const std::byte> bytes, const Limits& limits = {}) {
     Listing listing;
     TempArchive archive;
     auto file = archive.write(bytes);
@@ -211,7 +213,7 @@ inline Listing listArchive(std::span<const std::byte> bytes, const TarLimits& li
         return listing;
     }
 
-    auto reader = TarReader::open(*file, limits);
+    auto reader = Reader::open(std::move(*file), limits);
     if (!reader) {
         listing.error = reader.error();
         return listing;

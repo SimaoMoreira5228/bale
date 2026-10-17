@@ -10,7 +10,8 @@
 #include <vector>
 
 using namespace bale;
-using namespace bale::test;
+using namespace bale::tar;
+using namespace bale::tar::test;
 
 namespace {
 
@@ -35,7 +36,7 @@ ErrorKind errorKind(const Listing& listing) {
 
 }
 
-TEST_CASE("TarReader lists every basic entry kind with data offsets") {
+TEST_CASE("Reader lists every basic entry kind with data offsets") {
     auto file = named("file.txt");
     file.prefix = "some/deep/dir";
 
@@ -64,23 +65,23 @@ TEST_CASE("TarReader lists every basic entry kind with data offsets") {
 
     const auto& entries = listing.entries;
     CHECK(entries[0].path == "some/deep/dir/file.txt");
-    CHECK(entries[0].kind == TarEntryKind::Regular);
+    CHECK(entries[0].kind == EntryKind::Regular);
     CHECK(entries[0].dataOffset == 512);
     CHECK(entries[0].size == 11);
-    CHECK(entries[1].kind == TarEntryKind::Regular);
+    CHECK(entries[1].kind == EntryKind::Regular);
     CHECK(entries[1].dataOffset == 3 * 512);
-    CHECK(entries[2].kind == TarEntryKind::Regular);
+    CHECK(entries[2].kind == EntryKind::Regular);
     CHECK(entries[2].size == 600);
-    CHECK(entries[3].kind == TarEntryKind::Directory);
+    CHECK(entries[3].kind == EntryKind::Directory);
     CHECK(entries[3].path == "dir/");
-    CHECK(entries[4].kind == TarEntryKind::HardLink);
+    CHECK(entries[4].kind == EntryKind::HardLink);
     CHECK(entries[4].linkTarget == "some/deep/dir/file.txt");
     CHECK(entries[4].size == 0);
-    CHECK(entries[5].kind == TarEntryKind::Symlink);
+    CHECK(entries[5].kind == EntryKind::Symlink);
     CHECK(entries[5].linkTarget == "../target");
-    CHECK(entries[6].kind == TarEntryKind::CharDevice);
-    CHECK(entries[7].kind == TarEntryKind::Fifo);
-    CHECK(entries[8].kind == TarEntryKind::Other);
+    CHECK(entries[6].kind == EntryKind::CharDevice);
+    CHECK(entries[7].kind == EntryKind::Fifo);
+    CHECK(entries[8].kind == EntryKind::Other);
     CHECK(entries[8].size == 5);
 
     std::string content(entries[0].size, '\0');
@@ -90,14 +91,14 @@ TEST_CASE("TarReader lists every basic entry kind with data offsets") {
     CHECK(content == "hello world");
 }
 
-TEST_CASE("TarReader reuses one entry and keeps returning end after the archive") {
+TEST_CASE("Reader reuses one entry and keeps returning end after the archive") {
     ArchiveBuilder builder;
     builder.entry(named(std::string(100, 'a')), "1").entry(named("b"), "2").zeros(2);
 
     TempArchive archive;
     auto file = archive.write(builder.bytes());
     REQUIRE(file);
-    auto reader = TarReader::open(*file);
+    auto reader = Reader::open(std::move(*file));
     REQUIRE(reader);
 
     auto first = reader->next();
@@ -117,7 +118,7 @@ TEST_CASE("TarReader reuses one entry and keeps returning end after the archive"
     CHECK(reader->next() == nullptr);
 }
 
-TEST_CASE("TarReader applies pax per-entry and global overrides") {
+TEST_CASE("Reader applies pax per-entry and global overrides") {
     auto global = paxRecord("uid", "1000") + paxRecord("uname", "builder");
     auto longPath = "pax/" + std::string(200, 'p');
     auto local = paxRecord("path", longPath) + paxRecord("size", "3") +
@@ -138,7 +139,7 @@ TEST_CASE("TarReader applies pax per-entry and global overrides") {
     TempArchive archive;
     auto file = archive.write(builder.bytes());
     REQUIRE(file);
-    auto reader = TarReader::open(*file);
+    auto reader = Reader::open(std::move(*file));
     REQUIRE(reader);
 
     auto entry = reader->next();
@@ -170,7 +171,7 @@ TEST_CASE("TarReader applies pax per-entry and global overrides") {
     CHECK(reader->next() == nullptr);
 }
 
-TEST_CASE("TarReader reads GNU long names and base-256 sizes") {
+TEST_CASE("Reader reads GNU long names and base-256 sizes") {
     auto longName = "gnu/" + std::string(300, 'n');
     auto longLink = "link/" + std::string(200, 'k');
 
@@ -192,13 +193,13 @@ TEST_CASE("TarReader reads GNU long names and base-256 sizes") {
     REQUIRE(listing.entries.size() == 2);
     CHECK(listing.entries[0].path == longName);
     CHECK(listing.entries[0].linkTarget == longLink);
-    CHECK(listing.entries[0].kind == TarEntryKind::Symlink);
+    CHECK(listing.entries[0].kind == EntryKind::Symlink);
     CHECK(listing.entries[1].path == "big.bin");
     CHECK(listing.entries[1].size == 1000);
     CHECK(listing.entries[1].dataOffset == 6 * 512);
 }
 
-TEST_CASE("TarReader reports truncation at every structure boundary") {
+TEST_CASE("Reader reports truncation at every structure boundary") {
     ArchiveBuilder builder;
     builder.entry(named("a"), std::string(700, 'a'));
     const auto& full = builder.bytes();
@@ -217,7 +218,7 @@ TEST_CASE("TarReader reports truncation at every structure boundary") {
     CHECK(errorKind(listArchive(prefix(pax.bytes(), 512 + 50))) == ErrorKind::Truncated);
 }
 
-TEST_CASE("TarReader rejects sizes that overflow or exceed the file") {
+TEST_CASE("Reader rejects sizes that overflow or exceed the file") {
     auto huge = named("huge");
     huge.base256Size = true;
     huge.size = UINT64_MAX - 10;
@@ -242,14 +243,14 @@ TEST_CASE("TarReader rejects sizes that overflow or exceed the file") {
     CHECK((listing.error && listing.error->offset == 512));
 }
 
-TEST_CASE("TarReader enforces caller limits before allocating") {
+TEST_CASE("Reader enforces caller limits before allocating") {
     auto declared = named("PaxHeader", 'x');
     declared.size = std::uint64_t{2} << 20;
     ArchiveBuilder oversized;
     oversized.block(makeHeader(declared)).zeros(2);
     CHECK(errorKind(listArchive(oversized.bytes())) == ErrorKind::LimitExceeded);
 
-    TarLimits small;
+    Limits small;
     small.maxExtendedHeaderBytes = 128;
     small.maxPathBytes = 50;
     small.maxEntries = 2;
@@ -275,7 +276,7 @@ TEST_CASE("TarReader enforces caller limits before allocating") {
     CHECK(errorKind(listing) == ErrorKind::LimitExceeded);
 }
 
-TEST_CASE("TarReader refuses GNU sparse entries") {
+TEST_CASE("Reader refuses GNU sparse entries") {
     ArchiveBuilder sparse;
     sparse.entry(named("sparse", 'S'), "data").zeros(2);
     CHECK(errorKind(listArchive(sparse.bytes())) == ErrorKind::Unsupported);
@@ -285,7 +286,7 @@ TEST_CASE("TarReader refuses GNU sparse entries") {
     CHECK(errorKind(listArchive(paxSparse.bytes())) == ErrorKind::Unsupported);
 }
 
-TEST_CASE("TarReader end-of-archive variants") {
+TEST_CASE("Reader end-of-archive variants") {
     auto entryThen = [](auto&& finish) {
         ArchiveBuilder builder;
         builder.entry(named("a"), "data");

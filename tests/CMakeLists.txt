@@ -16,7 +16,7 @@ add_executable(bale_tests
     format/tlv_test.cpp
     formats/tar/header_test.cpp
     formats/tar/reader_test.cpp
-    formats/zip/zip_reader_test.cpp
+    formats/zip/reader_test.cpp
     io/byte_reader_test.cpp
     io/file_test.cpp
     security/archive_path_test.cpp
