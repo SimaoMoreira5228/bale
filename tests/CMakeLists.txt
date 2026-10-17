@@ -11,6 +11,7 @@ include(${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake)
 
 add_executable(bale_tests
     base/checked_test.cpp
+    checksum/blake3_test.cpp
     checksum/crc_test.cpp
     cli/single_file_test.cpp
     cli/terminal_text_test.cpp
