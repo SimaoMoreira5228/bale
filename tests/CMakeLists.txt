@@ -14,6 +14,7 @@ add_executable(bale_tests
     checksum/crc_test.cpp
     format/envelope_test.cpp
     format/tlv_test.cpp
+    formats/zip/zip_reader_test.cpp
     io/byte_reader_test.cpp
     io/file_test.cpp
     security/archive_path_test.cpp
@@ -23,6 +24,7 @@ add_executable(bale_tests
 target_link_libraries(bale_tests PRIVATE
     bale_checksum
     bale_format
+    bale_formats_zip
     bale_io
     bale_security
     bale_warnings
