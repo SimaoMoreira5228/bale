@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(BALE_BUILD_TESTS "Build the bale test suite" ${PROJECT_IS_TOP_LEVEL})
 option(BALE_BUILD_BENCHMARKS "Build the bale micro-benchmarks" OFF)
+option(BALE_BUILD_FUZZERS "Build the libFuzzer targets with ASan and UBSan (Clang only)" OFF)
 option(BALE_WERROR "Treat compiler warnings as errors" OFF)
 option(
     BALE_LINK_COMPILE_COMMANDS
@@ -58,6 +59,18 @@ endif()
 
 include(cmake/Dependencies.cmake)
 
+if(BALE_BUILD_FUZZERS)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        message(FATAL_ERROR "BALE_BUILD_FUZZERS requires Clang")
+    endif()
+    add_compile_options(
+        -fsanitize=fuzzer-no-link,address,undefined
+        -fno-sanitize-recover=undefined
+        -fno-omit-frame-pointer
+    )
+    add_link_options(-fsanitize=address,undefined)
+endif()
+
 add_subdirectory(src)
 
 if(BALE_BUILD_BENCHMARKS)
@@ -67,4 +80,8 @@ endif()
 if(BALE_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+if(BALE_BUILD_FUZZERS)
+    add_subdirectory(tests/fuzz)
 endif()

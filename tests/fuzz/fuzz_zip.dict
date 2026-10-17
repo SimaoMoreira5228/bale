@@ -1,0 +1,8 @@
+local="PK\x03\x04"
+central="PK\x01\x02"
+end="PK\x05\x06"
+zip64_end="PK\x06\x06"
+zip64_locator="PK\x06\x07"
+descriptor="PK\x07\x08"
+timestamp_extra="UT"
+saturated32="\xff\xff\xff\xff"

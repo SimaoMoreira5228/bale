@@ -1,0 +1,4 @@
+superblock="BALE\x0d\x0a\x1a\x0a"
+record="BLR1"
+trailer="END1"
+footer="BALEFTR1"
