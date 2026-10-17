@@ -86,6 +86,32 @@ Result<File> File::openRead(const std::filesystem::path& path) {
     return File(handle);
 }
 
+Result<File> File::openRegularNoFollow(const std::filesystem::path& path) {
+    HANDLE handle = CreateFileW(
+        path.c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+        nullptr
+    );
+    if (handle == INVALID_HANDLE_VALUE) {
+        return systemFailure("cannot open file for reading");
+    }
+    File file(handle);
+
+    BY_HANDLE_FILE_INFORMATION information{};
+    if (!GetFileInformationByHandle(handle, &information)) {
+        return systemFailure("cannot query file information");
+    }
+    constexpr DWORD notRegular = FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT;
+    if ((information.dwFileAttributes & notRegular) != 0 || GetFileType(handle) != FILE_TYPE_DISK) {
+        return fail(ErrorKind::Unsupported, "not a regular file");
+    }
+    return file;
+}
+
 Result<File> File::createNew(const std::filesystem::path& path) {
     HANDLE handle = CreateFileW(
         path.c_str(),
@@ -97,7 +123,11 @@ Result<File> File::createNew(const std::filesystem::path& path) {
         nullptr
     );
     if (handle == INVALID_HANDLE_VALUE) {
-        return systemFailure("cannot create file");
+        auto failure = systemFailure("cannot create file");
+        if (failure.error().systemCode == ERROR_FILE_EXISTS) {
+            failure.error().kind = ErrorKind::AlreadyExists;
+        }
+        return failure;
     }
     return File(handle);
 }
@@ -176,6 +206,27 @@ Result<File> File::openRead(const std::filesystem::path& path) {
     return File(fd);
 }
 
+Result<File> File::openRegularNoFollow(const std::filesystem::path& path) {
+    int fd = -1;
+    do {
+        fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    } while (fd < 0 && errno == EINTR);
+
+    if (fd < 0) {
+        return systemFailure("cannot open file for reading");
+    }
+    File file(fd);
+
+    struct stat status{};
+    if (::fstat(fd, &status) != 0) {
+        return systemFailure("cannot query file status");
+    }
+    if (!S_ISREG(status.st_mode)) {
+        return fail(ErrorKind::Unsupported, "not a regular file");
+    }
+    return file;
+}
+
 Result<File> File::createNew(const std::filesystem::path& path) {
     int fd = -1;
     do {
@@ -183,7 +234,11 @@ Result<File> File::createNew(const std::filesystem::path& path) {
     } while (fd < 0 && errno == EINTR);
 
     if (fd < 0) {
-        return systemFailure("cannot create file");
+        auto failure = systemFailure("cannot create file");
+        if (failure.error().systemCode == EEXIST) {
+            failure.error().kind = ErrorKind::AlreadyExists;
+        }
+        return failure;
     }
     return File(fd);
 }

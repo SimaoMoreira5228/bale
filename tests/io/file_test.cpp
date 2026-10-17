@@ -6,6 +6,7 @@
 
 #include <array>
 #include <filesystem>
+#include <system_error>
 
 using namespace bale;
 
@@ -45,8 +46,28 @@ TEST_CASE("File::createNew refuses an existing path") {
 
     auto again = File::createNew(temp.path());
     REQUIRE_FALSE(again);
-    CHECK(again.error().kind == ErrorKind::Io);
+    CHECK(again.error().kind == ErrorKind::AlreadyExists);
     CHECK(again.error().systemCode != 0);
+}
+
+TEST_CASE("File::openRegularNoFollow opens regular files and refuses directories and symlinks") {
+    TempPath temp;
+    std::filesystem::create_directories(temp.path());
+    auto regular = temp.path() / "regular";
+    REQUIRE(File::createNew(regular));
+
+    CHECK(File::openRegularNoFollow(regular));
+
+    auto directory = File::openRegularNoFollow(temp.path());
+    REQUIRE_FALSE(directory);
+
+    std::error_code error;
+    std::filesystem::create_symlink(regular, temp.path() / "link", error);
+    if (!error) {
+        auto link = File::openRegularNoFollow(temp.path() / "link");
+        REQUIRE_FALSE(link);
+        CHECK(File::openRead(temp.path() / "link"));
+    }
 }
 
 TEST_CASE("File::openRead reports a missing file") {

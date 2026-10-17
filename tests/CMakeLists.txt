@@ -10,6 +10,7 @@ FetchContent_MakeAvailable(doctest)
 include(${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake)
 
 add_executable(bale_tests
+    archive/archive_test.cpp
     archive/schema_test.cpp
     base/checked_test.cpp
     checksum/blake3_test.cpp
