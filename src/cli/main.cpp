@@ -1,11 +1,16 @@
 #include "cli/archive_commands.hpp"
 
+#include <charconv>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <exception>
+#include <limits>
+#include <optional>
 #include <print>
 #include <span>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace {
@@ -15,6 +20,9 @@ using bale::cli::ExitCode;
 constexpr std::string_view usage = R"(usage: bale <command> [arguments]
 
 commands:
+  create <archive.bale> <dir> [options]
+      --chunk-size <n>        chunk size in bytes, K or M suffix allowed (default 1M)
+      --sync                  flush the archive to disk before writing its footer
   list <archive> [--long]   list entries, --long adds type, size and modification time
   test <archive>            check archive structure and entry checksums
   extract <archive> [options]
@@ -58,6 +66,60 @@ int runList(std::span<const std::string_view> arguments) {
         return usageError("list needs an archive");
     }
     return exitWith(bale::cli::listArchive(archive, options));
+}
+
+std::optional<std::uint32_t> parseSize(std::string_view text) {
+    std::uint64_t multiplier = 1;
+    if (text.ends_with('K') || text.ends_with('k')) {
+        multiplier = 1024;
+        text.remove_suffix(1);
+    } else if (text.ends_with('M') || text.ends_with('m')) {
+        multiplier = std::uint64_t{1024} * 1024;
+        text.remove_suffix(1);
+    }
+
+    std::uint64_t value = 0;
+    auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (error != std::errc{} || end != text.data() + text.size() || text.empty()) {
+        return std::nullopt;
+    }
+    if (value > std::numeric_limits<std::uint32_t>::max() / multiplier) {
+        return std::nullopt;
+    }
+    return static_cast<std::uint32_t>(value * multiplier);
+}
+
+int runCreate(std::span<const std::string_view> arguments) {
+    bale::cli::CreateOptions options;
+    std::vector<std::string_view> positional;
+    for (std::size_t index = 0; index < arguments.size(); ++index) {
+        std::string_view argument = arguments[index];
+        if (argument == "--chunk-size") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--chunk-size needs a size");
+            }
+            ++index;
+            auto size = parseSize(arguments[index]);
+            if (!size) {
+                return usageError("invalid --chunk-size");
+            }
+            options.chunkSize = *size;
+            continue;
+        }
+        if (argument == "--sync") {
+            options.durable = true;
+            continue;
+        }
+        if (argument.starts_with('-')) {
+            return usageError("unknown option for create");
+        }
+        positional.push_back(argument);
+    }
+
+    if (positional.size() != 2) {
+        return usageError("create takes an archive and a directory");
+    }
+    return exitWith(bale::cli::createArchive(positional[0], positional[1], options));
 }
 
 int runTest(std::span<const std::string_view> arguments) {
@@ -124,14 +186,7 @@ int runFormats() {
     printFormat("tar.zst", "tar inside zstd, recognized by content; read as one stream");
     printFormat("gzip", "one compressed file, multi-member; named by FNAME or archive name");
     printFormat("zstd", "one compressed file, multi-frame, window up to 128 MiB");
-    std::println(
-        "{:<8} {:<5} {:<5} {:<8} {}",
-        "bale",
-        "no",
-        "no",
-        "no",
-        "native format reader not implemented yet"
-    );
+    printFormat("bale", "native format, also written by bale create; raw chunks, not frozen");
     return exitWith(ExitCode::Ok);
 }
 
@@ -145,6 +200,9 @@ int run(std::span<char*> argv) {
     auto rest = std::span<const std::string_view>(arguments).subspan(1);
     if (command == "list") {
         return runList(rest);
+    }
+    if (command == "create") {
+        return runCreate(rest);
     }
     if (command == "test") {
         return runTest(rest);

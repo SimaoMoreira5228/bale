@@ -1,5 +1,6 @@
 #include "cli/archive_commands.hpp"
 
+#include "archive/reader.hpp"
 #include "cli/terminal_text.hpp"
 #include "formats/compressed/stream.hpp"
 #include "formats/detect.hpp"
@@ -203,6 +204,88 @@ ExitCode listTar(std::string_view argument, OpenedArchive archive, const ListOpt
     }
 }
 
+[[nodiscard]] char baleKind(archive::EntryKind kind) {
+    switch (kind) {
+    case archive::EntryKind::Regular:
+        return '-';
+    case archive::EntryKind::Directory:
+        return 'd';
+    case archive::EntryKind::Symlink:
+        return 'l';
+    case archive::EntryKind::HardLink:
+        return 'h';
+    }
+    return '?';
+}
+
+[[nodiscard]] std::optional<CivilTime> baleTime(const archive::ManifestEntry& entry) {
+    constexpr std::int64_t perSecond = 1'000'000'000;
+    if (!entry.mtimeNanoseconds) {
+        return std::nullopt;
+    }
+
+    std::int64_t seconds = *entry.mtimeNanoseconds / perSecond;
+    if (*entry.mtimeNanoseconds % perSecond < 0) {
+        --seconds;
+    }
+    return civilFromUnix(seconds);
+}
+
+ExitCode listBale(std::string_view argument, File file, const ListOptions& options) {
+    auto reader = archive::Reader::open(std::move(file));
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    std::string escapedPath;
+    std::string escapedTarget;
+    for (const auto& entry : reader->manifest().entries) {
+        auto path = escapeForTerminal(entry.path, escapedPath);
+        if (!options.detailed) {
+            std::println("{}", path);
+            continue;
+        }
+
+        printRow(
+            baleKind(entry.kind),
+            entry.length,
+            baleTime(entry),
+            path,
+            escapeForTerminal(entry.target, escapedTarget)
+        );
+    }
+    return ExitCode::Ok;
+}
+
+ExitCode testBale(std::string_view argument, File file) {
+    auto reader = archive::Reader::open(std::move(file));
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    auto report = reader->verify(archive::VerifyMode::Content);
+    if (!report) {
+        return reportFailure(argument, report.error());
+    }
+
+    std::println(
+        "ok: {} entries, {} chunks ({} bytes) match their BLAKE3 digests",
+        reader->manifest().entries.size(),
+        report->chunksVerified,
+        report->bytesVerified
+    );
+    if (report->unindexedDataRecords != 0) {
+        std::println("note: {} unreferenced data records", report->unindexedDataRecords);
+    }
+    if (reader->ignoredTrailingBytes() != 0) {
+        std::println(
+            "note: ignored {} trailing bytes after the footer",
+            reader->ignoredTrailingBytes()
+        );
+    }
+    return ExitCode::Ok;
+}
+
 ExitCode testZip(std::string_view argument, File file) {
     auto reader = zip::Reader::open(std::move(file));
     if (!reader) {
@@ -375,9 +458,6 @@ Result<OpenedArchive> openArchive(std::string_view argument) {
     if (format->container == Container::Unknown) {
         return fail(ErrorKind::Unsupported, "unrecognized archive format");
     }
-    if (format->container == Container::Bale) {
-        return fail(ErrorKind::Unsupported, "native BALE archives cannot be read yet");
-    }
 
     return OpenedArchive{
         .file = std::move(*file),
@@ -432,6 +512,8 @@ ExitCode listArchive(std::string_view argument, const ListOptions& options) {
     }
 
     switch (archive->format.container) {
+    case Container::Bale:
+        return listBale(argument, std::move(archive->file), options);
     case Container::Zip:
         return listZip(argument, std::move(archive->file), options);
     case Container::SingleFile:
@@ -448,6 +530,8 @@ ExitCode testArchive(std::string_view argument) {
     }
 
     switch (archive->format.container) {
+    case Container::Bale:
+        return testBale(argument, std::move(archive->file));
     case Container::Zip:
         return testZip(argument, std::move(archive->file));
     case Container::SingleFile:
