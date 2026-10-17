@@ -14,6 +14,8 @@ add_executable(bale_tests
     checksum/crc_test.cpp
     format/envelope_test.cpp
     format/tlv_test.cpp
+    formats/tar/header_test.cpp
+    formats/tar/reader_test.cpp
     formats/zip/zip_reader_test.cpp
     io/byte_reader_test.cpp
     io/file_test.cpp
@@ -21,9 +23,11 @@ add_executable(bale_tests
     security/budget_test.cpp
     security/case_fold_test.cpp
 )
+target_include_directories(bale_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(bale_tests PRIVATE
     bale_checksum
     bale_format
+    bale_formats_tar
     bale_formats_zip
     bale_io
     bale_security
