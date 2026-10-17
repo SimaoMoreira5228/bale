@@ -88,6 +88,8 @@ const std::array rejected{
     Rejected{"C:\\x"sv, portable, ErrorKind::UnsafePath, "drive-letter prefix in path"},
     Rejected{"C:x"sv, portable, ErrorKind::UnsafePath, "drive-letter prefix in path"},
     Rejected{"z:/x"sv, posixRaw, ErrorKind::UnsafePath, "drive-letter prefix in path"},
+    Rejected{"./C:t"sv, posixRaw, ErrorKind::UnsafePath, "drive-letter prefix in path"},
+    Rejected{".//z:/x"sv, posixUtf8, ErrorKind::UnsafePath, "drive-letter prefix in path"},
     Rejected{"a\0b"sv, portable, ErrorKind::UnsafePath, "NUL byte in path"},
     Rejected{"a/\0"sv, posixRaw, ErrorKind::UnsafePath, "NUL byte in path"},
     Rejected{"a/\xC0\xAF"sv, portable, ErrorKind::UnsafePath, "overlong UTF-8 encoding in path"},

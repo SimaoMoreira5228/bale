@@ -167,6 +167,10 @@ Result<void> checkWindowsName(std::string_view component) {
     return {};
 }
 
+[[nodiscard]] constexpr bool hasDrivePrefix(std::string_view text) {
+    return text.size() >= 2 && isAsciiAlpha(text[0]) && text[1] == ':';
+}
+
 Result<void> checkPrefix(std::string_view text) {
     if (isSlashLike(text[0])) {
         if (text.size() > 1 && isSlashLike(text[1])) {
@@ -175,7 +179,7 @@ Result<void> checkPrefix(std::string_view text) {
         return fail(ErrorKind::UnsafePath, "absolute path");
     }
 
-    if (text.size() >= 2 && isAsciiAlpha(text[0]) && text[1] == ':') {
+    if (hasDrivePrefix(text)) {
         return fail(ErrorKind::UnsafePath, "drive-letter prefix in path");
     }
     return {};
@@ -216,6 +220,10 @@ Result<void> appendComponent(
         if (!checked) {
             return checked;
         }
+    }
+
+    if (out.empty() && hasDrivePrefix(component)) {
+        return fail(ErrorKind::UnsafePath, "drive-letter prefix in path");
     }
 
     if (depth >= limits.maxDepth) {
