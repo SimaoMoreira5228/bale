@@ -23,6 +23,7 @@ configure() {
     cmake -S "$repo_root" -B "$dir" "${generator_args[@]}" \
         --no-warn-unused-cli \
         -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+        -DBALE_WERROR=ON \
         "$@"
 }
 

@@ -5,7 +5,8 @@ Checks: >
   clang-analyzer-*,
   -clang-analyzer-optin.core.EnumCastOutOfRange,
   performance-*,
-  portability-*
+  portability-*,
+  -portability-avoid-pragma-once
 WarningsAsErrors: '*'
 HeaderFilterRegex: '.*/(include/bale|src|apps|tests|tools)/'
 FormatStyle: file
