@@ -2,8 +2,8 @@
 
 #include "base/error.hpp"
 #include "formats/tar/header.hpp"
+#include "formats/tar/source.hpp"
 #include "io/chunk_sink.hpp"
-#include "io/file.hpp"
 
 #include <algorithm>
 #include <array>
@@ -37,29 +37,36 @@ struct Entry {
     char typeflag = '0';
 };
 
+// NOTE: works the same over a seekable file and a decompressed stream; entry data must be read
+// before moving on, and next() skips whatever part of it was not read. Offsets in entries and
+// errors count bytes of the tar data, which for a compressed archive is the decompressed stream.
 class Reader {
   public:
-    [[nodiscard]] static Result<Reader> open(File file, const Limits& limits = {});
+    explicit Reader(Source source, const Limits& limits = {}) :
+        source_(std::move(source)), limits_(limits) {
+    }
 
-    // NOTE: returns nullptr at the end of the archive. The entry and its string views stay valid
-    // only until the next call to next() or until the reader is moved or destroyed. After an
-    // error every later call returns the same error.
+    // NOTE: returns nullptr at the end of the archive, after a compressed source was drained and
+    // verified. The entry and its string views stay valid only until the next call to next() or
+    // until the reader is moved or destroyed. After an error every later call returns the same
+    // error.
     [[nodiscard]] Result<const Entry*> next();
 
+    // NOTE: streams the part of the current entry's data not read yet.
     template <ChunkSink Sink>
-    [[nodiscard]] Result<void>
-    streamData(const Entry& entry, std::span<std::byte> scratch, Sink&& sink) const {
-        if (scratch.empty() && entry.size != 0) {
+    [[nodiscard]] Result<void> streamData(std::span<std::byte> scratch, Sink&& sink) {
+        if (failure_) {
+            return std::unexpected(*failure_);
+        }
+        if (scratch.empty() && dataLeft_ != 0) {
             return fail(ErrorKind::LimitExceeded, "scratch buffer is empty");
         }
 
-        std::uint64_t position = entry.dataOffset;
-        std::uint64_t remaining = entry.size;
-        while (remaining > 0) {
+        while (dataLeft_ > 0) {
             auto chunk = scratch.first(
-                static_cast<std::size_t>(std::min<std::uint64_t>(remaining, scratch.size()))
+                static_cast<std::size_t>(std::min<std::uint64_t>(dataLeft_, scratch.size()))
             );
-            auto read = file_.readExactAt(position, chunk);
+            auto read = readData(chunk);
             if (!read) {
                 return read;
             }
@@ -68,9 +75,6 @@ class Reader {
             if (!sunk) {
                 return sunk;
             }
-
-            position += chunk.size();
-            remaining -= chunk.size();
         }
         return {};
     }
@@ -82,21 +86,20 @@ class Reader {
         End,
     };
 
-    Reader(File file, std::uint64_t fileSize, const Limits& limits) :
-        file_(std::move(file)), fileSize_(fileSize), limits_(limits) {
-    }
-
     [[nodiscard]] Result<const Entry*> readNext();
-    [[nodiscard]] Result<BlockState> readBlock(std::uint64_t offset);
-    [[nodiscard]] Result<std::uint64_t> dataEnd(std::uint64_t dataOffset, std::uint64_t size) const;
+    [[nodiscard]] Result<void> readData(std::span<std::byte> out);
+    [[nodiscard]] Result<void> readExact(std::span<std::byte> out);
+    [[nodiscard]] Result<BlockState> readBlock();
+    [[nodiscard]] Result<std::uint64_t> padding(std::uint64_t dataOffset, std::uint64_t size) const;
     [[nodiscard]] Result<void> readMetaData(const Header& header, std::string& buffer);
     [[nodiscard]] Result<const Entry*> endOfArchive(BlockState state, bool pendingMeta);
     [[nodiscard]] Result<const Entry*> finishEntry(const Header& header);
 
-    File file_;
-    std::uint64_t fileSize_;
+    Source source_;
     Limits limits_;
     std::uint64_t position_ = 0;
+    std::uint64_t dataLeft_ = 0;
+    std::uint64_t paddingLeft_ = 0;
     std::uint64_t entryCount_ = 0;
     bool done_ = false;
     std::optional<Error> failure_;

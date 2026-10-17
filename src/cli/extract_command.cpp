@@ -1,5 +1,6 @@
 #include "cli/archive_commands.hpp"
 #include "cli/terminal_text.hpp"
+#include "formats/compressed/stream.hpp"
 #include "formats/tar/reader.hpp"
 #include "formats/zip/reader.hpp"
 #include "security/archive_path.hpp"
@@ -141,7 +142,7 @@ template <typename Stream>
 }
 
 [[nodiscard]] Result<EntryResult>
-extractTarEntry(Session& session, const tar::Reader& reader, const tar::Entry& entry) {
+extractTarEntry(Session& session, tar::Reader& reader, const tar::Entry& entry) {
     auto path = session.path(entry.path);
     if (!path) {
         return std::unexpected(path.error());
@@ -156,7 +157,7 @@ extractTarEntry(Session& session, const tar::Reader& reader, const tar::Entry& e
         return session.extractor().createDirectory(*path, metadata);
     case tar::EntryKind::Regular:
         return writeFile(session, *path, metadata, [&](auto&& sink) {
-            return reader.streamData(entry, session.scratch(), sink);
+            return reader.streamData(session.scratch(), sink);
         });
     case tar::EntryKind::Symlink:
         return session.extractor().createSymlink(*path, entry.linkTarget, metadata);
@@ -185,14 +186,15 @@ extractTarEntry(Session& session, const tar::Reader& reader, const tar::Entry& e
     };
 }
 
-ExitCode extractTar(std::string_view argument, File file, Session& session) {
-    auto reader = tar::Reader::open(std::move(file));
-    if (!reader) {
-        return reportFailure(argument, reader.error());
+ExitCode extractTar(std::string_view argument, OpenedArchive archive, Session& session) {
+    auto source = openTarSource(std::move(archive.file), archive.format.compression);
+    if (!source) {
+        return reportFailure(argument, source.error());
     }
 
+    tar::Reader reader(std::move(*source));
     while (true) {
-        auto next = reader->next();
+        auto next = reader.next();
         if (!next) {
             session.fail(argument, next.error());
             return session.finish();
@@ -203,12 +205,38 @@ ExitCode extractTar(std::string_view argument, File file, Session& session) {
             return session.finish();
         }
 
-        auto result = extractTarEntry(session, *reader, *entry);
+        auto result = extractTarEntry(session, reader, *entry);
         session.record(entry->path, result);
         if (!result && result.error().kind == ErrorKind::LimitExceeded) {
             return session.finish();
         }
     }
+}
+
+ExitCode extractSingleFile(std::string_view argument, OpenedArchive archive, Session& session) {
+    auto stream = CompressedStream::open(std::move(archive.file), archive.format.compression);
+    if (!stream) {
+        return reportFailure(argument, stream.error());
+    }
+
+    std::string normalized;
+    auto path = singleFileName(argument, *stream, normalized);
+    if (!path) {
+        session.fail(argument, path.error());
+        return session.finish();
+    }
+
+    EntryMetadata metadata;
+    const auto* header = stream->gzipHeader();
+    if (header != nullptr && header->mtime != 0) {
+        metadata.mtimeNanoseconds = mtimeNanoseconds(header->mtime, 0);
+    }
+
+    auto result = writeFile(session, *path, metadata, [&](auto&& sink) {
+        return stream->readAll(session.scratch(), sink);
+    });
+    session.record(path->path, result);
+    return session.finish();
 }
 
 [[nodiscard]] bool isZipSymlink(const zip::Entry& entry) {
@@ -303,14 +331,17 @@ ExitCode extractArchive(
     }
 
     PathPolicy pathPolicy;
-    if (archive->format == ArchiveFormat::Zip) {
+    if (archive->format.container == Container::Zip) {
         pathPolicy.backslash = Backslash::Separator;
         Session session(std::move(*extractor), policy, pathPolicy);
         return extractZip(argument, std::move(archive->file), session);
     }
 
     Session session(std::move(*extractor), policy, pathPolicy);
-    return extractTar(argument, std::move(archive->file), session);
+    if (archive->format.container == Container::SingleFile) {
+        return extractSingleFile(argument, std::move(*archive), session);
+    }
+    return extractTar(argument, std::move(*archive), session);
 }
 
 }

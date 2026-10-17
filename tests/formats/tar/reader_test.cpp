@@ -98,24 +98,25 @@ TEST_CASE("Reader reuses one entry and keeps returning end after the archive") {
     bale::test::TempFile archive(builder.bytes());
     auto file = archive.open();
     REQUIRE(file);
-    auto reader = Reader::open(std::move(*file));
-    REQUIRE(reader);
+    auto source = Source::open(std::move(*file));
+    REQUIRE(source);
+    Reader reader(std::move(*source));
 
-    auto first = reader->next();
+    auto first = reader.next();
     REQUIRE(first);
     REQUIRE(*first != nullptr);
     CHECK((*first)->path == std::string(100, 'a'));
     CHECK((*first)->uname == "user");
     CHECK((*first)->headerOffset == 0);
 
-    auto second = reader->next();
+    auto second = reader.next();
     REQUIRE(second);
     CHECK(*second == *first);
     CHECK((*second)->path == "b");
     CHECK((*second)->headerOffset == 1024);
 
-    CHECK(reader->next() == nullptr);
-    CHECK(reader->next() == nullptr);
+    CHECK(reader.next() == nullptr);
+    CHECK(reader.next() == nullptr);
 }
 
 TEST_CASE("Reader applies pax per-entry and global overrides") {
@@ -139,10 +140,11 @@ TEST_CASE("Reader applies pax per-entry and global overrides") {
     bale::test::TempFile archive(builder.bytes());
     auto file = archive.open();
     REQUIRE(file);
-    auto reader = Reader::open(std::move(*file));
-    REQUIRE(reader);
+    auto source = Source::open(std::move(*file));
+    REQUIRE(source);
+    Reader reader(std::move(*source));
 
-    auto entry = reader->next();
+    auto entry = reader.next();
     REQUIRE(entry);
     REQUIRE(*entry != nullptr);
     CHECK((*entry)->path == longPath);
@@ -153,7 +155,7 @@ TEST_CASE("Reader applies pax per-entry and global overrides") {
     CHECK((*entry)->uid == 1000);
     CHECK((*entry)->uname == "builder");
 
-    entry = reader->next();
+    entry = reader.next();
     REQUIRE(entry);
     REQUIRE(*entry != nullptr);
     CHECK((*entry)->path == "plain");
@@ -162,13 +164,13 @@ TEST_CASE("Reader applies pax per-entry and global overrides") {
     CHECK((*entry)->mtimeNanoseconds == 0);
     CHECK((*entry)->uid == 1000);
 
-    entry = reader->next();
+    entry = reader.next();
     REQUIRE(entry);
     REQUIRE(*entry != nullptr);
     CHECK((*entry)->uid == 5);
     CHECK((*entry)->uname == "builder");
 
-    CHECK(reader->next() == nullptr);
+    CHECK(reader.next() == nullptr);
 }
 
 TEST_CASE("Reader reads GNU long names and base-256 sizes") {

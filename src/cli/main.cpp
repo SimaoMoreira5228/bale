@@ -112,25 +112,22 @@ int runExtract(std::span<const std::string_view> arguments) {
     return exitWith(bale::cli::extractArchive(archive, output, policy));
 }
 
+void printFormat(std::string_view format, std::string_view notes) {
+    std::println("{:<8} {:<5} {:<5} {:<8} {}", format, "yes", "yes", "yes", notes);
+}
+
 int runFormats() {
-    std::println("{:<6} {:<5} {:<5} {}", "format", "list", "test", "notes");
+    std::println("{:<8} {:<5} {:<5} {:<8} {}", "format", "list", "test", "extract", "notes");
+    printFormat("zip", "stored and deflate, ZIP64, no encryption");
+    printFormat("tar", "ustar, pax, GNU long names; no sparse files");
+    printFormat("tar.gz", "tar inside gzip, recognized by content; read as one stream");
+    printFormat("tar.zst", "tar inside zstd, recognized by content; read as one stream");
+    printFormat("gzip", "one compressed file, multi-member; named by FNAME or archive name");
+    printFormat("zstd", "one compressed file, multi-frame, window up to 128 MiB");
     std::println(
-        "{:<6} {:<5} {:<5} {}",
-        "zip",
-        "yes",
-        "yes",
-        "stored and deflate, ZIP64, no encryption"
-    );
-    std::println(
-        "{:<6} {:<5} {:<5} {}",
-        "tar",
-        "yes",
-        "yes",
-        "ustar, pax, GNU long names; no sparse files"
-    );
-    std::println(
-        "{:<6} {:<5} {:<5} {}",
+        "{:<8} {:<5} {:<5} {:<8} {}",
         "bale",
+        "no",
         "no",
         "no",
         "native format reader not implemented yet"

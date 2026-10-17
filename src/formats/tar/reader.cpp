@@ -1,7 +1,5 @@
 #include "formats/tar/reader.hpp"
 
-#include "base/checked.hpp"
-
 #include <span>
 #include <utility>
 
@@ -37,14 +35,6 @@ std::string_view pickText(
 
 }
 
-Result<Reader> Reader::open(File file, const Limits& limits) {
-    auto size = file.size();
-    if (!size) {
-        return std::unexpected(size.error());
-    }
-    return Reader(std::move(file), *size, limits);
-}
-
 Result<const Entry*> Reader::next() {
     if (failure_) {
         return std::unexpected(*failure_);
@@ -61,6 +51,13 @@ Result<const Entry*> Reader::next() {
 }
 
 Result<const Entry*> Reader::readNext() {
+    auto skipped = source_.skip(dataLeft_ + paddingLeft_);
+    if (!skipped) {
+        return std::unexpected(skipped.error());
+    }
+    dataLeft_ = 0;
+    paddingLeft_ = 0;
+
     localPax_.clear();
     hasLongPath_ = false;
     hasLongLink_ = false;
@@ -68,7 +65,7 @@ Result<const Entry*> Reader::readNext() {
     while (true) {
         bool pendingMeta = hasLongPath_ || hasLongLink_ || !localPax_.empty();
 
-        auto state = readBlock(position_);
+        auto state = readBlock();
         if (!state) {
             return std::unexpected(state.error());
         }
@@ -145,31 +142,54 @@ Result<const Entry*> Reader::readNext() {
     }
 }
 
-Result<Reader::BlockState> Reader::readBlock(std::uint64_t offset) {
-    auto remaining = fileSize_ - offset;
-    if (remaining == 0) {
-        return BlockState::End;
-    }
-    if (remaining < blockSize) {
-        return fail(ErrorKind::Truncated, "tar archive ends inside a header block", offset);
+Result<void> Reader::readData(std::span<std::byte> out) {
+    auto read = readExact(out);
+    if (!read) {
+        failure_ = read.error();
+        return read;
     }
 
-    auto read = file_.readExactAt(offset, block_);
-    if (!read) {
-        return std::unexpected(read.error());
+    dataLeft_ -= out.size();
+    return {};
+}
+
+Result<void> Reader::readExact(std::span<std::byte> out) {
+    auto count = source_.readFull(out);
+    if (!count) {
+        return std::unexpected(count.error());
+    }
+    if (*count < out.size()) {
+        return fail(ErrorKind::Truncated, "tar archive ends inside entry data", source_.position());
+    }
+    return {};
+}
+
+Result<Reader::BlockState> Reader::readBlock() {
+    position_ = source_.position();
+    auto count = source_.readFull(block_);
+    if (!count) {
+        return std::unexpected(count.error());
+    }
+    if (*count == 0) {
+        return BlockState::End;
+    }
+    if (*count < blockSize) {
+        return fail(ErrorKind::Truncated, "tar archive ends inside a header block", position_);
     }
     return isZeroBlock(block_) ? BlockState::Zero : BlockState::Header;
 }
 
-Result<std::uint64_t> Reader::dataEnd(std::uint64_t dataOffset, std::uint64_t size) const {
+Result<std::uint64_t> Reader::padding(std::uint64_t dataOffset, std::uint64_t size) const {
     auto padded = paddedSize(size);
     if (!padded) {
         return fail(ErrorKind::Malformed, "tar entry size overflows", dataOffset);
     }
-    if (!fitsWithin(dataOffset, *padded, fileSize_)) {
+
+    auto remaining = source_.remaining();
+    if (remaining && *padded > *remaining) {
         return fail(ErrorKind::Truncated, "tar entry data extends past end of file", dataOffset);
     }
-    return dataOffset + *padded;
+    return *padded - size;
 }
 
 Result<void> Reader::readMetaData(const Header& header, std::string& buffer) {
@@ -177,20 +197,17 @@ Result<void> Reader::readMetaData(const Header& header, std::string& buffer) {
         return fail(ErrorKind::LimitExceeded, "tar extended header exceeds limit", position_);
     }
 
-    auto dataOffset = position_ + blockSize;
-    auto end = dataEnd(dataOffset, header.size);
-    if (!end) {
-        return std::unexpected(end.error());
+    auto pad = padding(position_ + blockSize, header.size);
+    if (!pad) {
+        return std::unexpected(pad.error());
     }
 
     buffer.resize(static_cast<std::size_t>(header.size));
-    auto read = file_.readExactAt(dataOffset, std::as_writable_bytes(std::span(buffer)));
+    auto read = readExact(std::as_writable_bytes(std::span(buffer)));
     if (!read) {
         return read;
     }
-
-    position_ = *end;
-    return {};
+    return source_.skip(*pad);
 }
 
 Result<const Entry*> Reader::endOfArchive(BlockState state, bool pendingMeta) {
@@ -199,17 +216,18 @@ Result<const Entry*> Reader::endOfArchive(BlockState state, bool pendingMeta) {
     }
 
     if (state == BlockState::Zero) {
-        auto second = readBlock(position_ + blockSize);
+        auto second = readBlock();
         if (!second) {
             return std::unexpected(second.error());
         }
         if (*second == BlockState::Header) {
-            return fail(
-                ErrorKind::Malformed,
-                "lone zero block before tar header",
-                position_ + blockSize
-            );
+            return fail(ErrorKind::Malformed, "lone zero block before tar header", position_);
         }
+    }
+
+    auto finished = source_.finish();
+    if (!finished) {
+        return std::unexpected(finished.error());
     }
 
     done_ = true;
@@ -256,9 +274,9 @@ Result<const Entry*> Reader::finishEntry(const Header& header) {
     }
 
     auto dataOffset = position_ + blockSize;
-    auto end = dataEnd(dataOffset, size);
-    if (!end) {
-        return std::unexpected(end.error());
+    auto pad = padding(dataOffset, size);
+    if (!pad) {
+        return std::unexpected(pad.error());
     }
 
     entry_ = Entry{};
@@ -302,7 +320,8 @@ Result<const Entry*> Reader::finishEntry(const Header& header) {
     }
 
     ++entryCount_;
-    position_ = *end;
+    dataLeft_ = size;
+    paddingLeft_ = *pad;
     return &entry_;
 }
 

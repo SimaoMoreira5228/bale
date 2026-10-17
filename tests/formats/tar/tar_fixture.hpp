@@ -167,23 +167,11 @@ struct Listing {
     std::optional<Error> error;
 };
 
-inline Listing listArchive(std::span<const std::byte> bytes, const Limits& limits = {}) {
+inline Listing listSource(Source source, const Limits& limits = {}) {
     Listing listing;
-    bale::test::TempFile archive(bytes);
-    auto file = archive.open();
-    if (!file) {
-        listing.error = file.error();
-        return listing;
-    }
-
-    auto reader = Reader::open(std::move(*file), limits);
-    if (!reader) {
-        listing.error = reader.error();
-        return listing;
-    }
-
+    Reader reader(std::move(source), limits);
     while (true) {
-        auto entry = reader->next();
+        auto entry = reader.next();
         if (!entry) {
             listing.error = entry.error();
             return listing;
@@ -202,6 +190,23 @@ inline Listing listArchive(std::span<const std::byte> bytes, const Limits& limit
             }
         );
     }
+}
+
+inline Listing listArchive(std::span<const std::byte> bytes, const Limits& limits = {}) {
+    Listing listing;
+    bale::test::TempFile archive(bytes);
+    auto file = archive.open();
+    if (!file) {
+        listing.error = file.error();
+        return listing;
+    }
+
+    auto source = Source::open(std::move(*file));
+    if (!source) {
+        listing.error = source.error();
+        return listing;
+    }
+    return listSource(std::move(*source), limits);
 }
 
 }
