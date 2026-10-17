@@ -12,6 +12,8 @@ include(${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake)
 add_executable(bale_tests
     base/checked_test.cpp
     checksum/crc_test.cpp
+    format/envelope_test.cpp
+    format/tlv_test.cpp
     io/byte_reader_test.cpp
     io/file_test.cpp
     security/archive_path_test.cpp
@@ -20,6 +22,7 @@ add_executable(bale_tests
 )
 target_link_libraries(bale_tests PRIVATE
     bale_checksum
+    bale_format
     bale_io
     bale_security
     bale_warnings
