@@ -1,7 +1,7 @@
 #pragma once
 
+#include "base/endian.hpp"
 #include "base/error.hpp"
-#include "io/endian.hpp"
 
 #include <cstddef>
 #include <cstdint>

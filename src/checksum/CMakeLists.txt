@@ -1,0 +1,2 @@
+add_library(bale_checksum INTERFACE)
+target_link_libraries(bale_checksum INTERFACE bale_base)
