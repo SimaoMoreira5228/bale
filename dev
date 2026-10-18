@@ -120,6 +120,23 @@ case "$cmd" in
             UBSAN_OPTIONS="${UBSAN_OPTIONS:-print_stacktrace=1}" \
             run_tests "$sanitize_dir" "$@"
         ;;
+    tsan)
+        tsan_dir="$build_root/tsan"
+        tsan_flags="-fsanitize=thread -fno-omit-frame-pointer"
+        # WORKAROUND: Fedora's GCC ships no libtsan, so ThreadSanitizer builds use Clang.
+        configure "$tsan_dir" \
+            -DCMAKE_C_COMPILER="${TSAN_CC:-clang}" \
+            -DCMAKE_CXX_COMPILER="${TSAN_CXX:-clang++}" \
+            -DBALE_LINK_COMPILE_COMMANDS=OFF \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="$tsan_flags" \
+            -DCMAKE_CXX_FLAGS="$tsan_flags" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=thread"
+        build "$tsan_dir"
+        TSAN_OPTIONS="${TSAN_OPTIONS:-halt_on_error=1:second_deadlock_stack=1}" \
+            run_tests "$tsan_dir" "$@"
+        ;;
     cover)
         cover_dir="$build_root/cover"
         configure "$cover_dir" \
@@ -200,6 +217,7 @@ usage: ./dev <command> [args...]
   build         build the dev build (extra args go to cmake --build)
   test          build and run ctest (extra args go to ctest)
   sanitize      build and test with ASan and UBSan in build/sanitize
+  tsan          build and test with ThreadSanitizer in build/tsan
   cover         build and test with coverage in build/cover, summary via gcovr
   windows       cross-build with MinGW in build/windows and run the tests under Wine
   run [target]  build and run an executable target (default: bale)
