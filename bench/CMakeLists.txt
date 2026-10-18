@@ -1,0 +1,2 @@
+add_executable(bale_bench_crc crc_bench.cpp)
+target_link_libraries(bale_bench_crc PRIVATE bale_checksum bale_warnings)

@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(BALE_BUILD_TESTS "Build the bale test suite" ${PROJECT_IS_TOP_LEVEL})
+option(BALE_BUILD_BENCHMARKS "Build the bale micro-benchmarks" OFF)
 option(BALE_WERROR "Treat compiler warnings as errors" OFF)
 option(
     BALE_LINK_COMPILE_COMMANDS
@@ -58,6 +59,10 @@ endif()
 include(cmake/Dependencies.cmake)
 
 add_subdirectory(src)
+
+if(BALE_BUILD_BENCHMARKS)
+    add_subdirectory(bench)
+endif()
 
 if(BALE_BUILD_TESTS)
     enable_testing()
