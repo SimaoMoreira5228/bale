@@ -35,11 +35,14 @@ class CaseFoldSet {
         std::size_t length = 0;
     };
 
+    void appendFolded(std::string_view path);
+
     void grow();
 
     std::uint64_t key0_ = 0;
     std::uint64_t key1_ = 0;
     std::string arena_;
+    std::vector<char32_t> scratch_;
     std::vector<Slot> slots_;
     std::size_t size_ = 0;
 };
