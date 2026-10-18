@@ -12,6 +12,7 @@ include(${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake)
 add_executable(bale_tests
     archive/archive_test.cpp
     archive/compression_test.cpp
+    archive/pipeline_test.cpp
     archive/schema_test.cpp
     archive/snapshot_test.cpp
     archive/tree_walk_test.cpp

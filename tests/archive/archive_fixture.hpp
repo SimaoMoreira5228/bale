@@ -68,6 +68,7 @@ inline archive::WriterOptions fixedOptions(std::uint32_t chunkSize = archive::de
     }
     options.archiveId = id;
     options.creationTimeNanoseconds = 1700000000000000000;
+    options.workers = 1;
     return options;
 }
 

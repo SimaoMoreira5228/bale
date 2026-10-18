@@ -1,5 +1,6 @@
 #include "archive/writer.hpp"
 
+#include "archive/chunk_pipeline.hpp"
 #include "archive/commit.hpp"
 #include "archive/reader.hpp"
 #include "base/checked.hpp"
@@ -11,6 +12,7 @@
 #include <chrono>
 #include <limits>
 #include <random>
+#include <thread>
 #include <utility>
 
 namespace bale::archive {
@@ -18,7 +20,10 @@ namespace bale::archive {
 namespace {
 
 constexpr std::string_view writerName = "bale";
-constexpr std::uint32_t maxReferences = std::numeric_limits<std::uint32_t>::max();
+constexpr std::uint32_t defaultWorkerCap = 8;
+// PERF: small records (descriptors, framing, tiny files) are coalesced into one write; a write
+// per record part cost more than the copy on a tree of small files.
+constexpr std::size_t outputBufferSize = std::size_t{256} * 1024;
 
 std::array<std::byte, 16> randomArchiveId() {
     std::random_device source;
@@ -37,84 +42,70 @@ std::int64_t currentTimeNanoseconds() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(now).count();
 }
 
-Result<void> checkAttributes(const EntryAttributes& attributes) {
+}
+
+std::uint32_t defaultWorkers() {
+    return std::clamp<std::uint32_t>(std::thread::hardware_concurrency(), 1, defaultWorkerCap);
+}
+
+Result<void> Writer::checkAttributes(const EntryAttributes& attributes) {
     if (attributes.mode && *attributes.mode > maxPermissionBits) {
         return fail(ErrorKind::Malformed, "mode has bits outside the permission bits");
     }
     return {};
 }
 
-}
-
-const IndexEntry*
-Writer::ChunkTable::find(std::span<const IndexEntry> entries, const ChunkKey& key) const {
-    if (slots_.empty()) {
-        return nullptr;
-    }
-
-    std::size_t mask = slots_.size() - 1;
-    for (std::size_t slot = slotFor(key);; slot = (slot + 1) & mask) {
-        std::uint32_t stored = slots_[slot];
-        if (stored == 0) {
-            return nullptr;
-        }
-        if (entries[stored - 1].key == key) {
-            return &entries[stored - 1];
-        }
-    }
-}
-
-void Writer::ChunkTable::insert(std::span<const IndexEntry> entries, std::uint32_t position) {
-    if ((size_ + 1) * 2 > slots_.size()) {
-        grow(entries);
-    }
-
-    std::size_t mask = slots_.size() - 1;
-    std::size_t slot = slotFor(entries[position].key);
-    while (slots_[slot] != 0) {
-        slot = (slot + 1) & mask;
-    }
-    slots_[slot] = position + 1;
-    ++size_;
-}
-
-std::size_t Writer::ChunkTable::slotFor(const ChunkKey& key) const {
-    auto hash = loadLe<std::uint64_t>(key.digest.data()) ^ (key.length * 0x9E3779B97F4A7C15);
-    return static_cast<std::size_t>(hash) & (slots_.size() - 1);
-}
-
-void Writer::ChunkTable::grow(std::span<const IndexEntry> entries) {
-    std::vector<std::uint32_t> previous(std::max<std::size_t>(64, slots_.size() * 2), 0);
-    previous.swap(slots_);
-
-    std::size_t mask = slots_.size() - 1;
-    for (std::uint32_t stored : previous) {
-        if (stored == 0) {
-            continue;
-        }
-        std::size_t slot = slotFor(entries[stored - 1].key);
-        while (slots_[slot] != 0) {
-            slot = (slot + 1) & mask;
-        }
-        slots_[slot] = stored;
-    }
-}
-
 Writer::Writer(File file, const WriterOptions& options) :
-    file_(std::move(file)), options_(options), buffer_(options.chunkSize) {
+    file_(std::move(file)), options_(options) {
+    output_.reserve(outputBufferSize);
 }
 
-Result<Writer> Writer::create(File file, const WriterOptions& options) {
+Writer::Writer(Writer&& other) noexcept = default;
+
+Writer& Writer::operator=(Writer&& other) noexcept = default;
+
+Writer::~Writer() {
+    if (pipeline_) {
+        pipeline_->cancel();
+    }
+    // NOTE: an abandoned writer still leaves every record it accepted on disk, as an unbuffered
+    // write would; readers then report the missing footer.
+    if (!failure_ && !output_.empty()) {
+        [[maybe_unused]] auto ignored = file_.append(output_);
+    }
+}
+
+Result<void> Writer::checkOptions(const WriterOptions& options) {
     if (options.chunkSize < minChunkSize || options.chunkSize > maxChunkSize) {
         return fail(ErrorKind::LimitExceeded, "chunk size outside the supported range");
     }
-    auto encoder = ChunkEncoder::create(options.compression, options.chunkSize);
-    if (!encoder) {
-        return std::unexpected(encoder.error());
+    if (options.workers == 0 || options.workers > maxWorkers) {
+        return fail(ErrorKind::LimitExceeded, "worker count outside the supported range");
+    }
+    return {};
+}
+
+Result<void> Writer::startPipeline() {
+    auto pipeline =
+        ChunkPipeline::create(options_.compression, options_.chunkSize, options_.workers);
+    if (!pipeline) {
+        return std::unexpected(pipeline.error());
+    }
+    pipeline_ = std::move(*pipeline);
+    return {};
+}
+
+Result<Writer> Writer::create(File file, const WriterOptions& options) {
+    auto valid = checkOptions(options);
+    if (!valid) {
+        return std::unexpected(valid.error());
     }
 
     Writer writer(std::move(file), options);
-    writer.chunkEncoder_ = std::move(*encoder);
+    auto started = writer.startPipeline();
+    if (!started) {
+        return std::unexpected(started.error());
+    }
 
     Superblock superblock;
     superblock.archiveId = options.archiveId ? *options.archiveId : randomArchiveId();
@@ -129,12 +120,9 @@ Result<Writer> Writer::create(File file, const WriterOptions& options) {
 }
 
 Result<Writer> Writer::append(File file, const WriterOptions& options) {
-    if (options.chunkSize < minChunkSize || options.chunkSize > maxChunkSize) {
-        return fail(ErrorKind::LimitExceeded, "chunk size outside the supported range");
-    }
-    auto encoder = ChunkEncoder::create(options.compression, options.chunkSize);
-    if (!encoder) {
-        return std::unexpected(encoder.error());
+    auto valid = checkOptions(options);
+    if (!valid) {
+        return std::unexpected(valid.error());
     }
 
     auto readFile = file.duplicate();
@@ -153,14 +141,18 @@ Result<Writer> Writer::append(File file, const WriterOptions& options) {
         return fail(ErrorKind::LimitExceeded, "archive generation limit exceeded");
     }
 
+    Writer writer(std::move(file), options);
+    auto started = writer.startPipeline();
+    if (!started) {
+        return std::unexpected(started.error());
+    }
+
     std::uint64_t position = reader->footerOffset() + footerSize;
-    auto truncated = file.truncate(position);
+    auto truncated = writer.file_.truncate(position);
     if (!truncated) {
         return std::unexpected(truncated.error());
     }
 
-    Writer writer(std::move(file), options);
-    writer.chunkEncoder_ = std::move(*encoder);
     writer.position_ = position;
     writer.sequence_ = verified->records;
     writer.generation_ = reader->commit().generation + 1;
@@ -170,7 +162,6 @@ Result<Writer> Writer::append(File file, const WriterOptions& options) {
     for (std::uint32_t index = 0; index < writer.index_.size(); ++index) {
         writer.table_.insert(writer.index_, index);
     }
-
     return writer;
 }
 
@@ -186,6 +177,9 @@ Result<void> Writer::check() const {
 
 Result<void> Writer::poison(const Error& error) {
     failure_ = error;
+    if (pipeline_) {
+        pipeline_->cancel();
+    }
     return std::unexpected(error);
 }
 
@@ -231,11 +225,33 @@ Result<void> Writer::appendRaw(std::span<const std::byte> data) {
         return poison(Error{.kind = ErrorKind::LimitExceeded, .what = "archive size overflows"});
     }
 
-    auto written = file_.append(data);
+    if (output_.size() + data.size() > outputBufferSize) {
+        auto flushed = flushOutput();
+        if (!flushed) {
+            return flushed;
+        }
+    }
+    if (data.size() >= outputBufferSize) {
+        auto written = file_.append(data);
+        if (!written) {
+            return poison(written.error());
+        }
+    } else {
+        output_.insert(output_.end(), data.begin(), data.end());
+    }
+    position_ = *end;
+    return {};
+}
+
+Result<void> Writer::flushOutput() {
+    if (output_.empty()) {
+        return {};
+    }
+    auto written = file_.append(output_);
+    output_.clear();
     if (!written) {
         return poison(written.error());
     }
-    position_ = *end;
     return {};
 }
 
@@ -276,51 +292,6 @@ Result<Writer::RecordSpan> Writer::writeRecord(
     return span;
 }
 
-Result<void> Writer::storeChunk(std::span<const std::byte> chunk) {
-    if (chunks_.size() >= maxReferences) {
-        return poison(Error{.kind = ErrorKind::LimitExceeded, .what = "too many chunk references"});
-    }
-
-    auto key = chunkKeyOf(chunk);
-    contentBytes_ += chunk.size();
-    if (table_.find(index_, key) != nullptr) {
-        chunks_.push_back(key);
-        return {};
-    }
-
-    auto descriptor = encodeDataDescriptor(key, descriptor_);
-    if (!descriptor) {
-        return poison(descriptor.error());
-    }
-    auto encoded = chunkEncoder_.encode(chunk);
-    if (!encoded) {
-        return poison(encoded.error());
-    }
-
-    auto span = writeRecord(
-        RecordType::Data,
-        descriptor_,
-        encoded->bytes,
-        encoded->codec,
-        descriptor_.size() + chunk.size()
-    );
-    if (!span) {
-        return std::unexpected(span.error());
-    }
-
-    index_.push_back(
-        IndexEntry{
-            .key = key,
-            .recordOffset = span->offset,
-            .recordLength = span->length,
-            .codec = encoded->codec,
-        }
-    );
-    table_.insert(index_, static_cast<std::uint32_t>(index_.size() - 1));
-    chunks_.push_back(key);
-    return {};
-}
-
 Result<void> Writer::addDirectory(std::string_view path, const EntryAttributes& attributes) {
     auto attributesValid = checkAttributes(attributes);
     if (!attributesValid) {
@@ -333,85 +304,6 @@ Result<void> Writer::addDirectory(std::string_view path, const EntryAttributes& 
     }
     (*entry)->mtimeNanoseconds = attributes.mtimeNanoseconds;
     (*entry)->mode = attributes.mode;
-    return {};
-}
-
-Result<void>
-Writer::addFile(std::string_view path, const File& source, const EntryAttributes& attributes) {
-    auto attributesValid = checkAttributes(attributes);
-    if (!attributesValid) {
-        return attributesValid;
-    }
-
-    auto entry = beginEntry(path, EntryKind::Regular);
-    if (!entry) {
-        return std::unexpected(entry.error());
-    }
-    std::size_t position = entries_.size() - 1;
-
-    std::uint64_t length = 0;
-    while (true) {
-        std::size_t filled = 0;
-        while (filled < buffer_.size()) {
-            auto count = source.readAt(length + filled, std::span(buffer_).subspan(filled));
-            if (!count) {
-                return poison(count.error());
-            }
-            if (*count == 0) {
-                break;
-            }
-            filled += *count;
-        }
-        if (filled == 0) {
-            break;
-        }
-
-        auto stored = storeChunk(std::span(buffer_).first(filled));
-        if (!stored) {
-            return stored;
-        }
-        length += filled;
-        if (filled < buffer_.size()) {
-            break;
-        }
-    }
-
-    PendingEntry& stored = entries_[position];
-    stored.length = length;
-    stored.chunkCount = static_cast<std::uint32_t>(chunks_.size() - stored.firstChunk);
-    stored.mtimeNanoseconds = attributes.mtimeNanoseconds;
-    stored.mode = attributes.mode;
-    return {};
-}
-
-Result<void> Writer::addBytes(
-    std::string_view path,
-    std::span<const std::byte> data,
-    const EntryAttributes& attributes
-) {
-    auto attributesValid = checkAttributes(attributes);
-    if (!attributesValid) {
-        return attributesValid;
-    }
-
-    auto entry = beginEntry(path, EntryKind::Regular);
-    if (!entry) {
-        return std::unexpected(entry.error());
-    }
-    std::size_t position = entries_.size() - 1;
-
-    for (std::size_t at = 0; at < data.size(); at += buffer_.size()) {
-        auto stored = storeChunk(data.subspan(at, std::min(buffer_.size(), data.size() - at)));
-        if (!stored) {
-            return stored;
-        }
-    }
-
-    PendingEntry& stored = entries_[position];
-    stored.length = data.size();
-    stored.chunkCount = static_cast<std::uint32_t>(chunks_.size() - stored.firstChunk);
-    stored.mtimeNanoseconds = attributes.mtimeNanoseconds;
-    stored.mode = attributes.mode;
     return {};
 }
 
@@ -563,7 +455,7 @@ Result<Writer::RecordSpan> Writer::writeManifest(Blake3Digest& digest) {
     manifest.comment = options_.comment;
     manifest.writer = inheritedWriter_
         ? *inheritedWriter_
-        : describeWriter(writerName, options_.compression, options_.chunkSize);
+        : describeWriter(writerName, options_.compression, options_.chunkSize, options_.workers);
 
     auto encoded = encodeManifest(manifest, payload_);
     chunks_ = std::move(manifest.chunks);
@@ -598,6 +490,10 @@ Result<WriteSummary> Writer::finish() {
     auto usable = check();
     if (!usable) {
         return std::unexpected(usable.error());
+    }
+    auto drained = pump(true);
+    if (!drained) {
+        return std::unexpected(drained.error());
     }
 
     auto sorted = sortEntries();
@@ -636,6 +532,10 @@ Result<WriteSummary> Writer::finish() {
     if (!record) {
         return std::unexpected(record.error());
     }
+    auto flushed = flushOutput();
+    if (!flushed) {
+        return std::unexpected(flushed.error());
+    }
 
     if (options_.durable) {
         auto synced = file_.sync();
@@ -652,6 +552,10 @@ Result<WriteSummary> Writer::finish() {
     auto written = appendRaw(encodeFooter(footer));
     if (!written) {
         return std::unexpected(written.error());
+    }
+    flushed = flushOutput();
+    if (!flushed) {
+        return std::unexpected(flushed.error());
     }
 
     if (options_.durable) {

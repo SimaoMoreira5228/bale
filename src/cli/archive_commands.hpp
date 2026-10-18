@@ -1,6 +1,7 @@
 #pragma once
 
 #include "archive/chunk.hpp"
+#include "archive/writer.hpp"
 #include "archive/writer_profile.hpp"
 #include "base/error.hpp"
 #include "extract/extractor.hpp"
@@ -60,6 +61,7 @@ struct CreateOptions {
     std::uint32_t chunkSize = archive::defaultChunkSize;
     archive::CompressionProfile compression = archive::profileFor(archive::Preset::Balanced);
     bool durable = false;
+    std::uint32_t workers = archive::defaultWorkers();
 };
 
 [[nodiscard]] ExitCode createArchive(

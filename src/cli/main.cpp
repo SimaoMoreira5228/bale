@@ -34,6 +34,7 @@ commands:
       --preset <name>         fast, balanced (default), small, restore-fast or portable
       --codec <raw|zstd|lz4>  explicit chunk codec instead of a preset
       --level <n>             level for the chosen codec: zstd 1-22, lz4 0-12
+      --threads <1-64>        compression worker threads (default: CPU count, at most 8)
       --sync                  flush the archive to disk before writing its footer
   update <archive.bale> <dir> [options]
       append a new snapshot of the directory, reusing unchanged chunks; takes create's options
@@ -109,6 +110,16 @@ std::optional<std::uint32_t> parseSize(std::string_view text) {
     return static_cast<std::uint32_t>(value * multiplier);
 }
 
+std::optional<std::uint32_t> parseThreads(std::string_view text) {
+    std::uint32_t value = 0;
+    auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (error != std::errc{} || end != text.data() + text.size() || value < 1 ||
+        value > bale::archive::maxWorkers) {
+        return std::nullopt;
+    }
+    return value;
+}
+
 std::optional<std::int32_t> parseLevel(std::string_view text) {
     std::int32_t value = 0;
     auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
@@ -156,6 +167,18 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
         }
         if (argument == "--sync") {
             options.durable = true;
+            continue;
+        }
+        if (argument == "--threads") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--threads needs a count");
+            }
+            ++index;
+            auto threads = parseThreads(arguments[index]);
+            if (!threads) {
+                return usageError("--threads must be between 1 and 64");
+            }
+            options.workers = *threads;
             continue;
         }
         if (argument == "--preset") {

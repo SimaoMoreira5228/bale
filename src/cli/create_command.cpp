@@ -23,6 +23,7 @@ ExitCode writeArchive(
     writerOptions.chunkSize = options.chunkSize;
     writerOptions.compression = options.compression;
     writerOptions.durable = options.durable;
+    writerOptions.workers = options.workers;
     auto writer = archive::Writer::create(std::move(file), writerOptions);
     if (!writer) {
         return reportFailure(archivePath, writer.error());
@@ -94,6 +95,7 @@ ExitCode updateArchive(
     writerOptions.chunkSize = options.chunkSize;
     writerOptions.compression = options.compression;
     writerOptions.durable = options.durable;
+    writerOptions.workers = options.workers;
     auto writer = archive::Writer::append(std::move(*file), writerOptions);
     if (!writer) {
         return reportFailure(archivePath, writer.error());
