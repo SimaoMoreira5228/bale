@@ -2,6 +2,7 @@
 
 import filecmp
 import gzip
+import importlib.util
 import io
 import os
 import subprocess
@@ -26,6 +27,7 @@ EXIT_IO = 8
 EXIT_ALREADY_EXISTS = 10
 
 BALE = Path(sys.argv[1]).resolve()
+REFERENCE = Path(__file__).resolve().parents[2] / "tools" / "reference" / "bale_reference.py"
 failures = []
 
 
@@ -115,6 +117,12 @@ def test_native(work, source):
     expect_exit("bale create", created, EXIT_OK)
     expect_exit("bale create again", run("create", archive, source, cwd=work), EXIT_ALREADY_EXISTS)
     expect_exit("bale test", run("test", archive, cwd=work), EXIT_OK)
+
+    small = work / "small.bale"
+    expect_exit("bale create small", run("create", small, source, "--preset", "small", cwd=work), EXIT_OK)
+    info = run("info", small, cwd=work)
+    expect_exit("bale info", info, EXIT_OK)
+    check("bale info preset", "preset: small" in info.stdout and "zstd level 19" in info.stdout, info.stdout)
 
     output = work / "native.out"
     expect_exit("bale extract", run("extract", archive, "-o", output, cwd=work), EXIT_OK)
@@ -209,6 +217,26 @@ def test_native_unicode_paths(work):
         EXIT_OK,
     )
     check("context file contents", single_file.read_text(encoding="utf-8") == "single file\n")
+
+
+def load_reference():
+    spec = importlib.util.spec_from_file_location("bale_reference", REFERENCE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_reference_archive(work):
+    archive = work / "reference.bale"
+    archive.write_bytes(load_reference().golden_archive())
+
+    expect_exit("reference test", run("test", archive, cwd=work), EXIT_OK)
+    listed = run("list", archive, cwd=work)
+    check("reference list", listed.stdout.split() == ["d", "d/f", "d/g", "e"], listed.stdout)
+
+    output = work / "reference.out"
+    expect_exit("reference extract", run("extract", archive, "-o", output, cwd=work), EXIT_OK)
+    check("reference contents", (output / "d" / "g").read_bytes() == b"hello")
 
 
 def test_single_gzip(work):
@@ -328,6 +356,7 @@ def main():
             lambda: test_round_trips(work, source),
             lambda: test_native(work, source),
             lambda: test_native_unicode_paths(work),
+            lambda: test_reference_archive(work),
             lambda: test_single_gzip(work),
             lambda: test_hostile_tar(work),
             lambda: test_corrupt_zip(work),

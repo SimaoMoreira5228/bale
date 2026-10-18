@@ -67,7 +67,7 @@ TEST_CASE("zstd writing compresses useful chunks and keeps incompressible chunks
     REQUIRE(file);
     WriterOptions options;
     options.chunkSize = minChunkSize;
-    options.codec = CodecId::Zstd;
+    options.compression.codec = CodecId::Zstd;
     auto writer = Writer::create(std::move(*file), options);
     REQUIRE(writer);
 

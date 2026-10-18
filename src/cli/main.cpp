@@ -28,14 +28,17 @@ constexpr std::string_view usage = R"(usage: bale <command> [arguments]
 commands:
   create <archive.bale> <dir> [options]
       --chunk-size <n>        chunk size in bytes, K or M suffix allowed (default 1M)
-      --codec <raw|zstd>      chunk codec (default raw; zstd keeps raw when larger)
+      --preset <name>         fast, balanced (default), small, restore-fast or portable
+      --codec <raw|zstd>      explicit chunk codec instead of a preset
+      --level <1-22>          explicit zstd level instead of a preset
       --sync                  flush the archive to disk before writing its footer
   update <archive.bale> <dir> [options]
-      append a new snapshot of the directory, reusing unchanged chunks
+      append a new snapshot of the directory, reusing unchanged chunks; takes create's options
   compact <archive.bale> <output.bale> [--sync]
       write the current snapshot to a new archive and keep the source
   list <archive> [--long]   list entries, --long adds type, size and modification time
   test <archive>            check archive structure and entry checksums
+  info <archive>            show the format and, for .bale, the recorded compression profile
   extract <archive> [options]
       -o, --output <dir>      extract into dir (default: current directory)
       --replace               replace existing regular files
@@ -103,9 +106,20 @@ std::optional<std::uint32_t> parseSize(std::string_view text) {
     return static_cast<std::uint32_t>(value * multiplier);
 }
 
+std::optional<std::int32_t> parseLevel(std::string_view text) {
+    std::int32_t value = 0;
+    auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (error != std::errc{} || end != text.data() + text.size() || value < 1 || value > 22) {
+        return std::nullopt;
+    }
+    return value;
+}
+
 int runCreate(std::span<const std::string_view> arguments, bool update = false) {
     bale::cli::CreateOptions options;
     std::vector<std::string_view> positional;
+    bool explicitCodec = false;
+    bool explicitLevel = false;
     for (std::size_t index = 0; index < arguments.size(); ++index) {
         std::string_view argument = arguments[index];
         if (argument == "--chunk-size") {
@@ -124,24 +138,62 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
             options.durable = true;
             continue;
         }
+        if (argument == "--preset") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--preset needs a name");
+            }
+            ++index;
+            auto preset = bale::archive::parsePreset(arguments[index]);
+            if (!preset) {
+                return usageError(
+                    "--preset must be fast, balanced, small, restore-fast or portable"
+                );
+            }
+            options.compression = bale::archive::profileFor(*preset);
+            continue;
+        }
         if (argument == "--codec") {
             if (index + 1 == arguments.size()) {
                 return usageError("--codec needs raw or zstd");
             }
             ++index;
             if (arguments[index] == "raw") {
-                options.codec = bale::CodecId::Raw;
+                options.compression.codec = bale::CodecId::Raw;
+                options.compression.level = 0;
             } else if (arguments[index] == "zstd") {
-                options.codec = bale::CodecId::Zstd;
+                options.compression.codec = bale::CodecId::Zstd;
             } else {
                 return usageError("--codec must be raw or zstd");
             }
+            options.compression.preset.reset();
+            explicitCodec = true;
+            continue;
+        }
+        if (argument == "--level") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--level needs a number");
+            }
+            ++index;
+            auto level = parseLevel(arguments[index]);
+            if (!level) {
+                return usageError("--level must be between 1 and 22");
+            }
+            options.compression.level = *level;
+            options.compression.preset.reset();
+            explicitLevel = true;
             continue;
         }
         if (argument.starts_with('-')) {
             return usageError(update ? "unknown option for update" : "unknown option for create");
         }
         positional.push_back(argument);
+    }
+
+    if (explicitLevel && options.compression.codec == bale::CodecId::Raw) {
+        return usageError("--level does not apply to --codec raw");
+    }
+    if (explicitLevel && !explicitCodec) {
+        options.compression.codec = bale::CodecId::Zstd;
     }
 
     if (positional.size() != 2) {
@@ -256,7 +308,7 @@ int runFormats() {
     printFormat("tar.zst", "tar inside zstd, recognized by content; read as one stream");
     printFormat("gzip", "one compressed file, multi-member; named by FNAME or archive name");
     printFormat("zstd", "one compressed file, multi-frame, window up to 128 MiB");
-    printFormat("bale", "native format, raw and zstd chunks; not frozen");
+    printFormat("bale", "native format, raw and zstd chunks, presets; not frozen");
     return exitWith(ExitCode::Ok);
 }
 
@@ -278,6 +330,12 @@ int run(std::span<const std::string_view> argv) {
     }
     if (command == "compact") {
         return runCompact(rest);
+    }
+    if (command == "info") {
+        if (rest.size() != 1 || rest[0].starts_with('-')) {
+            return usageError("info takes exactly one archive");
+        }
+        return exitWith(bale::cli::describeArchive(rest[0]));
     }
     if (command == "test") {
         return runTest(rest);

@@ -108,13 +108,13 @@ Result<Writer> Writer::create(File file, const WriterOptions& options) {
     if (options.chunkSize < minChunkSize || options.chunkSize > maxChunkSize) {
         return fail(ErrorKind::LimitExceeded, "chunk size outside the supported range");
     }
-    if (options.codec != CodecId::Raw && options.codec != CodecId::Zstd) {
+    if (options.compression.codec != CodecId::Raw && options.compression.codec != CodecId::Zstd) {
         return fail(ErrorKind::Unsupported, "writer codec not supported");
     }
 
     Writer writer(std::move(file), options);
-    if (options.codec == CodecId::Zstd) {
-        auto encoder = ZstdEncoder::create();
+    if (options.compression.codec == CodecId::Zstd) {
+        auto encoder = ZstdEncoder::create(options.compression.level);
         if (!encoder) {
             return std::unexpected(encoder.error());
         }
@@ -138,7 +138,7 @@ Result<Writer> Writer::append(File file, const WriterOptions& options) {
     if (options.chunkSize < minChunkSize || options.chunkSize > maxChunkSize) {
         return fail(ErrorKind::LimitExceeded, "chunk size outside the supported range");
     }
-    if (options.codec != CodecId::Raw && options.codec != CodecId::Zstd) {
+    if (options.compression.codec != CodecId::Raw && options.compression.codec != CodecId::Zstd) {
         return fail(ErrorKind::Unsupported, "writer codec not supported");
     }
 
@@ -175,8 +175,8 @@ Result<Writer> Writer::append(File file, const WriterOptions& options) {
         writer.table_.insert(writer.index_, index);
     }
 
-    if (options.codec == CodecId::Zstd) {
-        auto encoder = ZstdEncoder::create();
+    if (options.compression.codec == CodecId::Zstd) {
+        auto encoder = ZstdEncoder::create(options.compression.level);
         if (!encoder) {
             return std::unexpected(encoder.error());
         }
@@ -581,7 +581,9 @@ Result<Writer::RecordSpan> Writer::writeManifest(Blake3Digest& digest) {
     }
     manifest.chunks = std::move(chunks_);
     manifest.comment = options_.comment;
-    manifest.writer = writerName;
+    manifest.writer = inheritedWriter_
+        ? *inheritedWriter_
+        : describeWriter(writerName, options_.compression, options_.chunkSize);
 
     auto encoded = encodeManifest(manifest, payload_);
     chunks_ = std::move(manifest.chunks);

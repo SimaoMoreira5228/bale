@@ -1,6 +1,7 @@
 #pragma once
 
 #include "archive/chunk.hpp"
+#include "archive/writer_profile.hpp"
 #include "base/error.hpp"
 #include "security/budget.hpp"
 
@@ -42,7 +43,7 @@ struct Manifest {
     std::vector<ManifestEntry> entries;
     std::vector<ChunkKey> chunks;
     std::string_view comment;
-    std::string_view writer;
+    WriterMetadata writer;
 
     [[nodiscard]] std::span<const ChunkKey> chunksOf(const ManifestEntry& entry) const {
         return std::span(chunks).subspan(entry.firstChunk, entry.chunkCount);

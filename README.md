@@ -2,14 +2,15 @@
 
 bale is two things that share one engine. It's an archive format of its own, built around content addressing, append-only snapshots and strict framing. It's also an archiver that opens the formats you already have, ZIP and TAR for now, with more on the way.
 
-It's early. The native format isn't frozen: `bale create` writes `.bale` files so the design can be tested, but a later build may not read them. Native archives use deduplicated, BLAKE3-verified chunks, stored raw by default or compressed with zstd when requested.
+It's early. The native format isn't frozen: `bale create` writes `.bale` files so the design can be tested, but a later build may not read them. Native archives use deduplicated, BLAKE3-verified chunks, compressed with zstd unless a chunk would come out bigger, in which case it's stored as is.
 
 ## What you can do with it right now
 
 ```sh
 bale create backup.bale ./project
-bale create --codec zstd backup.bale ./project
+bale create --preset small backup.bale ./project
 bale update backup.bale ./project
+bale info backup.bale
 bale compact backup.bale compacted.bale
 bale test backup.bale
 bale list archive.zip
@@ -20,6 +21,8 @@ bale formats
 ```
 
 `extract` never writes outside the output directory. Paths with `..`, absolute paths, drive letters and Windows device names are refused. So are symlinks, unless you pass `--allow-symlinks`, and then only links that stay inside the output get created. Existing files are left alone unless you ask for `--replace` or `--skip-existing`. Every file is written to a temporary name first. It only moves into place once all of it is written and, if the format has a checksum, the checksum matches. A corrupt entry never shows up half-written under its real name.
+
+`create` and `update` take a preset: `fast`, `balanced` (the default), `small`, `restore-fast` or `portable`. Today they all map to zstd at different levels, with `fast` and `restore-fast` waiting on LZ4 and every choice waiting on the codec benchmark. The names describe what you're after, not a guarantee that a preset wins on your data. If you want to experiment, `--codec raw|zstd` and `--level N` pick the settings directly. Whatever you choose gets written into the snapshot, and `bale info` shows it back to you.
 
 `update` adds a new snapshot from the directory you pass. The snapshot becomes the archive's visible contents, and chunks already in the archive are reused when their contents match.
 

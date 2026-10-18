@@ -62,11 +62,13 @@ Result<WriteSummary> Writer::compact(File file, Reader& source, bool durable) {
     options.comment = source.manifest_.comment;
     options.limits = source.options_.limits;
     options.durable = durable;
+    options.compression.codec = CodecId::Raw;
     auto created = create(std::move(file), options);
     if (!created) {
         return std::unexpected(created.error());
     }
     Writer writer = std::move(*created);
+    writer.inheritedWriter_ = source.manifest_.writer;
     writer.names_.reserve(nameBytes);
     writer.entries_.reserve(source.manifest_.entries.size());
     writer.chunks_.assign(source.manifest_.chunks.begin(), source.manifest_.chunks.end());

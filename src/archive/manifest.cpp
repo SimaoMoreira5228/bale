@@ -501,10 +501,7 @@ Result<void> encodeManifest(const Manifest& manifest, std::vector<std::byte>& ou
             return comment;
         }
     }
-    if (!manifest.writer.empty()) {
-        return writer.bytes(writerField, Criticality::Noncritical, bytesOf(manifest.writer));
-    }
-    return {};
+    return encodeWriterMetadata(manifest.writer, writerField, writer, element);
 }
 
 Result<void> decodeManifest(
@@ -582,9 +579,14 @@ Result<void> decodeManifest(
         }
         if (field.number == commentField) {
             out.comment = textOf(field.value);
-        } else {
-            out.writer = textOf(field.value);
+            continue;
         }
+
+        auto metadata = decodeWriterMetadata(field);
+        if (!metadata) {
+            return std::unexpected(metadata.error());
+        }
+        out.writer = *metadata;
     }
 
     if (!hasVersion || !hasEntries) {
