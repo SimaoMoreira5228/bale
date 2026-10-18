@@ -15,7 +15,6 @@ add_executable(bale_tests
     archive/pipeline_test.cpp
     archive/schema_test.cpp
     archive/snapshot_test.cpp
-    archive/tree_walk_test.cpp
     base/checked_test.cpp
     checksum/blake3_test.cpp
     checksum/crc_test.cpp
@@ -26,6 +25,7 @@ add_executable(bale_tests
     extract/extractor_test.cpp
     format/envelope_test.cpp
     format/tlv_test.cpp
+    fswalk/tree_walker_test.cpp
     formats/detect_test.cpp
     formats/gzip/stream_test.cpp
     formats/tar/compressed_reader_test.cpp
@@ -54,6 +54,7 @@ target_link_libraries(bale_tests PRIVATE
     bale_formats_tar
     bale_formats_zip
     bale_formats_zstd
+    bale_fswalk
     bale_io
     bale_security
     bale_lz4

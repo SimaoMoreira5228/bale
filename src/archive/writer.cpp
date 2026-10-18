@@ -197,6 +197,9 @@ Result<Writer::PendingEntry*> Writer::beginEntry(std::string_view path, EntryKin
     if (!usable) {
         return std::unexpected(usable.error());
     }
+    if (openFile_) {
+        return fail(ErrorKind::Malformed, "previous file entry is still open");
+    }
     if (entries_.size() >= options_.limits.maxEntries) {
         return fail(ErrorKind::LimitExceeded, "entry count limit exceeded");
     }
@@ -485,6 +488,9 @@ Result<WriteSummary> Writer::finish() {
     auto usable = check();
     if (!usable) {
         return std::unexpected(usable.error());
+    }
+    if (openFile_) {
+        return fail(ErrorKind::Malformed, "file entry is still open");
     }
     auto drained = pump(true);
     if (!drained) {

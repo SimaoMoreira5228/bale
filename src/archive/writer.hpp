@@ -6,6 +6,7 @@
 #include "archive/writer_profile.hpp"
 #include "base/error.hpp"
 #include "format/record.hpp"
+#include "fswalk/tree_walker.hpp"
 #include "io/file.hpp"
 #include "security/budget.hpp"
 
@@ -45,11 +46,6 @@ struct WriterOptions {
     Limits limits;
     bool durable = false;
     std::uint32_t workers = defaultWorkers();
-};
-
-struct SkippedPath {
-    std::string path;
-    std::string_view reason;
 };
 
 struct WriteSummary {
@@ -92,6 +88,13 @@ class Writer {
     [[nodiscard]] Result<void> addHardLink(std::string_view path, std::string_view target);
 
     [[nodiscard]] Result<void>
+    beginFile(std::string_view path, const EntryAttributes& attributes = {});
+
+    [[nodiscard]] Result<void> writeFile(std::span<const std::byte> data);
+
+    [[nodiscard]] Result<void> endFile();
+
+    [[nodiscard]] Result<void>
     addTree(const std::filesystem::path& root, const std::filesystem::path& exclude = {});
 
     [[nodiscard]] const std::vector<SkippedPath>& skipped() const {
@@ -119,6 +122,12 @@ class Writer {
         std::size_t size = 0;
     };
 
+    struct OpenFile {
+        std::size_t position = 0;
+        std::uint64_t length = 0;
+        std::size_t filled = 0;
+    };
+
     struct RecordSpan {
         std::uint64_t offset = 0;
         std::uint64_t length = 0;
@@ -137,8 +146,6 @@ class Writer {
         std::vector<std::uint32_t> slots_;
         std::size_t size_ = 0;
     };
-
-    struct Walk;
 
     Writer(File file, const WriterOptions& options);
 
@@ -169,10 +176,7 @@ class Writer {
     [[nodiscard]] Result<void> resolveHardLinks();
     [[nodiscard]] Result<RecordSpan> writeManifest(Blake3Digest& digest);
     [[nodiscard]] Result<RecordSpan> writeIndex(Blake3Digest& digest);
-
-    [[nodiscard]] Result<void> walkDirectory(Walk& walk, const std::filesystem::path& directory);
-    [[nodiscard]] Result<void> addNode(Walk& walk, const std::filesystem::path& node);
-    [[nodiscard]] Result<void> skipNode(const Walk& walk, std::string_view reason);
+    [[nodiscard]] Result<void> addWalked(const WalkEntry& entry);
 
     File file_;
     WriterOptions options_;
@@ -196,6 +200,7 @@ class Writer {
     std::vector<IndexEntry> index_;
     ChunkTable table_;
     std::vector<SkippedPath> skipped_;
+    std::optional<OpenFile> openFile_;
 };
 
 }
