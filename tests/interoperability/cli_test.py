@@ -5,6 +5,7 @@ import gzip
 import importlib.util
 import io
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -357,6 +358,160 @@ def test_errors_and_escaping(work):
     check("terminal escaping", "\x1b" not in listed.stdout and "\\x1b" in listed.stdout, listed.stdout)
 
 
+def make_rich_tree(root):
+    long_dir = root / ("d" * 120)
+    long_dir.mkdir(parents=True)
+    (long_dir / "inside.txt").write_bytes(b"split between prefix and name\n")
+    (root / ("n" * 150 + ".txt")).write_bytes(b"needs a pax path\n")
+    (root / "ação-東京").mkdir()
+    (root / "ação-東京" / "資料.txt").write_text("unicode\n", encoding="utf-8")
+    (root / "empty-dir" / "nested-empty").mkdir(parents=True)
+    (root / "empty.txt").write_bytes(b"")
+    (root / "text.txt").write_bytes(b"compressible line of text\n" * 20_000)
+    (root / "random.bin").write_bytes(os.urandom(1_500_000))
+    os.symlink("text.txt", root / "link-to-text")
+    os.symlink("l" * 120, root / "long-link")
+    os.link(root / "text.txt", root / "hard-text")
+
+
+def expected_members(source):
+    members = {}
+    for path in sorted(source.rglob("*")):
+        name = path.relative_to(source).as_posix()
+        if path.is_symlink():
+            members[name] = ("symlink", os.readlink(path))
+        elif path.is_dir():
+            members[name] = ("dir", None)
+        else:
+            members[name] = ("file", path.read_bytes())
+    return members
+
+
+def zip_members(archive):
+    members = {}
+    with zipfile.ZipFile(archive) as handle:
+        check("python zip testzip", handle.testzip() is None)
+        for info in handle.infolist():
+            mode = info.external_attr >> 16
+            name = info.filename.rstrip("/")
+            if info.is_dir():
+                members[name] = ("dir", None)
+            elif (mode & 0o170000) == 0o120000:
+                members[name] = ("symlink", handle.read(info).decode("utf-8"))
+            else:
+                members[name] = ("file", handle.read(info))
+    return members
+
+
+def tar_members(archive, mode):
+    members = {}
+    with tarfile.open(archive, mode) as handle:
+        contents = {}
+        for info in handle.getmembers():
+            name = info.name.rstrip("/")
+            if info.isdir():
+                members[name] = ("dir", None)
+            elif info.issym():
+                members[name] = ("symlink", info.linkname)
+            elif info.islnk():
+                members[name] = ("file", contents[info.linkname])
+            else:
+                contents[info.name] = handle.extractfile(info).read()
+                members[name] = ("file", contents[info.name])
+    return members
+
+
+def system_extract(name, command, output):
+    output.mkdir()
+    result = subprocess.run(command, cwd=output, capture_output=True)
+    check(name, result.returncode == 0, result.stderr.decode("utf-8", "replace"))
+
+
+def test_created_formats(work):
+    source = work / "rich-source"
+    make_rich_tree(source)
+    expected = expected_members(source)
+
+    readers = {
+        "rich.zip": lambda path: zip_members(path),
+        "rich.tar": lambda path: tar_members(path, "r:"),
+        "rich.tgz": lambda path: tar_members(path, "r:gz"),
+    }
+    if zstd is not None:
+        readers["rich.tar.zst"] = lambda path: tar_members(path, "r:zst")
+    else:
+        readers["rich.tar.zst"] = None
+
+    for archive_name, reader in readers.items():
+        archive = work / archive_name
+        created = run("create", archive, source, cwd=work)
+        expect_exit(f"create {archive_name}", created, EXIT_OK)
+        if reader is not None:
+            check(f"python reads {archive_name}", reader(archive) == expected, archive_name)
+
+        output = work / (archive_name + ".bale-out")
+        extracted = run("extract", archive, "-o", output, "--allow-symlinks", cwd=work)
+        expect_exit(f"bale extracts {archive_name}", extracted, EXIT_OK)
+        check(f"bale round trip {archive_name}", expected_members(output) == expected)
+
+    first = (work / "rich.tar").read_bytes()
+    (work / "rich.tar").unlink()
+    expect_exit("create tar again", run("create", work / "rich.tar", source, cwd=work), EXIT_OK)
+    check("tar output is deterministic", (work / "rich.tar").read_bytes() == first)
+
+    if shutil.which("unzip"):
+        output = work / "unzip-out"
+        system_extract("system unzip", ["unzip", "-q", str(work / "rich.zip")], output)
+        check("system unzip contents", expected_members(output) == expected)
+    if shutil.which("tar"):
+        for archive_name in ("rich.tar", "rich.tgz"):
+            output = work / (archive_name + ".tar-out")
+            system_extract(f"system tar {archive_name}", ["tar", "-xf", str(work / archive_name)], output)
+            check(f"system tar {archive_name} contents", expected_members(output) == expected)
+    if shutil.which("zstd"):
+        result = subprocess.run(["zstd", "-t", "-q", str(work / "rich.tar.zst")], capture_output=True)
+        check("system zstd test", result.returncode == 0, result.stderr.decode("utf-8", "replace"))
+
+    chain = ["rich.zip", "chain.tar.gz", "chain.bale", "chain.tar.zst", "chain.zip", "chain.tar"]
+    for previous, following in zip(chain, chain[1:]):
+        converted = run("convert", work / previous, work / following, cwd=work)
+        expect_exit(f"convert {previous} to {following}", converted, EXIT_OK)
+    check("converted chain", tar_members(work / "chain.tar", "r:") == expected)
+
+    stored = work / "level0.zip"
+    expect_exit("zip level 0", run("create", stored, source, "--level", "0", cwd=work), EXIT_OK)
+    with zipfile.ZipFile(stored) as handle:
+        check("zip level 0 stores", all(i.compress_type == zipfile.ZIP_STORED for i in handle.infolist()))
+    with zipfile.ZipFile(work / "rich.zip") as handle:
+        methods = {i.filename: i.compress_type for i in handle.infolist()}
+        check("zip deflates text", methods["text.txt"] == zipfile.ZIP_DEFLATED)
+        check("zip stores random", methods["random.bin"] == zipfile.ZIP_STORED)
+
+    forced = work / "forced.bin"
+    expect_exit("forced format", run("create", forced, source, "--format", "tar.gz", cwd=work), EXIT_OK)
+    check("forced format is gzip", forced.read_bytes()[:2] == b"\x1f\x8b")
+
+    for args in (
+        ("create", work / "unknown.out", source),
+        ("create", work / "bad.zip", source, "--threads", "2"),
+        ("create", work / "bad.zip", source, "--preset", "small"),
+        ("create", work / "bad.tar", source, "--level", "3"),
+        ("create", work / "bad.zip", source, "--level", "10"),
+        ("create", work / "bad.zip", source, "--format", "rar"),
+        ("convert", work / "rich.zip", work / "bad.bale", "--level", "3"),
+    ):
+        expect_exit(f"usage {args[1:]}", run(*args, cwd=work), EXIT_USAGE)
+        check(f"usage leaves nothing {args[1:]}", not Path(args[2] if args[0] == "convert" else args[1]).exists())
+
+    expect_exit("zip refuses overwrite", run("create", work / "rich.zip", source, cwd=work), EXIT_ALREADY_EXISTS)
+    check("zip kept on refusal", zip_members(work / "rich.zip") == expected)
+
+    missing = work / "missing.zip"
+    result = run("create", missing, work / "no-such-dir", cwd=work)
+    check("missing source fails", result.returncode != EXIT_OK, result.stderr)
+    check("partial output removed", not missing.exists())
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="bale-cli-") as directory:
         work = Path(directory)
@@ -374,6 +529,7 @@ def main():
             lambda: test_cp437_zip_name(work),
             lambda: test_truncated_tgz(work, source),
             lambda: test_errors_and_escaping(work),
+            lambda: test_created_formats(work),
         ]
         for index, run_check in enumerate(checks):
             try:

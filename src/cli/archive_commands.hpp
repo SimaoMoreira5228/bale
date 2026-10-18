@@ -4,6 +4,7 @@
 #include "archive/writer.hpp"
 #include "archive/writer_profile.hpp"
 #include "base/error.hpp"
+#include "cli/archive_output.hpp"
 #include "extract/extractor.hpp"
 #include "format/record.hpp"
 #include "formats/compressed/stream.hpp"
@@ -13,6 +14,7 @@
 #include "security/archive_path.hpp"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -58,6 +60,8 @@ struct ListOptions {
 [[nodiscard]] ExitCode testArchive(std::string_view argument);
 
 struct CreateOptions {
+    OutputFormat format = OutputFormat::Bale;
+    std::optional<int> level;
     std::uint32_t chunkSize = archive::defaultChunkSize;
     archive::CompressionProfile compression = archive::profileFor(archive::Preset::Balanced);
     bool durable = false;
@@ -78,6 +82,14 @@ struct CreateOptions {
 
 [[nodiscard]] ExitCode
 compactArchive(std::string_view archivePath, std::string_view outputPath, bool durable);
+
+struct ConvertOptions {
+    OutputFormat format = OutputFormat::Bale;
+    std::optional<int> level;
+};
+
+[[nodiscard]] ExitCode
+convertArchive(std::string_view input, std::string_view output, const ConvertOptions& options);
 
 [[nodiscard]] ExitCode describeArchive(std::string_view argument);
 
