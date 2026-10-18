@@ -57,6 +57,8 @@ class Writer {
   public:
     [[nodiscard]] static Result<Writer> create(File file, const WriterOptions& options = {});
     [[nodiscard]] static Result<Writer> append(File file, const WriterOptions& options = {});
+    [[nodiscard]] static Result<WriteSummary>
+    compact(File file, Reader& source, bool durable = false);
 
     [[nodiscard]] Result<void>
     addDirectory(std::string_view path, const EntryAttributes& attributes = {});

@@ -32,6 +32,8 @@ commands:
       --sync                  flush the archive to disk before writing its footer
   update <archive.bale> <dir> [options]
       append a new snapshot of the directory, reusing unchanged chunks
+  compact <archive.bale> <output.bale> [--sync]
+      write the current snapshot to a new archive and keep the source
   list <archive> [--long]   list entries, --long adds type, size and modification time
   test <archive>            check archive structure and entry checksums
   extract <archive> [options]
@@ -154,6 +156,26 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
     return exitWith(bale::cli::createArchive(positional[0], positional[1], options));
 }
 
+int runCompact(std::span<const std::string_view> arguments) {
+    bool durable = false;
+    std::vector<std::string_view> positional;
+    for (std::string_view argument : arguments) {
+        if (argument == "--sync") {
+            durable = true;
+            continue;
+        }
+        if (argument.starts_with('-')) {
+            return usageError("unknown option for compact");
+        }
+        positional.push_back(argument);
+    }
+
+    if (positional.size() != 2) {
+        return usageError("compact takes a source archive and a new output path");
+    }
+    return exitWith(bale::cli::compactArchive(positional[0], positional[1], durable));
+}
+
 int runTest(std::span<const std::string_view> arguments) {
     if (arguments.size() != 1 || arguments[0].starts_with('-')) {
         return usageError("test takes exactly one archive");
@@ -253,6 +275,9 @@ int run(std::span<const std::string_view> argv) {
     }
     if (command == "update") {
         return runCreate(rest, true);
+    }
+    if (command == "compact") {
+        return runCompact(rest);
     }
     if (command == "test") {
         return runTest(rest);

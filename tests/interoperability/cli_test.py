@@ -130,6 +130,19 @@ def test_native(work, source):
     check("updated snapshot entry", "replacement.txt" in listing.stdout, listing.stdout)
     check("old snapshot entry removed", "docs/deep/random.bin" not in listing.stdout, listing.stdout)
 
+    archive_size = archive.stat().st_size
+    compacted = work / "compacted.bale"
+    expect_exit("bale compact", run("compact", archive, compacted, cwd=work), EXIT_OK)
+    expect_exit("bale compacted test", run("test", compacted, cwd=work), EXIT_OK)
+    check("compact preserves source", archive.stat().st_size == archive_size)
+    compacted_listing = run("list", compacted, cwd=work)
+    expect_exit("bale compacted list", compacted_listing, EXIT_OK)
+    check(
+        "compacted snapshot entry",
+        "replacement.txt" in compacted_listing.stdout,
+        compacted_listing.stdout,
+    )
+
     compressed = work / "compressed.bale"
     expect_exit(
         "bale zstd create",

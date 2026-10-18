@@ -1,6 +1,7 @@
 add_library(bale_archive STATIC
     chunk.cpp
     commit.cpp
+    compactor.cpp
     index.cpp
     manifest.cpp
     reader.cpp

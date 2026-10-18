@@ -73,6 +73,9 @@ struct CreateOptions {
     const CreateOptions& options
 );
 
+[[nodiscard]] ExitCode
+compactArchive(std::string_view archivePath, std::string_view outputPath, bool durable);
+
 [[nodiscard]] ExitCode createArchiveFromPath(std::string_view input);
 
 [[nodiscard]] ExitCode extractArchive(
