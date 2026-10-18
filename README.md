@@ -1,6 +1,6 @@
 # bale
 
-bale is two things that share one engine. It's an archive format of its own, built around content addressing, append-only snapshots and strict framing. It's also an archiver that opens the formats you already have, ZIP and TAR for now, with more on the way.
+bale is two things that share one engine. It's an archive format of its own, built around content addressing, append-only snapshots and strict framing. It's also an archiver that reads and writes the formats you already have, ZIP and TAR (plain, gzip or zstd) for now, with more on the way.
 
 It's early. The native format isn't frozen: `bale create` writes `.bale` files so the design can be tested, but a later build may not read them. Native archives use deduplicated, BLAKE3-verified chunks, compressed with zstd or LZ4 unless a chunk would come out bigger, in which case it's stored as is.
 
@@ -9,6 +9,9 @@ It's early. The native format isn't frozen: `bale create` writes `.bale` files s
 ```sh
 bale create backup.bale ./project
 bale create --preset small backup.bale ./project
+bale create backup.zip ./project
+bale create backup.tar.zst ./project --level 19
+bale convert backup.tar.gz backup.bale
 bale update backup.bale ./project
 bale info backup.bale
 bale compact backup.bale compacted.bale
@@ -23,6 +26,8 @@ bale formats
 `extract` never writes outside the output directory. Paths with `..`, absolute paths, drive letters and Windows device names are refused. So are symlinks, unless you pass `--allow-symlinks`, and then only links that stay inside the output get created. Existing files are left alone unless you ask for `--replace` or `--skip-existing`. Every file is written to a temporary name first. It only moves into place once all of it is written and, if the format has a checksum, the checksum matches. A corrupt entry never shows up half-written under its real name.
 
 `create` and `update` take a preset: `fast`, `balanced` (the default), `small`, `restore-fast` or `portable`. `fast` and `restore-fast` use LZ4, which won both create and extract time against zstd in every measured group, at the cost of archives a fifth to over half bigger. The others are zstd at different levels. The names describe what you're after, not a guarantee that a preset wins on your data. If you want to experiment, `--codec raw|zstd|lz4` and `--level N` (zstd 1-22, lz4 0-12) pick the settings directly. Whatever you choose gets written into the snapshot, and `bale info` shows it back to you. Chunks are hashed and compressed on `--threads N` workers (default: one per CPU, at most 8); the archive comes out the same for any thread count apart from the recorded worker count.
+
+`create` picks the format from the archive name (`.bale`, `.zip`, `.tar`, `.tar.gz` or `.tgz`, `.tar.zst` or `.tzst`); `--format` overrides it. ZIP entries are deflated unless deflate doesn't shrink them, in which case they're stored: entries up to 1 MiB are compressed in memory and compared exactly, larger ones decide on their first MiB. ZIP64 records only appear when sizes, offsets or the entry count need them. TAR output is POSIX ustar with pax headers only for long or non-ASCII names, big sizes and sub-second times. Output for the same tree is byte-identical across runs: entries are sorted and owner names are left out. `--level` takes 0-9 for zip (0 stores everything), 1-9 for tar.gz and 1-22 for tar.zst; presets, codecs, threads and chunk sizes only apply to `.bale`. `convert` rewrites a bale, ZIP or TAR archive entry by entry into any of those formats without unpacking it to disk.
 
 `update` adds a new snapshot from the directory you pass. The snapshot becomes the archive's visible contents, and chunks already in the archive are reused when their contents match.
 
@@ -84,11 +89,12 @@ The corpus generator writes deterministic synthetic groups (prose, lots of small
 ```text
 src/base       errors, checked arithmetic, byte order
 src/io         bounded byte reader, positional file I/O
+src/fswalk     sorted, non-following directory walk shared by every writer
 src/checksum   CRC-32, CRC32C and domain-separated BLAKE3
 src/codecs     DEFLATE, zstd and LZ4 frame encoders and decoders
 src/format     native wire format: ULEB128, canonical TLV, superblock, records, footer
 src/archive    native archive: chunk, manifest, index and commit schemas, writer, reader
-src/formats    ZIP, TAR and gzip readers, format detection
+src/formats    ZIP, TAR, gzip and zstd readers and writers, format detection
 src/security   archive path rules, case-fold collisions, resource budgets
 src/extract    directory-relative extraction with atomic staging
 src/cli        the bale command
