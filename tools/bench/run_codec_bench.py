@@ -18,6 +18,7 @@ import tempfile
 import time
 from pathlib import Path
 
+MEBIBYTE = 1 << 20
 DEFAULT_CODECS = ["raw", "zstd:1", "zstd:3", "zstd:9", "zstd:19", "deflate:1", "deflate:6", "deflate:9"]
 PRESETS = ["fast", "balanced", "small", "restore-fast", "portable"]
 
@@ -241,15 +242,17 @@ def summary(env, codecs, presets):
         lines += [
             f"## {group}",
             "",
-            "| codec | ratio | raw fallback | encode MB/s median [min-max] | decode MB/s median [min-max] | peak RSS KiB |",
-            "|---|---:|---:|---|---|---:|",
+            "| codec | stored MiB | ratio | raw fallback | encode MB/s median [min-max] "
+            "| decode MB/s median [min-max] | peak RSS KiB |",
+            "|---|---:|---:|---:|---|---|---:|",
         ]
         for row in (row for row in codecs if row["group"] == group):
             encode = row["encode_mb_s"]
             decode = row["decode_mb_s"]
             ratio = row["stored_bytes"] / row["input_bytes"] if row["input_bytes"] else 0
             lines.append(
-                f"| {row['codec']} | {ratio:.4f} | {row['raw_fallback_chunks']}/{row['chunks']} "
+                f"| {row['codec']} | {row['stored_bytes'] / MEBIBYTE:.1f} | {ratio:.4f} "
+                f"| {row['raw_fallback_chunks']}/{row['chunks']} "
                 f"| {encode['median']:.1f} [{encode['min']:.1f}-{encode['max']:.1f}] "
                 f"| {decode['median']:.1f} [{decode['min']:.1f}-{decode['max']:.1f}] "
                 f"| {row['peak_rss_kb']} |"
@@ -263,9 +266,10 @@ def summary(env, codecs, presets):
             "Throughput is input bytes over the median time, which includes reading the input and",
             "writing the output.",
             "",
-            "| target | input MB | preset | ratio | create MB/s | create s median [min-max] "
-            "| extract MB/s | extract s median [min-max] | create RSS KiB | extract RSS KiB |",
-            "|---|---:|---|---:|---:|---|---:|---|---:|---:|",
+            "| target | input MiB | preset | archive MiB | ratio | create MB/s "
+            "| create s median [min-max] | extract MB/s | extract s median [min-max] "
+            "| create RSS KiB | extract RSS KiB |",
+            "|---|---:|---|---:|---:|---:|---|---:|---|---:|---:|",
         ]
         for row in presets:
             create = row["create_seconds"]
@@ -273,7 +277,8 @@ def summary(env, codecs, presets):
             megabytes = row["input_bytes"] / 1e6
             ratio = row["archive_bytes"] / row["input_bytes"] if row["input_bytes"] else 0
             lines.append(
-                f"| {row['target']} | {megabytes:.1f} | {row['preset']} | {ratio:.4f} "
+                f"| {row['target']} | {row['input_bytes'] / MEBIBYTE:.1f} | {row['preset']} "
+                f"| {row['archive_bytes'] / MEBIBYTE:.1f} | {ratio:.4f} "
                 f"| {megabytes / create['median']:.1f} "
                 f"| {create['median']:.3f} [{create['min']:.3f}-{create['max']:.3f}] "
                 f"| {megabytes / extract['median']:.1f} "
@@ -286,10 +291,16 @@ def summary(env, codecs, presets):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--bench", type=Path, required=True, help="path to bale_bench_codecs")
+    parser.add_argument(
+        "--summarize",
+        type=Path,
+        metavar="RESULTS_JSON",
+        help="rewrite summary.md next to an existing results.json and exit",
+    )
+    parser.add_argument("--bench", type=Path, help="path to bale_bench_codecs")
     parser.add_argument("--bale", type=Path, help="path to bale; enables the end-to-end runs")
-    parser.add_argument("--corpus", type=Path, required=True)
-    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--corpus", type=Path)
+    parser.add_argument("--out", type=Path)
     parser.add_argument("--runs", type=int, default=5)
     parser.add_argument("--chunk-size", type=int, default=1 << 20)
     parser.add_argument("--cpu", type=int, help="pin every run to this CPU with taskset")
@@ -302,6 +313,16 @@ def main():
         help="where end-to-end archives and extractions go (default: next to --out); avoid tmpfs for large inputs",
     )
     arguments = parser.parse_args()
+
+    if arguments.summarize:
+        saved = json.loads(arguments.summarize.read_text())
+        text = summary(saved["environment"], saved["codecs"], saved["presets"])
+        (arguments.summarize.parent / "summary.md").write_text(text)
+        return
+
+    for name in ("bench", "corpus", "out"):
+        if getattr(arguments, name) is None:
+            parser.error(f"--{name} is required")
 
     if arguments.work_dir is None:
         arguments.work_dir = arguments.out.parent / "bench-work"
