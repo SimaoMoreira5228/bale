@@ -1,0 +1,361 @@
+{
+  "environment": {
+    "date_utc": "2026-10-18T15:13:41+00:00",
+    "platform": "Linux-7.2.11-200.fc44.x86_64-x86_64-with-glibc2.43",
+    "machine": "x86_64",
+    "cpu_model": "Intel(R) Xeon(R) CPU E5-2690 v3 @ 2.60GHz",
+    "logical_cpus": 24,
+    "governor": "performance",
+    "smt_active": "1",
+    "load_average": [
+      3.19921875,
+      8.11767578125,
+      9.13671875
+    ],
+    "pinned_cpu": "1-9",
+    "python": "3.14.8",
+    "bench_sha256": "992ca6c674bf9bf4f93d97d281b95494547ad486fcd1584a574bcf2b00e8dba1",
+    "bale_sha256": "7dcb938ac492503c7bf3d3eba9002ad8edfd975313782153d2f5fa3de9aabe2c",
+    "git_commit": "65dd0fd5b1def14e1e5fc11701409e34aa1ffa39",
+    "corpus_sha256": "7bcddc28a3846c3ac37c04975aa80ff2f029f03a62c596451d1e3442fbebe952",
+    "corpus_version": 1,
+    "chunk_size": 1048576,
+    "runs": 1,
+    "e2e_runs": 2,
+    "create_args": [
+      "--threads",
+      "2"
+    ],
+    "work_dir": "/mnt/hdd/Projects/cpp/bale/build/bench/work/threads-agent"
+  },
+  "codecs": [
+    {
+      "codec": "raw",
+      "group": "size-100M",
+      "files": 1,
+      "chunks": 100,
+      "chunk_size": 1048576,
+      "runs": 1,
+      "input_bytes": 104857600,
+      "stored_bytes": 104867500,
+      "raw_fallback_chunks": 100,
+      "encode_mb_s": {
+        "median": 14195.87,
+        "min": 14195.87,
+        "max": 14195.87
+      },
+      "decode_mb_s": {
+        "median": 14297.43,
+        "min": 14297.43,
+        "max": 14297.43
+      },
+      "peak_rss_kb": 7636
+    },
+    {
+      "codec": "raw",
+      "group": "size-10M",
+      "files": 1,
+      "chunks": 10,
+      "chunk_size": 1048576,
+      "runs": 1,
+      "input_bytes": 10485760,
+      "stored_bytes": 10486750,
+      "raw_fallback_chunks": 10,
+      "encode_mb_s": {
+        "median": 13296.86,
+        "min": 13296.86,
+        "max": 13296.86
+      },
+      "decode_mb_s": {
+        "median": 12346.54,
+        "min": 12346.54,
+        "max": 12346.54
+      },
+      "peak_rss_kb": 7636
+    },
+    {
+      "codec": "raw",
+      "group": "size-1G",
+      "files": 1,
+      "chunks": 1024,
+      "chunk_size": 1048576,
+      "runs": 1,
+      "input_bytes": 1073741824,
+      "stored_bytes": 1073843200,
+      "raw_fallback_chunks": 1024,
+      "encode_mb_s": {
+        "median": 12521.6,
+        "min": 12521.6,
+        "max": 12521.6
+      },
+      "decode_mb_s": {
+        "median": 11575.01,
+        "min": 11575.01,
+        "max": 11575.01
+      },
+      "peak_rss_kb": 7636
+    },
+    {
+      "codec": "raw",
+      "group": "size-1M",
+      "files": 1,
+      "chunks": 1,
+      "chunk_size": 1048576,
+      "runs": 1,
+      "input_bytes": 1048576,
+      "stored_bytes": 1048675,
+      "raw_fallback_chunks": 1,
+      "encode_mb_s": {
+        "median": 13378.28,
+        "min": 13378.28,
+        "max": 13378.28
+      },
+      "decode_mb_s": {
+        "median": 11772.76,
+        "min": 11772.76,
+        "max": 11772.76
+      },
+      "peak_rss_kb": 7636
+    },
+    {
+      "codec": "raw",
+      "group": "size-500M",
+      "files": 1,
+      "chunks": 500,
+      "chunk_size": 1048576,
+      "runs": 1,
+      "input_bytes": 524288000,
+      "stored_bytes": 524337500,
+      "raw_fallback_chunks": 500,
+      "encode_mb_s": {
+        "median": 12289.26,
+        "min": 12289.26,
+        "max": 12289.26
+      },
+      "decode_mb_s": {
+        "median": 11356.53,
+        "min": 11356.53,
+        "max": 11356.53
+      },
+      "peak_rss_kb": 7636
+    }
+  ],
+  "presets": [
+    {
+      "target": "size-1M",
+      "preset": "fast",
+      "input_bytes": 1048576,
+      "archive_bytes": 739087,
+      "create_seconds": {
+        "median": 0.009306164000008721,
+        "min": 0.008990991000018766,
+        "max": 0.009621336999998675
+      },
+      "extract_seconds": {
+        "median": 0.0056790264999335704,
+        "min": 0.0055907029998252256,
+        "max": 0.005767350000041915
+      },
+      "create_peak_rss_kb": 10148,
+      "extract_peak_rss_kb": 6988
+    },
+    {
+      "target": "size-1M",
+      "preset": "balanced",
+      "input_bytes": 1048576,
+      "archive_bytes": 436291,
+      "create_seconds": {
+        "median": 0.01624055249999401,
+        "min": 0.015336538000155997,
+        "max": 0.017144566999832023
+      },
+      "extract_seconds": {
+        "median": 0.006968626999992011,
+        "min": 0.006785860000036337,
+        "max": 0.007151393999947686
+      },
+      "create_peak_rss_kb": 11052,
+      "extract_peak_rss_kb": 6648
+    },
+    {
+      "target": "size-10M",
+      "preset": "fast",
+      "input_bytes": 10485760,
+      "archive_bytes": 8203885,
+      "create_seconds": {
+        "median": 0.01815618150010323,
+        "min": 0.018006297000056293,
+        "max": 0.018306066000150167
+      },
+      "extract_seconds": {
+        "median": 0.015193412999906286,
+        "min": 0.015175652999914746,
+        "max": 0.015211172999897826
+      },
+      "create_peak_rss_kb": 14372,
+      "extract_peak_rss_kb": 7580
+    },
+    {
+      "target": "size-10M",
+      "preset": "balanced",
+      "input_bytes": 10485760,
+      "archive_bytes": 4142864,
+      "create_seconds": {
+        "median": 0.03641716200002065,
+        "min": 0.036164847000009104,
+        "max": 0.0366694770000322
+      },
+      "extract_seconds": {
+        "median": 0.023209872000165888,
+        "min": 0.022934252000140987,
+        "max": 0.02348549200019079
+      },
+      "create_peak_rss_kb": 16676,
+      "extract_peak_rss_kb": 7288
+    },
+    {
+      "target": "size-100M",
+      "preset": "fast",
+      "input_bytes": 104857600,
+      "archive_bytes": 76208201,
+      "create_seconds": {
+        "median": 0.12711726299994552,
+        "min": 0.12621769399993354,
+        "max": 0.1280168319999575
+      },
+      "extract_seconds": {
+        "median": 0.11368271400010599,
+        "min": 0.11183711100011351,
+        "max": 0.11552831700009847
+      },
+      "create_peak_rss_kb": 15532,
+      "extract_peak_rss_kb": 7444
+    },
+    {
+      "target": "size-100M",
+      "preset": "balanced",
+      "input_bytes": 104857600,
+      "archive_bytes": 43997015,
+      "create_seconds": {
+        "median": 0.316912496499981,
+        "min": 0.3124556669999947,
+        "max": 0.32136932599996726
+      },
+      "extract_seconds": {
+        "median": 0.20724997750005514,
+        "min": 0.20351207900012014,
+        "max": 0.21098787599999014
+      },
+      "create_peak_rss_kb": 17068,
+      "extract_peak_rss_kb": 8336
+    },
+    {
+      "target": "size-500M",
+      "preset": "fast",
+      "input_bytes": 524288000,
+      "archive_bytes": 376132364,
+      "create_seconds": {
+        "median": 0.6023087639998721,
+        "min": 0.5950673759998608,
+        "max": 0.6095501519998834
+      },
+      "extract_seconds": {
+        "median": 0.5649893874998497,
+        "min": 0.5597644279998804,
+        "max": 0.5702143469998191
+      },
+      "create_peak_rss_kb": 15332,
+      "extract_peak_rss_kb": 7924
+    },
+    {
+      "target": "size-500M",
+      "preset": "balanced",
+      "input_bytes": 524288000,
+      "archive_bytes": 224388512,
+      "create_seconds": {
+        "median": 1.6502693735000094,
+        "min": 1.6226426670000365,
+        "max": 1.6778960799999822
+      },
+      "extract_seconds": {
+        "median": 1.0485544985000388,
+        "min": 1.0283907840000666,
+        "max": 1.068718213000011
+      },
+      "create_peak_rss_kb": 16940,
+      "extract_peak_rss_kb": 8252
+    },
+    {
+      "target": "size-1G",
+      "preset": "fast",
+      "input_bytes": 1073741824,
+      "archive_bytes": 766054553,
+      "create_seconds": {
+        "median": 1.241605136500084,
+        "min": 1.2316356470000756,
+        "max": 1.2515746260000924
+      },
+      "extract_seconds": {
+        "median": 1.1221738264999885,
+        "min": 1.1116120189999492,
+        "max": 1.1327356340000279
+      },
+      "create_peak_rss_kb": 15532,
+      "extract_peak_rss_kb": 8024
+    },
+    {
+      "target": "size-1G",
+      "preset": "balanced",
+      "input_bytes": 1073741824,
+      "archive_bytes": 464598811,
+      "create_seconds": {
+        "median": 3.198643041999958,
+        "min": 3.1796080829999482,
+        "max": 3.2176780009999675
+      },
+      "extract_seconds": {
+        "median": 2.004077954999957,
+        "min": 1.9904995330000474,
+        "max": 2.0176563769998666
+      },
+      "create_peak_rss_kb": 17252,
+      "extract_peak_rss_kb": 8396
+    },
+    {
+      "target": "all",
+      "preset": "fast",
+      "input_bytes": 1714423176,
+      "archive_bytes": 1227337767,
+      "create_seconds": {
+        "median": 1.9004823979998946,
+        "min": 1.895617060999939,
+        "max": 1.9053477349998502
+      },
+      "extract_seconds": {
+        "median": 1.730779049500029,
+        "min": 1.6887826859999677,
+        "max": 1.7727754130000903
+      },
+      "create_peak_rss_kb": 15716,
+      "extract_peak_rss_kb": 7632
+    },
+    {
+      "target": "all",
+      "preset": "balanced",
+      "input_bytes": 1714423176,
+      "archive_bytes": 737563052,
+      "create_seconds": {
+        "median": 4.9990800049998825,
+        "min": 4.995076218999884,
+        "max": 5.003083790999881
+      },
+      "extract_seconds": {
+        "median": 3.1745498479999696,
+        "min": 3.1334559379999973,
+        "max": 3.215643757999942
+      },
+      "create_peak_rss_kb": 17548,
+      "extract_peak_rss_kb": 8784
+    }
+  ]
+}

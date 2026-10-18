@@ -76,6 +76,7 @@ def environment(arguments, corpus_manifest):
         "chunk_size": arguments.chunk_size,
         "runs": arguments.runs,
         "e2e_runs": arguments.e2e_runs,
+        "create_args": arguments.create_args,
         "work_dir": str(arguments.work_dir),
     }
 
@@ -191,6 +192,7 @@ def end_to_end_run(arguments, work, preset, source, run):
     archive = work / f"{name}-{run}.bale"
     output = work / f"{name}-{run}.out"
     create = [str(arguments.bale), "create", str(archive), str(source), *profile_arguments(preset)]
+    create += arguments.create_args
     _, create_seconds, create_peak = run_measured(pinned(create, arguments.cpu))
     archive_bytes = archive.stat().st_size
 
@@ -247,6 +249,7 @@ def summary(env, codecs, presets):
         f"- machine: {env['cpu_model']} ({env['logical_cpus']} logical CPUs, {env['platform']})",
         f"- governor: {env['governor']}, SMT active: {env['smt_active']}, pinned CPU: {env['pinned_cpu']}",
         f"- load average at start: {env['load_average']}",
+        f"- bale create arguments: {' '.join(env.get('create_args') or []) or '(none)'}",
         f"- corpus: {env['corpus_sha256']}",
         f"- commit: {env['git_commit']}, chunk size {env['chunk_size']}, {env['runs']} runs",
         "",
@@ -320,7 +323,7 @@ def main():
     parser.add_argument("--out", type=Path)
     parser.add_argument("--runs", type=int, default=5)
     parser.add_argument("--chunk-size", type=int, default=1 << 20)
-    parser.add_argument("--cpu", type=int, help="pin every run to this CPU with taskset")
+    parser.add_argument("--cpu", help="pin every run to this CPU or CPU list (taskset -c syntax)")
     parser.add_argument("--codec", action="append", help="codec spec, repeatable (default: a standard set)")
     parser.add_argument(
         "--preset",
@@ -328,6 +331,13 @@ def main():
         action="append",
         type=parse_profile,
         help="preset or codec:level (raw, zstd:L, lz4:L) for end-to-end runs, repeatable (default: all presets)",
+    )
+    parser.add_argument(
+        "--create-arg",
+        dest="create_args",
+        action="append",
+        default=[],
+        help="extra argument for bale create, repeatable (for example --create-arg=--threads --create-arg=4)",
     )
     parser.add_argument("--e2e-runs", type=int, default=3, help="repetitions of each end-to-end run")
     parser.add_argument(

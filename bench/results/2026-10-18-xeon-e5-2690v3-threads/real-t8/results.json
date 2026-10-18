@@ -1,0 +1,245 @@
+{
+  "environment": {
+    "date_utc": "2026-10-18T15:18:44+00:00",
+    "platform": "Linux-7.2.11-200.fc44.x86_64-x86_64-with-glibc2.43",
+    "machine": "x86_64",
+    "cpu_model": "Intel(R) Xeon(R) CPU E5-2690 v3 @ 2.60GHz",
+    "logical_cpus": 24,
+    "governor": "performance",
+    "smt_active": "1",
+    "load_average": [
+      4.0302734375,
+      6.00927734375,
+      7.94580078125
+    ],
+    "pinned_cpu": "1-9",
+    "python": "3.14.8",
+    "bench_sha256": "992ca6c674bf9bf4f93d97d281b95494547ad486fcd1584a574bcf2b00e8dba1",
+    "bale_sha256": "7dcb938ac492503c7bf3d3eba9002ad8edfd975313782153d2f5fa3de9aabe2c",
+    "git_commit": "65dd0fd5b1def14e1e5fc11701409e34aa1ffa39",
+    "corpus_sha256": "af927ec773c8b2497e29ad74dfe47116aaeffa8e9446190bd0a08ec90dc8a9ea",
+    "corpus_version": 1,
+    "chunk_size": 1048576,
+    "runs": 1,
+    "e2e_runs": 2,
+    "create_args": [
+      "--threads",
+      "8"
+    ],
+    "work_dir": "/mnt/hdd/Projects/cpp/bale/build/bench/work/threads-agent"
+  },
+  "codecs": [
+    {
+      "codec": "raw",
+      "group": "binaries",
+      "files": 135,
+      "chunks": 421,
+      "chunk_size": 1048576,
+      "runs": 1,
+      "input_bytes": 358470211,
+      "stored_bytes": 358511873,
+      "raw_fallback_chunks": 421,
+      "encode_mb_s": {
+        "median": 13582.21,
+        "min": 13582.21,
+        "max": 13582.21
+      },
+      "decode_mb_s": {
+        "median": 13812.8,
+        "min": 13812.8,
+        "max": 13812.8
+      },
+      "peak_rss_kb": 43060
+    },
+    {
+      "codec": "raw",
+      "group": "docs",
+      "files": 24085,
+      "chunks": 24148,
+      "chunk_size": 1048576,
+      "runs": 1,
+      "input_bytes": 520099739,
+      "stored_bytes": 522470565,
+      "raw_fallback_chunks": 24148,
+      "encode_mb_s": {
+        "median": 16250.59,
+        "min": 16250.59,
+        "max": 16250.59
+      },
+      "decode_mb_s": {
+        "median": 18352.72,
+        "min": 18352.72,
+        "max": 18352.72
+      },
+      "peak_rss_kb": 43060
+    },
+    {
+      "codec": "raw",
+      "group": "source",
+      "files": 1322,
+      "chunks": 1327,
+      "chunk_size": 1048576,
+      "runs": 1,
+      "input_bytes": 15768373,
+      "stored_bytes": 15898513,
+      "raw_fallback_chunks": 1327,
+      "encode_mb_s": {
+        "median": 17275.2,
+        "min": 17275.2,
+        "max": 17275.2
+      },
+      "decode_mb_s": {
+        "median": 19409.81,
+        "min": 19409.81,
+        "max": 19409.81
+      },
+      "peak_rss_kb": 43060
+    }
+  ],
+  "presets": [
+    {
+      "target": "source",
+      "preset": "fast",
+      "input_bytes": 15768373,
+      "archive_bytes": 10341169,
+      "create_seconds": {
+        "median": 0.04036774200017135,
+        "min": 0.03953009099996052,
+        "max": 0.04120539300038217
+      },
+      "extract_seconds": {
+        "median": 0.10284685099986746,
+        "min": 0.10171103199991194,
+        "max": 0.10398266999982297
+      },
+      "create_peak_rss_kb": 19332,
+      "extract_peak_rss_kb": 7364
+    },
+    {
+      "target": "source",
+      "preset": "balanced",
+      "input_bytes": 15768373,
+      "archive_bytes": 8956196,
+      "create_seconds": {
+        "median": 0.046797825999874476,
+        "min": 0.04521945799979221,
+        "max": 0.04837619399995674
+      },
+      "extract_seconds": {
+        "median": 0.12147519950008245,
+        "min": 0.11877528600007281,
+        "max": 0.1241751130000921
+      },
+      "create_peak_rss_kb": 38084,
+      "extract_peak_rss_kb": 8164
+    },
+    {
+      "target": "binaries",
+      "preset": "fast",
+      "input_bytes": 358470211,
+      "archive_bytes": 212001768,
+      "create_seconds": {
+        "median": 0.1899005865000163,
+        "min": 0.1870861719999084,
+        "max": 0.19271500100012418
+      },
+      "extract_seconds": {
+        "median": 0.37899563449991547,
+        "min": 0.3759227759996975,
+        "max": 0.38206849300013346
+      },
+      "create_peak_rss_kb": 47204,
+      "extract_peak_rss_kb": 9240
+    },
+    {
+      "target": "binaries",
+      "preset": "balanced",
+      "input_bytes": 358470211,
+      "archive_bytes": 162024540,
+      "create_seconds": {
+        "median": 0.3614738759999909,
+        "min": 0.3564119849997951,
+        "max": 0.36653576700018675
+      },
+      "extract_seconds": {
+        "median": 0.7088384820001465,
+        "min": 0.7043790620000436,
+        "max": 0.7132979020002495
+      },
+      "create_peak_rss_kb": 56996,
+      "extract_peak_rss_kb": 9664
+    },
+    {
+      "target": "docs",
+      "preset": "fast",
+      "input_bytes": 520099739,
+      "archive_bytes": 238821796,
+      "create_seconds": {
+        "median": 0.6942770595001093,
+        "min": 0.6791547810003067,
+        "max": 0.709399337999912
+      },
+      "extract_seconds": {
+        "median": 2.231736041999966,
+        "min": 2.121081170999787,
+        "max": 2.342390913000145
+      },
+      "create_peak_rss_kb": 63784,
+      "extract_peak_rss_kb": 19816
+    },
+    {
+      "target": "docs",
+      "preset": "balanced",
+      "input_bytes": 520099739,
+      "archive_bytes": 190240395,
+      "create_seconds": {
+        "median": 0.7881496364998384,
+        "min": 0.7878014259999873,
+        "max": 0.7884978469996895
+      },
+      "extract_seconds": {
+        "median": 2.7224362174999897,
+        "min": 2.634728523999911,
+        "max": 2.8101439110000683
+      },
+      "create_peak_rss_kb": 77864,
+      "extract_peak_rss_kb": 19276
+    },
+    {
+      "target": "all",
+      "preset": "fast",
+      "input_bytes": 898823485,
+      "archive_bytes": 463408508,
+      "create_seconds": {
+        "median": 0.9020076429999335,
+        "min": 0.8914109369998187,
+        "max": 0.9126043490000484
+      },
+      "extract_seconds": {
+        "median": 3.0282849150000857,
+        "min": 3.0090416140001253,
+        "max": 3.047528216000046
+      },
+      "create_peak_rss_kb": 68812,
+      "extract_peak_rss_kb": 20168
+    },
+    {
+      "target": "all",
+      "preset": "balanced",
+      "input_bytes": 898823485,
+      "archive_bytes": 362557360,
+      "create_seconds": {
+        "median": 1.173591453500194,
+        "min": 1.1600953730003312,
+        "max": 1.1870875340000566
+      },
+      "extract_seconds": {
+        "median": 3.597397459000149,
+        "min": 3.4887584970001626,
+        "max": 3.7060364210001353
+      },
+      "create_peak_rss_kb": 80528,
+      "extract_peak_rss_kb": 19244
+    }
+  ]
+}
