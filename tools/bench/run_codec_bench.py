@@ -74,6 +74,8 @@ def environment(arguments, corpus_manifest):
         "corpus_version": corpus_manifest.get("version"),
         "chunk_size": arguments.chunk_size,
         "runs": arguments.runs,
+        "e2e_runs": arguments.e2e_runs,
+        "work_dir": str(arguments.work_dir),
     }
 
 
@@ -85,23 +87,39 @@ def pinned(command, cpu):
     return ["taskset", "-c", str(cpu), *command]
 
 
-def run_measured(command):
+def time_command():
+    if not Path("/usr/bin/time").exists():
+        return None
+    if sys.platform == "darwin":
+        return ["/usr/bin/time", "-l"]
+    if sys.platform.startswith("linux"):
+        return ["/usr/bin/time", "-f", "bale-peak-rss-kb %M"]
+    return None
+
+
+def peak_from_time(stderr):
+    for line in stderr.splitlines():
+        words = line.split()
+        if line.startswith("bale-peak-rss-kb ") and len(words) == 2:
+            return int(words[1])
+        if line.endswith("maximum resident set size") and words:
+            return int(words[0]) // 1024
+    return None
+
+
+# NOTE: a child forked from Python reports Python's memory in ru_maxrss until it execs, so peak
+# memory comes from /usr/bin/time, which forks the measured program from a small process.
+def run_measured(command, track_memory=True):
+    wrapper = time_command() if track_memory else None
     start = time.perf_counter()
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if hasattr(os, "wait4"):
-        stdout = process.stdout.read()
-        stderr = process.stderr.read()
-        _, status, usage = os.wait4(process.pid, 0)
-        elapsed = time.perf_counter() - start
-        process.returncode = os.waitstatus_to_exitcode(status)
-        peak = usage.ru_maxrss // 1024 if sys.platform == "darwin" else usage.ru_maxrss
-    else:
-        stdout, stderr = process.communicate()
-        elapsed = time.perf_counter() - start
-        peak = None
-    if process.returncode != 0:
-        sys.exit(f"{' '.join(map(str, command))} failed:\n{stderr.decode(errors='replace')}")
-    return stdout.decode(), elapsed, peak
+    result = subprocess.run([*(wrapper or []), *command], capture_output=True)
+    elapsed = time.perf_counter() - start
+
+    stderr = result.stderr.decode(errors="replace")
+    if result.returncode != 0:
+        sys.exit(f"{' '.join(map(str, command))} failed:\n{stderr}")
+    peak = peak_from_time(stderr) if wrapper else None
+    return result.stdout.decode(), elapsed, peak
 
 
 def codec_results(arguments):
@@ -117,9 +135,10 @@ def codec_results(arguments):
             "--codec",
             codec,
         ]
-        stdout, _, peak = run_measured(pinned(command, arguments.cpu))
-        for line in stdout.splitlines():
-            record = json.loads(line)
+        stdout, _, _ = run_measured(pinned(command, arguments.cpu), track_memory=False)
+        records = [json.loads(line) for line in stdout.splitlines()]
+        peak = next((record["peak_rss_kb"] for record in records if "peak_rss_kb" in record), None)
+        for record in records:
             if "group" in record:
                 record["peak_rss_kb"] = peak
                 rows.append(record)
@@ -135,46 +154,70 @@ def spread(samples):
     }
 
 
+def directory_bytes(path):
+    return sum(item.stat().st_size for item in path.rglob("*") if item.is_file() and not item.is_symlink())
+
+
+def end_to_end_targets(corpus):
+    groups = sorted(
+        (item for item in corpus.iterdir() if item.is_dir() and not item.is_symlink()),
+        key=lambda item: (directory_bytes(item), item.name),
+    )
+    targets = [(group.name, group) for group in groups]
+    if len(groups) > 1:
+        targets.append(("all", corpus))
+    return targets
+
+
+def end_to_end_run(arguments, work, preset, source, run):
+    archive = work / f"{preset}-{run}.bale"
+    output = work / f"{preset}-{run}.out"
+    create = [str(arguments.bale), "create", str(archive), str(source), "--preset", preset]
+    _, create_seconds, create_peak = run_measured(pinned(create, arguments.cpu))
+    archive_bytes = archive.stat().st_size
+
+    extract = [str(arguments.bale), "extract", str(archive), "-o", str(output)]
+    _, extract_seconds, extract_peak = run_measured(pinned(extract, arguments.cpu))
+
+    archive.unlink()
+    shutil.rmtree(output)
+    return archive_bytes, create_seconds, create_peak, extract_seconds, extract_peak
+
+
 def end_to_end_results(arguments):
     rows = []
-    input_bytes = sum(item.stat().st_size for item in arguments.corpus.rglob("*") if item.is_file())
-    with tempfile.TemporaryDirectory(prefix="bale-bench-") as directory:
+    arguments.work_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="bale-bench-", dir=arguments.work_dir) as directory:
         work = Path(directory)
-        for preset in PRESETS:
-            create_times = []
-            extract_times = []
-            create_peak = 0
-            extract_peak = 0
-            archive_bytes = 0
-            for run in range(arguments.runs):
-                archive = work / f"{preset}-{run}.bale"
-                output = work / f"{preset}-{run}.out"
-                create = [str(arguments.bale), "create", str(archive), str(arguments.corpus), "--preset", preset]
-                _, seconds, peak = run_measured(pinned(create, arguments.cpu))
-                create_times.append(seconds)
-                create_peak = max(create_peak, peak or 0)
-                archive_bytes = archive.stat().st_size
+        for target, source in end_to_end_targets(arguments.corpus):
+            input_bytes = directory_bytes(source)
+            for preset in arguments.presets or PRESETS:
+                create_times = []
+                extract_times = []
+                create_peak = 0
+                extract_peak = 0
+                archive_bytes = 0
+                for run in range(arguments.e2e_runs):
+                    measured = end_to_end_run(arguments, work, preset, source, run)
+                    archive_bytes = measured[0]
+                    create_times.append(measured[1])
+                    create_peak = max(create_peak, measured[2] or 0)
+                    extract_times.append(measured[3])
+                    extract_peak = max(extract_peak, measured[4] or 0)
 
-                extract = [str(arguments.bale), "extract", str(archive), "-o", str(output)]
-                _, seconds, peak = run_measured(pinned(extract, arguments.cpu))
-                extract_times.append(seconds)
-                extract_peak = max(extract_peak, peak or 0)
-
-                archive.unlink()
-                shutil.rmtree(output)
-
-            rows.append(
-                {
-                    "preset": preset,
-                    "input_bytes": input_bytes,
-                    "archive_bytes": archive_bytes,
-                    "create_seconds": spread(create_times),
-                    "extract_seconds": spread(extract_times),
-                    "create_peak_rss_kb": create_peak or None,
-                    "extract_peak_rss_kb": extract_peak or None,
-                }
-            )
-            print(f"preset {preset} done", file=sys.stderr)
+                rows.append(
+                    {
+                        "target": target,
+                        "preset": preset,
+                        "input_bytes": input_bytes,
+                        "archive_bytes": archive_bytes,
+                        "create_seconds": spread(create_times),
+                        "extract_seconds": spread(extract_times),
+                        "create_peak_rss_kb": create_peak or None,
+                        "extract_peak_rss_kb": extract_peak or None,
+                    }
+                )
+                print(f"{target} {preset} done", file=sys.stderr)
     return rows
 
 
@@ -193,7 +236,8 @@ def summary(env, codecs, presets):
         "BALE record overhead and per-chunk raw fallback.",
         "",
     ]
-    for group in sorted({row["group"] for row in codecs}):
+    group_bytes = {row["group"]: row["input_bytes"] for row in codecs}
+    for group in sorted(group_bytes, key=lambda name: (group_bytes[name], name)):
         lines += [
             f"## {group}",
             "",
@@ -216,18 +260,25 @@ def summary(env, codecs, presets):
         lines += [
             "## End to end, deduplication enabled",
             "",
-            "| preset | ratio | create s median [min-max] | extract s median [min-max] | create RSS KiB |",
-            "|---|---:|---|---|---:|",
+            "Throughput is input bytes over the median time, which includes reading the input and",
+            "writing the output.",
+            "",
+            "| target | input MB | preset | ratio | create MB/s | create s median [min-max] "
+            "| extract MB/s | extract s median [min-max] | create RSS KiB | extract RSS KiB |",
+            "|---|---:|---|---:|---:|---|---:|---|---:|---:|",
         ]
         for row in presets:
             create = row["create_seconds"]
             extract = row["extract_seconds"]
+            megabytes = row["input_bytes"] / 1e6
             ratio = row["archive_bytes"] / row["input_bytes"] if row["input_bytes"] else 0
             lines.append(
-                f"| {row['preset']} | {ratio:.4f} "
+                f"| {row['target']} | {megabytes:.1f} | {row['preset']} | {ratio:.4f} "
+                f"| {megabytes / create['median']:.1f} "
                 f"| {create['median']:.3f} [{create['min']:.3f}-{create['max']:.3f}] "
+                f"| {megabytes / extract['median']:.1f} "
                 f"| {extract['median']:.3f} [{extract['min']:.3f}-{extract['max']:.3f}] "
-                f"| {row['create_peak_rss_kb']} |"
+                f"| {row['create_peak_rss_kb']} | {row['extract_peak_rss_kb']} |"
             )
         lines.append("")
     return "\n".join(lines)
@@ -243,7 +294,17 @@ def main():
     parser.add_argument("--chunk-size", type=int, default=1 << 20)
     parser.add_argument("--cpu", type=int, help="pin every run to this CPU with taskset")
     parser.add_argument("--codec", action="append", help="codec spec, repeatable (default: a standard set)")
+    parser.add_argument("--preset", dest="presets", action="append", choices=PRESETS, help="preset for end-to-end runs, repeatable (default: all)")
+    parser.add_argument("--e2e-runs", type=int, default=3, help="repetitions of each end-to-end run")
+    parser.add_argument(
+        "--work-dir",
+        type=Path,
+        help="where end-to-end archives and extractions go (default: next to --out); avoid tmpfs for large inputs",
+    )
     arguments = parser.parse_args()
+
+    if arguments.work_dir is None:
+        arguments.work_dir = arguments.out.parent / "bench-work"
 
     corpus_file = arguments.corpus / "corpus.json"
     corpus_manifest = json.loads(corpus_file.read_text()) if corpus_file.exists() else {}

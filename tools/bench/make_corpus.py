@@ -85,6 +85,76 @@ def incompressible_group(root, rng, scale):
     write(root / "random.bin", rng.randbytes(4 * scale * MEBIBYTE))
 
 
+def parse_size(text):
+    units = {"K": 1 << 10, "M": 1 << 20, "G": 1 << 30}
+    multiplier = units.get(text[-1:].upper(), 1)
+    digits = text[:-1] if text[-1:].upper() in units else text
+    if not digits.isdigit() or int(digits) == 0:
+        raise argparse.ArgumentTypeError(f"bad size {text!r}")
+    return int(digits) * multiplier
+
+
+class MixedSegments:
+    def __init__(self, rng):
+        self.rng = rng
+        self.sentences = prose(rng, 4 * MEBIBYTE).split(b". ")
+        self.records = bytearray()
+        for row in range(MEBIBYTE // 24 + 1):
+            self.records += struct.pack(
+                "<IqdhB3x",
+                row,
+                1_700_000_000 + row * 3,
+                20.0 + row % 97 / 10,
+                row % 1000,
+                row % 4,
+            )
+        del self.records[MEBIBYTE:]
+        self.blocks = [rng.randbytes(64 * 1024) for _ in range(8)]
+
+    def text(self):
+        out = bytearray()
+        while len(out) < MEBIBYTE:
+            out += self.rng.choice(self.sentences) + b". "
+        return bytes(out[:MEBIBYTE])
+
+    def structured(self):
+        out = bytearray(self.records)
+        timestamps = out[4::24]
+        out[4::24] = self.rng.randbytes(len(timestamps))
+        return bytes(out)
+
+    def repeated(self):
+        out = bytearray()
+        while len(out) < MEBIBYTE:
+            out += self.rng.randbytes(self.rng.randint(0, 512)) + self.rng.choice(self.blocks)
+        return bytes(out[:MEBIBYTE])
+
+    def random(self):
+        return self.rng.randbytes(MEBIBYTE)
+
+    def segment(self):
+        kinds = [self.text, self.structured, self.repeated, self.random]
+        return self.rng.choices(kinds, weights=[4, 3, 2, 1])[0]()
+
+
+def sized_group(root, rng, size):
+    segments = MixedSegments(rng)
+    root.mkdir(parents=True, exist_ok=True)
+    with open(root / "mixed.bin", "wb") as handle:
+        remaining = size
+        while remaining > 0:
+            data = segments.segment()[:remaining]
+            handle.write(data)
+            remaining -= len(data)
+
+
+def size_label(size):
+    for unit, factor in (("G", 1 << 30), ("M", 1 << 20), ("K", 1 << 10)):
+        if size % factor == 0:
+            return f"{size // factor}{unit}"
+    return str(size)
+
+
 GENERATORS = {
     "text": text_group,
     "small-files": small_files_group,
@@ -103,16 +173,23 @@ def copy_tree(source, destination):
         shutil.copyfile(path, target)
 
 
-def manifest(root, seed, scale, added):
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(MEBIBYTE), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def manifest(root, seed, scale, sizes, added):
     files = []
     overall = hashlib.sha256()
     for path in sorted(root.rglob("*")):
         if not path.is_file() or path.name == "corpus.json":
             continue
-        data = path.read_bytes()
-        digest = hashlib.sha256(data).hexdigest()
+        digest = file_sha256(path)
         relative = path.relative_to(root).as_posix()
-        files.append({"path": relative, "size": len(data), "sha256": digest})
+        files.append({"path": relative, "size": path.stat().st_size, "sha256": digest})
         overall.update(f"{relative}\0{digest}\n".encode())
 
     groups = {}
@@ -125,6 +202,7 @@ def manifest(root, seed, scale, added):
         "version": CORPUS_VERSION,
         "seed": seed,
         "scale": scale,
+        "sizes": sizes,
         "python": sys.version.split()[0],
         "added": added,
         "groups": groups,
@@ -139,6 +217,16 @@ def main():
     parser.add_argument("--seed", type=int, default=20261018)
     parser.add_argument("--scale", type=int, default=1, help="multiplies every synthetic group size")
     parser.add_argument(
+        "--sizes",
+        default="",
+        help="comma-separated file sizes such as 1M,500M,1G; each becomes a size-<n> group of one mixed file",
+    )
+    parser.add_argument(
+        "--no-synthetic",
+        action="store_true",
+        help="skip the content-type groups, for example when only --sizes or --add are wanted",
+    )
+    parser.add_argument(
         "--add",
         action="append",
         default=[],
@@ -150,8 +238,14 @@ def main():
     if arguments.output.exists() and any(arguments.output.iterdir()):
         parser.error(f"{arguments.output} is not empty")
 
-    for name, generate in GENERATORS.items():
-        generate(arguments.output / name, random.Random(f"{arguments.seed}:{name}"), arguments.scale)
+    if not arguments.no_synthetic:
+        for name, generate in GENERATORS.items():
+            generate(arguments.output / name, random.Random(f"{arguments.seed}:{name}"), arguments.scale)
+
+    sizes = [parse_size(text) for text in arguments.sizes.split(",") if text]
+    for size in sizes:
+        label = size_label(size)
+        sized_group(arguments.output / f"size-{label}", random.Random(f"{arguments.seed}:size:{label}"), size)
 
     added = {}
     for spec in arguments.add:
@@ -161,7 +255,7 @@ def main():
         copy_tree(Path(source), arguments.output / name)
         added[name] = source
 
-    result = manifest(arguments.output, arguments.seed, arguments.scale, added)
+    result = manifest(arguments.output, arguments.seed, arguments.scale, sizes, added)
     (arguments.output / "corpus.json").write_text(json.dumps(result, indent=2) + "\n")
     print(f"corpus {result['sha256']}")
     for name, group in result["groups"].items():

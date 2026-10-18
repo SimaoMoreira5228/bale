@@ -49,16 +49,16 @@ struct CodecSpec {
     std::string label;
 };
 
-struct ChunkRange {
-    std::size_t offset = 0;
-    std::size_t length = 0;
+struct CorpusFile {
+    std::filesystem::path path;
+    std::uint64_t size = 0;
 };
 
 struct Group {
     std::string name;
-    std::vector<std::byte> data;
-    std::vector<ChunkRange> chunks;
-    std::uint64_t files = 0;
+    std::vector<CorpusFile> files;
+    std::uint64_t bytes = 0;
+    std::uint64_t chunks = 0;
 };
 
 struct Options {
@@ -279,33 +279,22 @@ std::optional<Options> parseOptions(std::span<char*> arguments) {
     return options;
 }
 
-bool appendFile(const std::filesystem::path& path, std::size_t chunkSize, Group& group) {
-    auto file = File::openRegularNoFollow(path);
-    if (!file) {
-        return false;
-    }
-    auto size = file->size();
-    if (!size) {
-        return false;
+void addFile(const std::filesystem::path& path, std::size_t chunkSize, Group& group) {
+    std::error_code error;
+    auto size = std::filesystem::file_size(path, error);
+    if (error) {
+        std::println(stderr, "skipping unreadable file {}", path.string());
+        return;
     }
 
-    std::size_t start = group.data.size();
-    group.data.resize(start + static_cast<std::size_t>(*size));
-    auto read = file->readExactAt(0, std::span(group.data).subspan(start));
-    if (!read) {
-        return false;
-    }
-
-    for (std::size_t offset = start; offset < group.data.size(); offset += chunkSize) {
-        group.chunks.push_back(
-            ChunkRange{
-                .offset = offset,
-                .length = std::min(chunkSize, group.data.size() - offset),
-            }
-        );
-    }
-    ++group.files;
-    return true;
+    group.files.push_back(
+        CorpusFile{
+            .path = path,
+            .size = size,
+        }
+    );
+    group.bytes += size;
+    group.chunks += (size + chunkSize - 1) / chunkSize;
 }
 
 std::vector<Group> loadCorpus(const Options& options) {
@@ -333,9 +322,7 @@ std::vector<Group> loadCorpus(const Options& options) {
         Group& group = groups.emplace_back();
         group.name = groupPath.filename().string();
         for (const auto& path : files) {
-            if (!appendFile(path, options.chunkSize, group)) {
-                std::println(stderr, "skipping unreadable file {}", path.string());
-            }
+            addFile(path, options.chunkSize, group);
         }
     }
     return groups;
@@ -360,6 +347,81 @@ Spread spreadOf(std::vector<double> samples) {
     };
 }
 
+struct RunTotals {
+    double encodeSeconds = 0;
+    double decodeSeconds = 0;
+    std::uint64_t storedBytes = 0;
+    std::uint64_t rawFallbackChunks = 0;
+};
+
+struct Buffers {
+    std::vector<std::byte> input;
+    std::vector<std::byte> encoded;
+    std::vector<std::byte> decoded;
+};
+
+bool measureChunk(
+    Codec& codec,
+    std::span<const std::byte> input,
+    Buffers& buffers,
+    bool verify,
+    RunTotals& totals
+) {
+    auto encodeStart = std::chrono::steady_clock::now();
+    auto size = encodeChunk(codec, input, buffers.encoded);
+    std::chrono::duration<double> encodeTime = std::chrono::steady_clock::now() - encodeStart;
+    if (!size) {
+        return false;
+    }
+
+    auto output = std::span(buffers.decoded).first(input.size());
+    bool fallback = *size >= input.size();
+    auto decodeStart = std::chrono::steady_clock::now();
+    if (fallback) {
+        std::memcpy(output.data(), input.data(), input.size());
+    } else if (!decodeChunk(codec, std::span(buffers.encoded).first(*size), output)) {
+        return false;
+    }
+    std::chrono::duration<double> decodeTime = std::chrono::steady_clock::now() - decodeStart;
+
+    if (verify && std::memcmp(output.data(), input.data(), input.size()) != 0) {
+        return false;
+    }
+
+    totals.encodeSeconds += encodeTime.count();
+    totals.decodeSeconds += decodeTime.count();
+    totals.rawFallbackChunks += fallback ? 1 : 0;
+    totals.storedBytes += (fallback ? input.size() : *size) + recordOverhead(input.size());
+    return true;
+}
+
+bool measureFile(
+    Codec& codec,
+    const CorpusFile& corpusFile,
+    std::size_t chunkSize,
+    Buffers& buffers,
+    bool verify,
+    RunTotals& totals
+) {
+    auto file = File::openRegularNoFollow(corpusFile.path);
+    if (!file) {
+        return false;
+    }
+
+    for (std::uint64_t offset = 0; offset < corpusFile.size; offset += chunkSize) {
+        auto length =
+            static_cast<std::size_t>(std::min<std::uint64_t>(chunkSize, corpusFile.size - offset));
+        auto input = std::span(buffers.input).first(length);
+        if (!file->readExactAt(offset, input)) {
+            return false;
+        }
+        if (!measureChunk(codec, input, buffers, verify, totals)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 std::optional<Measurement>
 measure(const Options& options, const CodecSpec& spec, const Group& group) {
     auto created = createCodec(spec);
@@ -368,64 +430,32 @@ measure(const Options& options, const CodecSpec& spec, const Group& group) {
     }
     Codec& codec = *created;
 
-    std::vector<std::size_t> encodedOffsets(group.chunks.size());
-    std::vector<std::size_t> encodedSizes(group.chunks.size());
-    std::size_t arenaSize = 0;
-    for (std::size_t index = 0; index < group.chunks.size(); ++index) {
-        encodedOffsets[index] = arenaSize;
-        arenaSize += boundOf(codec, group.chunks[index].length);
-    }
-    std::vector<std::byte> arena(arenaSize);
-    std::vector<std::byte> decoded(options.chunkSize);
+    Buffers buffers{
+        .input = std::vector<std::byte>(options.chunkSize),
+        .encoded = std::vector<std::byte>(boundOf(codec, options.chunkSize)),
+        .decoded = std::vector<std::byte>(options.chunkSize),
+    };
 
     Measurement result;
     std::vector<double> encodeSamples;
     std::vector<double> decodeSamples;
-    const double megabytes = static_cast<double>(group.data.size()) / 1e6;
+    const double megabytes = static_cast<double>(group.bytes) / 1e6;
     for (int run = 0; run < options.runs; ++run) {
-        auto encodeStart = std::chrono::steady_clock::now();
-        for (std::size_t index = 0; index < group.chunks.size(); ++index) {
-            const ChunkRange& range = group.chunks[index];
-            auto input = std::span(group.data).subspan(range.offset, range.length);
-            auto output =
-                std::span(arena).subspan(encodedOffsets[index], boundOf(codec, range.length));
-            auto size = encodeChunk(codec, input, output);
-            if (!size) {
-                return std::nullopt;
-            }
-            encodedSizes[index] = *size;
-        }
-        std::chrono::duration<double> encodeTime = std::chrono::steady_clock::now() - encodeStart;
-
-        auto decodeStart = std::chrono::steady_clock::now();
-        for (std::size_t index = 0; index < group.chunks.size(); ++index) {
-            const ChunkRange& range = group.chunks[index];
-            if (encodedSizes[index] >= range.length) {
-                std::memcpy(decoded.data(), group.data.data() + range.offset, range.length);
-                continue;
-            }
-            auto input = std::span(arena).subspan(encodedOffsets[index], encodedSizes[index]);
-            if (!decodeChunk(codec, input, std::span(decoded).first(range.length))) {
-                return std::nullopt;
-            }
-            bool mismatch =
-                std::memcmp(decoded.data(), group.data.data() + range.offset, range.length) != 0;
-            if (run == 0 && mismatch) {
+        RunTotals totals;
+        for (const CorpusFile& file : group.files) {
+            if (!measureFile(codec, file, options.chunkSize, buffers, run == 0, totals)) {
                 return std::nullopt;
             }
         }
-        std::chrono::duration<double> decodeTime = std::chrono::steady_clock::now() - decodeStart;
 
-        encodeSamples.push_back(megabytes / encodeTime.count());
-        decodeSamples.push_back(megabytes / std::max(decodeTime.count(), 1e-9));
+        if (run == 0) {
+            result.storedBytes = totals.storedBytes;
+            result.rawFallbackChunks = totals.rawFallbackChunks;
+        }
+        encodeSamples.push_back(megabytes / std::max(totals.encodeSeconds, 1e-9));
+        decodeSamples.push_back(megabytes / std::max(totals.decodeSeconds, 1e-9));
     }
 
-    for (std::size_t index = 0; index < group.chunks.size(); ++index) {
-        std::size_t length = group.chunks[index].length;
-        bool fallback = encodedSizes[index] >= length;
-        result.rawFallbackChunks += fallback ? 1 : 0;
-        result.storedBytes += (fallback ? length : encodedSizes[index]) + recordOverhead(length);
-    }
     result.encodeMegabytesPerSecond = spreadOf(encodeSamples);
     result.decodeMegabytesPerSecond = spreadOf(decodeSamples);
     return result;
@@ -438,16 +468,33 @@ std::uint64_t peakResidentKilobytes() {
         return 0;
     }
     return counters.PeakWorkingSetSize / 1024;
+#elif defined(__linux__)
+    // NOTE: VmHWM belongs to this address space and starts over at exec; ru_maxrss would also
+    // count the parent's pages from before exec.
+    std::FILE* status = std::fopen("/proc/self/status", "r");
+    if (status == nullptr) {
+        return 0;
+    }
+    std::array<char, 256> line{};
+    std::uint64_t kilobytes = 0;
+    while (std::fgets(line.data(), static_cast<int>(line.size()), status) != nullptr) {
+        std::string_view text(line.data());
+        if (!text.starts_with("VmHWM:")) {
+            continue;
+        }
+        text.remove_prefix(6);
+        text.remove_prefix(std::min(text.find_first_not_of(" \t"), text.size()));
+        std::from_chars(text.data(), text.data() + text.size(), kilobytes);
+        break;
+    }
+    std::fclose(status);
+    return kilobytes;
 #else
     rusage usage{};
     if (getrusage(RUSAGE_SELF, &usage) != 0) {
         return 0;
     }
-#ifdef __APPLE__
     return static_cast<std::uint64_t>(usage.ru_maxrss) / 1024;
-#else
-    return static_cast<std::uint64_t>(usage.ru_maxrss);
-#endif
 #endif
 }
 
@@ -519,9 +566,9 @@ int run(std::span<char*> arguments) {
             }
 
             double ratio = 0;
-            if (!group.data.empty()) {
-                ratio = static_cast<double>(measured->storedBytes) /
-                    static_cast<double>(group.data.size());
+            if (group.bytes != 0) {
+                ratio =
+                    static_cast<double>(measured->storedBytes) / static_cast<double>(group.bytes);
             }
             std::println(
                 "{{\"codec\":{},\"group\":{},\"files\":{},\"chunks\":{},\"chunk_size\":{},"
@@ -529,11 +576,11 @@ int run(std::span<char*> arguments) {
                 "\"encode_mb_s\":{},\"decode_mb_s\":{}}}",
                 jsonString(spec.label),
                 jsonString(group.name),
-                group.files,
-                group.chunks.size(),
+                group.files.size(),
+                group.chunks,
                 options->chunkSize,
                 options->runs,
-                group.data.size(),
+                group.bytes,
                 measured->storedBytes,
                 measured->rawFallbackChunks,
                 jsonSpread(measured->encodeMegabytesPerSecond),
@@ -545,7 +592,7 @@ int run(std::span<char*> arguments) {
                 "[{:.1f}-{:.1f}]",
                 spec.label,
                 group.name,
-                group.data.size(),
+                group.bytes,
                 measured->storedBytes,
                 ratio,
                 measured->encodeMegabytesPerSecond.median,
