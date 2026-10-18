@@ -15,6 +15,33 @@ inline constexpr std::size_t blockSize = 512;
 
 using Block = std::span<const std::byte, blockSize>;
 
+struct Field {
+    std::size_t offset;
+    std::size_t length;
+};
+
+inline constexpr Field nameField{0, 100};
+inline constexpr Field modeField{100, 8};
+inline constexpr Field uidField{108, 8};
+inline constexpr Field gidField{116, 8};
+inline constexpr Field sizeField{124, 12};
+inline constexpr Field mtimeField{136, 12};
+inline constexpr Field checksumField{148, 8};
+inline constexpr std::size_t typeflagOffset = 156;
+inline constexpr Field linkNameField{157, 100};
+inline constexpr Field magicField{257, 8};
+inline constexpr Field unameField{265, 32};
+inline constexpr Field gnameField{297, 32};
+inline constexpr Field devMajorField{329, 8};
+inline constexpr Field devMinorField{337, 8};
+inline constexpr Field prefixField{345, 155};
+
+inline constexpr std::string_view ustarMagic{
+    "ustar\0"
+    "00",
+    8
+};
+
 enum class Format : std::uint8_t {
     V7,
     Ustar,

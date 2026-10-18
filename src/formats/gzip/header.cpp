@@ -141,4 +141,32 @@ bool looksLikeGzip(std::span<const std::byte> head) {
         (std::to_integer<std::uint8_t>(head[3]) & reservedFlags) == 0;
 }
 
+std::array<std::byte, fixedHeaderSize> encodeHeader(int compressionLevel) {
+    constexpr std::uint8_t extraFlagsSlowest = 2;
+    constexpr std::uint8_t extraFlagsFastest = 4;
+    constexpr std::byte unknownOs{0xFF};
+
+    std::uint8_t extraFlags = 0;
+    if (compressionLevel == 9) {
+        extraFlags = extraFlagsSlowest;
+    } else if (compressionLevel == 1) {
+        extraFlags = extraFlagsFastest;
+    }
+
+    std::array<std::byte, fixedHeaderSize> header{};
+    header[0] = magic1;
+    header[1] = magic2;
+    header[2] = std::byte{methodDeflate};
+    header[8] = std::byte{extraFlags};
+    header[9] = unknownOs;
+    return header;
+}
+
+std::array<std::byte, trailerSize> encodeTrailer(std::uint32_t crc, std::uint64_t size) {
+    std::array<std::byte, trailerSize> trailer{};
+    storeLe(trailer.data(), crc);
+    storeLe(trailer.data() + 4, static_cast<std::uint32_t>(size));
+    return trailer;
+}
+
 }

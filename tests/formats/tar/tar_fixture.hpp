@@ -21,11 +21,6 @@ namespace bale::tar::test {
 
 using BlockBytes = std::array<std::byte, blockSize>;
 
-inline constexpr std::string_view ustarMagic{
-    "ustar\0"
-    "00",
-    8
-};
 inline constexpr std::string_view gnuMagic{"ustar  \0", 8};
 inline constexpr std::string_view v7Magic{"\0\0\0\0\0\0\0\0", 8};
 

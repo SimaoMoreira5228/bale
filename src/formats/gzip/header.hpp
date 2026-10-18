@@ -2,6 +2,7 @@
 
 #include "base/error.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -47,5 +48,10 @@ parseHeader(std::span<const std::byte> data, const Limits& limits, std::uint64_t
 [[nodiscard]] Result<std::size_t> maxHeaderSize(const Limits& limits);
 
 [[nodiscard]] bool looksLikeGzip(std::span<const std::byte> head);
+
+[[nodiscard]] std::array<std::byte, fixedHeaderSize> encodeHeader(int compressionLevel);
+
+[[nodiscard]] std::array<std::byte, trailerSize>
+encodeTrailer(std::uint32_t crc, std::uint64_t size);
 
 }
