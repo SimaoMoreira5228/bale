@@ -69,7 +69,7 @@ TEST_CASE("detectFormat rejects lookalikes") {
     CHECK(detectBytes({}) == ArchiveFormat{});
 }
 
-TEST_CASE("detectFormat looks one tar block into gzip and zstd streams") {
+TEST_CASE("detectFormat looks one tar block into every compressed stream") {
     tar::test::HeaderSpec spec;
     spec.name = "inner.txt";
     tar::test::ArchiveBuilder builder;
@@ -78,15 +78,25 @@ TEST_CASE("detectFormat looks one tar block into gzip and zstd streams") {
 
     ArchiveFormat tarGz{.container = Container::Tar, .compression = Compression::Gzip};
     ArchiveFormat tarZst{.container = Container::Tar, .compression = Compression::Zstd};
+    ArchiveFormat tarXz{.container = Container::Tar, .compression = Compression::Xz};
+    ArchiveFormat tarBz2{.container = Container::Tar, .compression = Compression::Bzip2};
     ArchiveFormat gzipFile{.container = Container::SingleFile, .compression = Compression::Gzip};
     ArchiveFormat zstdFile{.container = Container::SingleFile, .compression = Compression::Zstd};
+    ArchiveFormat xzFile{.container = Container::SingleFile, .compression = Compression::Xz};
+    ArchiveFormat bz2File{.container = Container::SingleFile, .compression = Compression::Bzip2};
     CHECK(name(tarGz) == "tar.gz");
     CHECK(name(tarZst) == "tar.zst");
+    CHECK(name(tarXz) == "tar.xz");
+    CHECK(name(tarBz2) == "tar.bz2");
     CHECK(name(gzipFile) == "gzip");
     CHECK(name(zstdFile) == "zstd");
+    CHECK(name(xzFile) == "xz");
+    CHECK(name(bz2File) == "bzip2");
 
     CHECK(detectBytes(test::gzipMember(tarBytes)) == tarGz);
     CHECK(detectBytes(test::zstdCompress(tarBytes, 20)) == tarZst);
+    CHECK(detectBytes(test::xzCompress(tarBytes)) == tarXz);
+    CHECK(detectBytes(test::bzip2Compress(tarBytes)) == tarBz2);
 
     auto split = test::gzipMember(std::span(tarBytes).first(100));
     auto rest = test::gzipMember(std::span(tarBytes).subspan(100));
@@ -96,6 +106,8 @@ TEST_CASE("detectFormat looks one tar block into gzip and zstd streams") {
     std::vector<std::byte> text(2000, std::byte{'t'});
     CHECK(detectBytes(test::gzipMember(text, "notes.txt")) == gzipFile);
     CHECK(detectBytes(test::zstdCompress(text, 20)) == zstdFile);
+    CHECK(detectBytes(test::xzCompress(text)) == xzFile);
+    CHECK(detectBytes(test::bzip2Compress(text)) == bz2File);
     CHECK(detectBytes(test::gzipMember(std::span(text).first(tar::blockSize))) == gzipFile);
 
     auto badChecksum = tarBytes;
@@ -109,4 +121,31 @@ TEST_CASE("detectFormat looks one tar block into gzip and zstd streams") {
     auto corrupt = test::zstdCompress(tarBytes, 20);
     corrupt.resize(8);
     CHECK(detectBytes(corrupt) == zstdFile);
+}
+
+TEST_CASE("detectFormat rejects xz and bzip2 lookalikes") {
+    CHECK_FALSE(xz::looksLikeXz({}));
+    CHECK_FALSE(bzip2::looksLikeBzip2({}));
+
+    std::array<std::byte, 5> shortXz{
+        std::byte{0xFD},
+        std::byte{0x37},
+        std::byte{0x7A},
+        std::byte{0x58},
+        std::byte{0x5A},
+    };
+    CHECK_FALSE(xz::looksLikeXz(shortXz));
+
+    std::array<std::byte, 4> badDigit{
+        std::byte{'B'},
+        std::byte{'Z'},
+        std::byte{'h'},
+        std::byte{'0'},
+    };
+    CHECK_FALSE(bzip2::looksLikeBzip2(badDigit));
+
+    std::vector<std::byte> text(2000, std::byte{'t'});
+    auto xz = test::xzCompress(text);
+    xz[0] = std::byte{0x1F};
+    CHECK(detectBytes(xz) == ArchiveFormat{});
 }

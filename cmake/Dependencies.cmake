@@ -8,6 +8,8 @@ add_library(bale_zlib_ng INTERFACE)
 add_library(bale_zstd INTERFACE)
 add_library(bale_lz4 INTERFACE)
 add_library(bale_blake3 INTERFACE)
+add_library(bale_lzma INTERFACE)
+add_library(bale_bz2 INTERFACE)
 
 if(BALE_USE_SYSTEM_CODECS)
     find_package(zlib-ng CONFIG QUIET)
@@ -61,6 +63,26 @@ if(BALE_USE_SYSTEM_CODECS)
     else()
         message(FATAL_ERROR "BALE_USE_SYSTEM_CODECS: BLAKE3 not found")
     endif()
+
+    find_package(LibLZMA QUIET)
+    if(TARGET LibLZMA::LibLZMA)
+        target_link_libraries(bale_lzma INTERFACE LibLZMA::LibLZMA)
+    elseif(PkgConfig_FOUND)
+        pkg_check_modules(BALE_SYSTEM_LZMA REQUIRED IMPORTED_TARGET liblzma>=5.4.0)
+        target_link_libraries(bale_lzma INTERFACE PkgConfig::BALE_SYSTEM_LZMA)
+    else()
+        message(FATAL_ERROR "BALE_USE_SYSTEM_CODECS: liblzma not found")
+    endif()
+
+    find_package(BZip2 QUIET)
+    if(TARGET BZip2::BZip2)
+        target_link_libraries(bale_bz2 INTERFACE BZip2::BZip2)
+    elseif(PkgConfig_FOUND)
+        pkg_check_modules(BALE_SYSTEM_BZ2 REQUIRED IMPORTED_TARGET bzip2)
+        target_link_libraries(bale_bz2 INTERFACE PkgConfig::BALE_SYSTEM_BZ2)
+    else()
+        message(FATAL_ERROR "BALE_USE_SYSTEM_CODECS: bzip2 not found")
+    endif()
     return()
 endif()
 
@@ -88,6 +110,11 @@ FetchContent_Declare(blake3
     URL https://github.com/BLAKE3-team/BLAKE3/archive/refs/tags/1.8.7.tar.gz
     URL_HASH SHA256=c6782a28842b1c0478524ac06a4f2ede784038ee298d6e2162c0b089c4306a3c
     SOURCE_SUBDIR c
+    SYSTEM
+)
+FetchContent_Declare(xz
+    URL https://github.com/tukaani-project/xz/releases/download/v5.8.4/xz-5.8.4.tar.gz
+    URL_HASH SHA256=0014c7886930454fe8bd4228665b51af55eeae560ea135c9c4cd33f55b2591d9
     SYSTEM
 )
 
@@ -134,10 +161,51 @@ block(SCOPE_FOR VARIABLES)
     set(BLAKE3_EXAMPLES OFF)
     set(BLAKE3_TESTING OFF)
 
-    FetchContent_MakeAvailable(zlib_ng zstd lz4 blake3)
+    # NOTE: only the decoder library is needed; the command line tools, scripts,
+    # translated messages and API docs stay out of the build.
+    set(XZ_TOOL_XZ OFF)
+    set(XZ_TOOL_XZDEC OFF)
+    set(XZ_TOOL_LZMADEC OFF)
+    set(XZ_TOOL_LZMAINFO OFF)
+    set(XZ_TOOL_SCRIPTS OFF)
+    set(XZ_DOC OFF)
+    set(XZ_NLS OFF)
+    # NOTE: the sandbox only confines the xz tools above, which bale never builds, so this
+    # changes nothing in the library. xz's configure hard-errors when CFLAGS holds
+    # -fsanitize, which would needlessly break sanitizer builds (./dev sanitize).
+    set(XZ_SANDBOX no)
+
+    FetchContent_MakeAvailable(zlib_ng zstd lz4 blake3 xz)
 endblock()
+
+# NOTE: bzip2 ships no CMake build, so bale verifies the tarball by hash and compiles
+# the library sources directly. Only the bzip2 and bzip2recover tools are left out.
+set(BALE_BZIP2_URL https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz)
+set(BALE_BZIP2_SHA256 ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269)
+set(BALE_BZIP2_ARCHIVE ${CMAKE_BINARY_DIR}/bzip2-1.0.8.tar.gz)
+set(BALE_BZIP2_SOURCE_DIR ${CMAKE_BINARY_DIR}/bzip2-1.0.8)
+if(NOT EXISTS ${BALE_BZIP2_SOURCE_DIR}/bzlib.h)
+    file(DOWNLOAD ${BALE_BZIP2_URL} ${BALE_BZIP2_ARCHIVE} EXPECTED_HASH SHA256=${BALE_BZIP2_SHA256})
+    file(ARCHIVE_EXTRACT INPUT ${BALE_BZIP2_ARCHIVE} DESTINATION ${CMAKE_BINARY_DIR})
+endif()
+add_library(bale_bz2_static STATIC
+    ${BALE_BZIP2_SOURCE_DIR}/blocksort.c
+    ${BALE_BZIP2_SOURCE_DIR}/bzlib.c
+    ${BALE_BZIP2_SOURCE_DIR}/compress.c
+    ${BALE_BZIP2_SOURCE_DIR}/crctable.c
+    ${BALE_BZIP2_SOURCE_DIR}/decompress.c
+    ${BALE_BZIP2_SOURCE_DIR}/huffman.c
+    ${BALE_BZIP2_SOURCE_DIR}/randtable.c
+)
+target_include_directories(bale_bz2_static SYSTEM PUBLIC ${BALE_BZIP2_SOURCE_DIR})
+target_link_libraries(bale_bz2 INTERFACE bale_bz2_static)
 
 target_link_libraries(bale_zlib_ng INTERFACE zlib-ng::zlib)
 target_link_libraries(bale_zstd INTERFACE libzstd_static)
 target_link_libraries(bale_lz4 INTERFACE lz4_static)
 target_link_libraries(bale_blake3 INTERFACE BLAKE3::blake3)
+# NOTE: liblzma's CMake target does not expose its API headers, so bale adds them
+# explicitly instead of picking up whatever lzma.h the system happens to provide.
+FetchContent_GetProperties(xz SOURCE_DIR XZ_SOURCE_DIR)
+target_include_directories(bale_lzma SYSTEM INTERFACE ${XZ_SOURCE_DIR}/src/liblzma/api)
+target_link_libraries(bale_lzma INTERFACE liblzma)

@@ -61,4 +61,54 @@ class ZstdDecoder {
     std::unique_ptr<State> state_;
 };
 
+struct XzLimits {
+    std::uint64_t memLimitBytes = std::uint64_t{256} << 20;
+};
+
+class XzDecoder {
+  public:
+    [[nodiscard]] static Result<XzDecoder> create(const XzLimits& limits = {});
+
+    XzDecoder(XzDecoder&& other) noexcept;
+    XzDecoder& operator=(XzDecoder&& other) noexcept;
+    ~XzDecoder();
+
+    [[nodiscard]] Result<DecodeStep>
+    decompress(std::span<const std::byte> input, std::span<std::byte> output, bool finish);
+
+    [[nodiscard]] Result<void> reset();
+
+    [[nodiscard]] bool streamEnded() const;
+
+  private:
+    struct State;
+
+    explicit XzDecoder(std::unique_ptr<State> state);
+
+    std::unique_ptr<State> state_;
+};
+
+class Bzip2Decoder {
+  public:
+    [[nodiscard]] static Result<Bzip2Decoder> create();
+
+    Bzip2Decoder(Bzip2Decoder&& other) noexcept;
+    Bzip2Decoder& operator=(Bzip2Decoder&& other) noexcept;
+    ~Bzip2Decoder();
+
+    [[nodiscard]] Result<DecodeStep>
+    decompress(std::span<const std::byte> input, std::span<std::byte> output);
+
+    [[nodiscard]] Result<void> reset();
+
+    [[nodiscard]] bool streamEnded() const;
+
+  private:
+    struct State;
+
+    explicit Bzip2Decoder(std::unique_ptr<State> state);
+
+    std::unique_ptr<State> state_;
+};
+
 }

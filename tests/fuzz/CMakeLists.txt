@@ -1,5 +1,6 @@
 set(bale_fuzz_targets
     fuzz_archive_path
+    fuzz_bzip2
     fuzz_codecs
     fuzz_detect
     fuzz_gzip
@@ -8,6 +9,7 @@ set(bale_fuzz_targets
     fuzz_tar
     fuzz_terminal_text
     fuzz_tlv
+    fuzz_xz
     fuzz_zip
     fuzz_zstd
 )
@@ -22,9 +24,11 @@ foreach(target IN LISTS bale_fuzz_targets)
         bale_codecs
         bale_format
         bale_formats
+        bale_formats_bzip2
         bale_formats_compressed
         bale_formats_gzip
         bale_formats_tar
+        bale_formats_xz
         bale_formats_zip
         bale_formats_zstd
         bale_io

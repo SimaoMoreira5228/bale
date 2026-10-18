@@ -1,5 +1,6 @@
 #include "formats/compressed/stream.hpp"
 
+#include <type_traits>
 #include <utility>
 
 namespace bale {
@@ -29,6 +30,28 @@ CompressedStream::open(File file, Compression compression, const DecompressLimit
         }
         return CompressedStream(Codec(std::move(*stream)));
     }
+    case Compression::Xz: {
+        xz::Limits xzLimits;
+        xzLimits.maxOutputBytes = limits.maxOutputBytes;
+        xzLimits.chunkBytes = limits.chunkBytes;
+
+        auto stream = xz::Stream::open(std::move(file), xzLimits);
+        if (!stream) {
+            return std::unexpected(stream.error());
+        }
+        return CompressedStream(Codec(std::move(*stream)));
+    }
+    case Compression::Bzip2: {
+        bzip2::Limits bzip2Limits;
+        bzip2Limits.maxOutputBytes = limits.maxOutputBytes;
+        bzip2Limits.chunkBytes = limits.chunkBytes;
+
+        auto stream = bzip2::Stream::open(std::move(file), bzip2Limits);
+        if (!stream) {
+            return std::unexpected(stream.error());
+        }
+        return CompressedStream(Codec(std::move(*stream)));
+    }
     case Compression::None:
         break;
     }
@@ -36,7 +59,21 @@ CompressedStream::open(File file, Compression compression, const DecompressLimit
 }
 
 Compression CompressedStream::compression() const {
-    return std::holds_alternative<gzip::Stream>(codec_) ? Compression::Gzip : Compression::Zstd;
+    return std::visit(
+        [](const auto& stream) -> Compression {
+            using Stream = std::decay_t<decltype(stream)>;
+            if constexpr (std::is_same_v<Stream, gzip::Stream>) {
+                return Compression::Gzip;
+            } else if constexpr (std::is_same_v<Stream, zstd::Stream>) {
+                return Compression::Zstd;
+            } else if constexpr (std::is_same_v<Stream, xz::Stream>) {
+                return Compression::Xz;
+            } else {
+                return Compression::Bzip2;
+            }
+        },
+        codec_
+    );
 }
 
 const gzip::Header* CompressedStream::gzipHeader() const {

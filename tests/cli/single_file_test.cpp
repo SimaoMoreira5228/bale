@@ -54,4 +54,12 @@ TEST_CASE("singleFileName falls back to the archive name without its suffix") {
     CHECK(nameFor("x/blob.bin", zstd, Compression::Zstd) == "blob.bin.out");
     CHECK(nameFor(".zst", zstd, Compression::Zstd) == ".zst.out");
     CHECK(gzipNamed("plain", "") == "plain.out");
+
+    auto xz = test::xzCompress(std::span(data));
+    CHECK(nameFor("x/notes.txt.xz", xz, Compression::Xz) == "notes.txt");
+    CHECK(nameFor("x/blob.bin", xz, Compression::Xz) == "blob.bin.out");
+
+    auto bz2 = test::bzip2Compress(std::span(data));
+    CHECK(nameFor("x/notes.txt.bz2", bz2, Compression::Bzip2) == "notes.txt");
+    CHECK(nameFor("x/blob.bin", bz2, Compression::Bzip2) == "blob.bin.out");
 }

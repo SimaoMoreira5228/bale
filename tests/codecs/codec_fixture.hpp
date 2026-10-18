@@ -11,6 +11,8 @@
 #include <string_view>
 #include <vector>
 
+#include <bzlib.h>
+#include <lzma.h>
 #include <zstd.h>
 
 namespace bale::test {
@@ -92,6 +94,74 @@ inline std::vector<std::byte> zstdCompress(std::span<const std::byte> data, int 
     ZSTD_freeCCtx(context);
 
     out.resize(ZSTD_isError(first) != 0U || last != 0 ? 0 : sink.pos);
+    return out;
+}
+
+inline std::vector<std::byte> xzCompress(std::span<const std::byte> data) {
+    lzma_stream stream = LZMA_STREAM_INIT;
+    if (lzma_easy_encoder(&stream, 6, LZMA_CHECK_CRC64) != LZMA_OK) {
+        return {};
+    }
+
+    std::vector<std::byte> out(data.size() + 128);
+    stream.next_in = reinterpret_cast<const std::uint8_t*>(data.data());
+    stream.avail_in = data.size();
+    while (true) {
+        if (stream.total_out == out.size()) {
+            out.resize(out.size() + data.size() + 128);
+        }
+
+        stream.next_out = reinterpret_cast<std::uint8_t*>(out.data() + stream.total_out);
+        stream.avail_out = out.size() - static_cast<std::size_t>(stream.total_out);
+        auto status = lzma_code(&stream, stream.avail_in == 0 ? LZMA_FINISH : LZMA_RUN);
+        if (status == LZMA_STREAM_END) {
+            break;
+        }
+        if (status != LZMA_OK) {
+            lzma_end(&stream);
+            return {};
+        }
+    }
+
+    out.resize(static_cast<std::size_t>(stream.total_out));
+    lzma_end(&stream);
+    return out;
+}
+
+inline std::vector<std::byte> bzip2Compress(std::span<const std::byte> data) {
+    bz_stream stream{};
+    if (BZ2_bzCompressInit(&stream, 9, 0, 0) != BZ_OK) {
+        return {};
+    }
+
+    std::vector<std::byte> out(data.size() + 128);
+    stream.next_in = reinterpret_cast<char*>(const_cast<std::byte*>(data.data()));
+    stream.avail_in = static_cast<unsigned int>(data.size());
+    stream.next_out = reinterpret_cast<char*>(out.data());
+    stream.avail_out = static_cast<unsigned int>(out.size());
+
+    std::size_t produced = 0;
+    while (true) {
+        if (stream.avail_out == 0) {
+            out.resize(out.size() + data.size() + 128);
+            stream.next_out = reinterpret_cast<char*>(out.data() + produced);
+            stream.avail_out = static_cast<unsigned int>(out.size() - produced);
+        }
+
+        auto room = stream.avail_out;
+        int status = BZ2_bzCompress(&stream, stream.avail_in == 0 ? BZ_FINISH : BZ_RUN);
+        produced += room - stream.avail_out;
+        if (status == BZ_STREAM_END) {
+            break;
+        }
+        if (status != BZ_RUN_OK && status != BZ_FINISH_OK) {
+            BZ2_bzCompressEnd(&stream);
+            return {};
+        }
+    }
+
+    out.resize(produced);
+    BZ2_bzCompressEnd(&stream);
     return out;
 }
 
