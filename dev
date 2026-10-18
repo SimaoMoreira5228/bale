@@ -137,6 +137,52 @@ case "$cmd" in
         TSAN_OPTIONS="${TSAN_OPTIONS:-halt_on_error=1:second_deadlock_stack=1}" \
             run_tests "$tsan_dir" "$@"
         ;;
+    fuzz)
+        fuzz_dir="$build_root/fuzz"
+        fuzz_target="${1:-all}"
+        fuzz_seconds="${2:-60}"
+        if [[ ! "$fuzz_seconds" =~ ^[1-9][0-9]*$ ]]; then
+            echo "fuzz seconds must be a positive integer" >&2
+            exit 2
+        fi
+        configure "$fuzz_dir" \
+            -DCMAKE_C_COMPILER="${FUZZ_CC:-clang}" \
+            -DCMAKE_CXX_COMPILER="${FUZZ_CXX:-clang++}" \
+            -DBALE_LINK_COMPILE_COMMANDS=OFF \
+            -DBALE_BUILD_TESTS=OFF \
+            -DBALE_BUILD_FUZZERS=ON \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo
+        targets=()
+        if [[ "$fuzz_target" == all ]]; then
+            for seeds in "$repo_root"/tests/fuzz/corpus/*/; do
+                targets+=("$(basename "$seeds")")
+            done
+        else
+            targets=("$fuzz_target")
+        fi
+        build "$fuzz_dir" --target "${targets[@]}"
+        for target in "${targets[@]}"; do
+            seeds="$repo_root/tests/fuzz/corpus/$target"
+            corpus="$fuzz_dir/corpus/$target"
+            artifacts="$fuzz_dir/artifacts/$target"
+            mkdir -p "$corpus" "$artifacts"
+            dictionary=()
+            if [[ -f "$repo_root/tests/fuzz/$target.dict" ]]; then
+                dictionary=("-dict=$repo_root/tests/fuzz/$target.dict")
+            fi
+            echo "fuzzing $target for ${fuzz_seconds}s"
+            ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=1}" \
+                UBSAN_OPTIONS="${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=1}" \
+                "$fuzz_dir/tests/fuzz/$target" \
+                -max_total_time="$fuzz_seconds" \
+                -timeout=10 \
+                -rss_limit_mb=2048 \
+                -print_final_stats=1 \
+                -artifact_prefix="$artifacts/" \
+                "${dictionary[@]}" \
+                "$corpus" "$seeds"
+        done
+        ;;
     cover)
         cover_dir="$build_root/cover"
         configure "$cover_dir" \
@@ -218,6 +264,10 @@ usage: ./dev <command> [args...]
   test          build and run ctest (extra args go to ctest)
   sanitize      build and test with ASan and UBSan in build/sanitize
   tsan          build and test with ThreadSanitizer in build/tsan
+  fuzz [target] [seconds]
+                build the libFuzzer targets with Clang in build/fuzz and run each one (or
+                one) for N seconds (default 60) from its seed corpus; crashes land in
+                build/fuzz/artifacts
   cover         build and test with coverage in build/cover, summary via gcovr
   windows       cross-build with MinGW in build/windows and run the tests under Wine
   run [target]  build and run an executable target (default: bale)

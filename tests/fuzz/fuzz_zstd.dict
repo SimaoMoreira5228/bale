@@ -1,0 +1,2 @@
+zstd_frame="\x28\xb5\x2f\xfd"
+zstd_skippable="\x50\x2a\x4d\x18"
