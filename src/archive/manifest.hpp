@@ -37,8 +37,6 @@ struct ManifestEntry {
     EntryKind kind = EntryKind::Regular;
 };
 
-// NOTE: string views point into storage owned by whoever filled the manifest: the decoded payload
-// for a reader, the writer's name arena for a writer.
 struct Manifest {
     std::vector<ManifestEntry> entries;
     std::vector<ChunkKey> chunks;

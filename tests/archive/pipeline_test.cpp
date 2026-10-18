@@ -93,8 +93,6 @@ Reader openArchive(const fs::path& path) {
     return std::move(*reader);
 }
 
-// NOTE: the recorded worker count is the only input that may differ: every DATA record, the index
-// and the manifest apart from that field must be byte-identical to the one-worker archive.
 void requireSameArchive(const fs::path& single, const fs::path& parallel, std::uint32_t workers) {
     auto singleBytes = readAll(single);
     auto parallelBytes = readAll(parallel);

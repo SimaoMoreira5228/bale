@@ -11,8 +11,6 @@ namespace bale {
 inline constexpr int minLz4Level = 0;
 inline constexpr int maxLz4Level = 12;
 
-// NOTE: writes one LZ4 frame per call with independent blocks, the content size and no
-// checksums or dictionary ID; level 0 is the fast compressor, 3 and above select LZ4HC.
 class Lz4FrameEncoder {
   public:
     [[nodiscard]] static Result<Lz4FrameEncoder> create(int compressionLevel = minLz4Level);
@@ -33,8 +31,6 @@ class Lz4FrameEncoder {
     std::unique_ptr<State> state_;
 };
 
-// NOTE: accepts only the frames Lz4FrameEncoder writes, and only when the frame fills output
-// exactly and nothing follows it.
 class Lz4FrameDecoder {
   public:
     [[nodiscard]] static Result<Lz4FrameDecoder> create();

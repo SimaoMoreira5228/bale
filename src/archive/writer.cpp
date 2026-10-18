@@ -21,8 +21,6 @@ namespace {
 
 constexpr std::string_view writerName = "bale";
 constexpr std::uint32_t defaultWorkerCap = 8;
-// PERF: small records (descriptors, framing, tiny files) are coalesced into one write; a write
-// per record part cost more than the copy on a tree of small files.
 constexpr std::size_t outputBufferSize = std::size_t{256} * 1024;
 
 std::array<std::byte, 16> randomArchiveId() {
@@ -68,8 +66,6 @@ Writer::~Writer() {
     if (pipeline_) {
         pipeline_->cancel();
     }
-    // NOTE: an abandoned writer still leaves every record it accepted on disk, as an unbuffered
-    // write would; readers then report the missing footer.
     if (!failure_ && !output_.empty()) {
         [[maybe_unused]] auto ignored = file_.append(output_);
     }
@@ -403,7 +399,6 @@ Result<void> Writer::resolveHardLinks() {
         groupFirst[target] = std::min(groupFirst[target], index);
     }
 
-    // NOTE: the format requires a hard link's target to precede it in byte order.
     for (std::size_t index = 0; index < entries_.size(); ++index) {
         std::size_t root = groupRoot[index];
         std::size_t first = groupFirst[root];

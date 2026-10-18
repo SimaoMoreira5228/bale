@@ -25,7 +25,6 @@ enum class PathSyntax : std::uint8_t {
 struct PathPolicy {
     Backslash backslash = Backslash::Reject;
     PathSyntax syntax = PathSyntax::Lenient;
-    // NOTE: Windows-safe names imply UTF-8 validation, whatever allowRawNames says.
     bool windowsSafe = true;
     bool allowRawNames = false;
     std::uint32_t maxComponentBytes = 255;
@@ -37,7 +36,6 @@ struct ArchivePath {
     bool directory = false;
 };
 
-// NOTE: the returned view points into `out`, which is reused across calls to avoid allocations.
 [[nodiscard]] Result<ArchivePath> normalizeArchivePath(
     std::span<const std::byte> raw,
     const PathPolicy& policy,

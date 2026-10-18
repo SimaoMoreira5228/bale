@@ -40,7 +40,6 @@ struct ZstdLimits {
     std::uint32_t maxWindowLog = 27;
 };
 
-// NOTE: finished marks the end of one frame; further input continues with the next frame.
 class ZstdDecoder {
   public:
     [[nodiscard]] static Result<ZstdDecoder> create(const ZstdLimits& limits = {});

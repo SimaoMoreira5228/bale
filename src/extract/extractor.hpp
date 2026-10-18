@@ -77,7 +77,6 @@ enum class EntryOutcome : std::uint8_t {
 
 struct EntryResult {
     EntryOutcome outcome = EntryOutcome::Extracted;
-    // NOTE: a string literal explaining a skip; empty when the entry was extracted.
     std::string_view reason;
 };
 
@@ -164,8 +163,6 @@ class PendingFile {
     State state_ = State::Writing;
 };
 
-// NOTE: a PendingFile keeps a pointer to its Extractor, so the Extractor must stay alive and in
-// place until every PendingFile it returned is committed or destroyed.
 class Extractor {
   public:
     struct FileId {
@@ -202,8 +199,6 @@ class Extractor {
     [[nodiscard]] Result<EntryResult>
     skipOrRefuseSpecialFile(const ArchivePath& path, SpecialFileKind kind);
 
-    // NOTE: writing an entry moves its parent directory's mtime, so directory times are recorded
-    // during extraction and applied here, after the last entry.
     [[nodiscard]] Result<void> finish();
 
     [[nodiscard]] const Budget& budget() const {

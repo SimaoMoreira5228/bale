@@ -22,11 +22,7 @@ struct PresetPolicy {
     std::int32_t level;
 };
 
-// NOTE: zstd levels follow bench/results/2026-10-18-*: 3 is the knee (9 costs 3-4x the time for
-// about 4.5% less) and 19 keeps the size goal. LZ4 level 0 beat zstd 1 on both create and extract
-// time in every group of bench/results/2026-10-18-xeon-e5-2690v3-lz4, for archives 22% (real
-// data) to 58% (synthetic) bigger. LZ4 level 9 decoded slower on real data and created 7-35x
-// slower.
+// NOTE: levels chosen from bench/results/2026-10-18-*; read those summaries before changing one.
 constexpr std::array presetPolicies{
     PresetPolicy{
         .preset = Preset::Fast,

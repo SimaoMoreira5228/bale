@@ -501,8 +501,7 @@ std::uint64_t peakResidentKilobytes() {
     }
     return counters.PeakWorkingSetSize / 1024;
 #elif defined(__linux__)
-    // NOTE: VmHWM belongs to this address space and starts over at exec; ru_maxrss would also
-    // count the parent's pages from before exec.
+    // NOTE: VmHWM resets at exec; ru_maxrss would include the parent's pages from before exec.
     std::FILE* status = std::fopen("/proc/self/status", "r");
     if (status == nullptr) {
         return 0;

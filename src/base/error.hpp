@@ -23,7 +23,6 @@ struct Error {
     static constexpr std::uint64_t noOffset = std::numeric_limits<std::uint64_t>::max();
 
     ErrorKind kind;
-    // NOTE: always a string literal; errors are copied freely and must never own memory.
     std::string_view what;
     std::uint64_t offset = noOffset;
     int systemCode = 0;

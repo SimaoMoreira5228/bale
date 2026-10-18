@@ -29,8 +29,6 @@ struct Limits {
 
 [[nodiscard]] bool looksLikeZstd(std::span<const std::byte> head);
 
-// NOTE: consecutive frames decode as one stream and skippable frames are skipped. After an error
-// every later read returns it.
 class Stream {
   public:
     [[nodiscard]] static Result<Stream> open(File file, const Limits& limits = {});
@@ -39,9 +37,6 @@ class Stream {
         return outputBytes_;
     }
 
-    // NOTE: 0 means the input ended exactly at the end of a frame.
-    // SECURITY: bytes are returned before a frame's optional content checksum is checked; output
-    // is untrusted until a read returns 0.
     [[nodiscard]] Result<std::size_t> read(std::span<std::byte> out);
 
   private:

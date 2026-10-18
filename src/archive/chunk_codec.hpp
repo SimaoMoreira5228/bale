@@ -21,8 +21,6 @@ struct EncodedChunk {
     std::span<const std::byte> bytes;
 };
 
-// NOTE: one per encoding thread. The returned bytes alias the chunk or this encoder's buffer and
-// stay valid until the next encode call.
 class ChunkEncoder {
   public:
     ChunkEncoder() = default;
@@ -40,7 +38,6 @@ class ChunkEncoder {
     std::vector<std::byte> buffer_;
 };
 
-// NOTE: error offsets are relative to the start of the encoded bytes.
 class ChunkDecoder {
   public:
     [[nodiscard]] Result<void>

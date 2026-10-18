@@ -168,8 +168,6 @@ Result<Zip64End> readZip64End(const File& file, std::uint64_t locatorPosition) {
         return **direct;
     }
 
-    // NOTE: with prepended data the locator offset is short by the prefix; the record is then only
-    // accepted when it has no extensible data and ends exactly at the locator.
     if (locatorPosition < zip64EndRecordSize) {
         return fail(ErrorKind::Malformed, "ZIP64 end record not found", locatorPosition);
     }
@@ -608,8 +606,6 @@ Result<std::span<const std::byte>> Reader::nextDeflated(EntryStream& stream) {
             stream.inputLeft -= chunk.size();
         }
 
-        // SECURITY: once the declared size is reached a one-byte window probes for excess output,
-        // which is never passed on, so a bomb stops after a single extra byte.
         auto window = stream.outputLeft == 0
             ? stream.output.first(1)
             : stream.output.first(

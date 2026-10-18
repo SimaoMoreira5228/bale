@@ -205,8 +205,8 @@ void sortCombiningRun(std::vector<char32_t>& buffer, std::size_t begin, std::siz
         return;
     }
 
-    // SECURITY: a hostile name can stack thousands of combining marks, so long runs use a stable
-    // counting sort instead of a quadratic one.
+    // SECURITY: hostile names can stack thousands of combining marks; long runs avoid a quadratic
+    // sort.
     std::array<std::size_t, 257> starts{};
     for (std::size_t index = begin; index < end; ++index) {
         ++starts[combiningClass(buffer[index]) + 1U];
@@ -268,9 +268,6 @@ CaseFoldSet::insertOrFindCollision(std::string_view path, std::uint64_t id) {
     }
 }
 
-// SECURITY: names match when canonically equivalent ignoring simple case, NFD(fold(NFD(name))), as
-// on APFS and HFS+; on NTFS, which ignores only case, this refuses more than needed. Full folding
-// (ß against ss, as Linux casefold directories do) is not applied. Invalid UTF-8 stays verbatim.
 void CaseFoldSet::appendFolded(std::string_view path) {
     arena_.reserve(arena_.size() + path.size());
 

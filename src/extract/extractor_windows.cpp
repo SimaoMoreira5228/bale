@@ -340,10 +340,8 @@ Result<EntryResult> Extractor::place(
         }
     }
 
-    // SECURITY: the rename goes straight to NtSetInformationFile relative to the parent handle; the
-    // Win32 wrapper would turn the name into a full path first. With ReplaceIfExists the check
-    // above can race with a swap to a reparse point, but the rename then replaces the reparse
-    // point itself rather than writing through it, and renaming over a directory fails.
+    // SECURITY: the Win32 rename wrapper resolves a full path; this call stays relative to the
+    // parent handle.
     alignas(FILE_RENAME_INFO) std::array<std::byte, sizeof(FILE_RENAME_INFO) + sizeof(WideName)>
         buffer{};
     auto* info = reinterpret_cast<FILE_RENAME_INFO*>(buffer.data());
@@ -420,7 +418,6 @@ Extractor::createDirectory(const ArchivePath& path, const EntryMetadata& metadat
         return fail(ErrorKind::UnsafePath, "reparse point at extraction target");
     }
 
-    // NOTE: Windows has no POSIX permission bits; the mode is not restored there.
     if (policy_.restoreMtime && metadata.mtimeNanoseconds) {
         auto checked = toFileTime(*metadata.mtimeNanoseconds);
         if (!checked) {
@@ -492,7 +489,6 @@ Result<PendingFile> Extractor::beginFile(const ArchivePath& path, const EntryMet
 }
 
 Result<EntryResult> Extractor::finishFile(PendingFile& file) {
-    // NOTE: Windows has no POSIX permission bits; the mode is not restored there.
     auto times = applyTimes(file.file_, file.metadata_, policy_.restoreMtime);
     if (!times) {
         return std::unexpected(times.error());
@@ -518,9 +514,6 @@ Result<EntryResult> Extractor::finishFile(PendingFile& file) {
 }
 
 Result<void> Extractor::applyDeferredTime(std::string_view path, const DeferredTime& time) {
-    // SECURITY: the directory is reached again handle by handle from the root without following
-    // reparse points, and its volume serial and file index must match the directory created
-    // earlier, so a directory swapped after extraction is left alone.
     auto parent = openParent(path, false);
     if (!parent) {
         if (isGone(parent.error())) {

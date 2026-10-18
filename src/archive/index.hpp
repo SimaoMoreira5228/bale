@@ -20,7 +20,6 @@ struct IndexEntry {
     CodecId codec = CodecId::Raw;
 };
 
-// NOTE: entries must already be sorted by key without duplicates.
 [[nodiscard]] Result<void>
 encodeIndex(std::span<const IndexEntry> entries, std::vector<std::byte>& out);
 

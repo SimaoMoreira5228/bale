@@ -41,8 +41,6 @@ struct Header {
     }
 };
 
-// NOTE: the views point into data. Name and comment are ISO-8859-1 per RFC 1952 and are returned
-// undecoded.
 [[nodiscard]] Result<Header>
 parseHeader(std::span<const std::byte> data, const Limits& limits, std::uint64_t offset = 0);
 

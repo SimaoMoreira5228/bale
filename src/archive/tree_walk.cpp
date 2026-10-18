@@ -84,8 +84,6 @@ std::unexpected<Error> systemError(std::string_view what, const std::error_code&
 
 #endif
 
-// NOTE: false means the name has no UTF-8 form (an unpaired UTF-16 surrogate on Windows); `out`
-// then holds a lossy form with U+FFFD for reporting only.
 [[nodiscard]] bool pathBytes(const fs::path& path, std::string& out) {
     out.clear();
 #ifdef _WIN32

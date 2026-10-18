@@ -32,7 +32,6 @@ class Source {
 
     [[nodiscard]] Result<void> skip(std::uint64_t count);
 
-    // NOTE: a stream is drained to its end so every codec checksum and trailer is verified.
     [[nodiscard]] Result<void> finish();
 
   private:

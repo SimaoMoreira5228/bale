@@ -16,13 +16,10 @@
 
 namespace bale::gzip {
 
-// NOTE: concatenated members decode as one stream. Zero bytes after the last member are accepted
-// as padding; any other trailing data is rejected. After an error every later read returns it.
 class Stream {
   public:
     [[nodiscard]] static Result<Stream> open(File file, const Limits& limits = {});
 
-    // NOTE: the first member's header; its views stay valid for the stream's lifetime.
     [[nodiscard]] const Header& header() const {
         return header_;
     }
@@ -35,9 +32,6 @@ class Stream {
         return outputBytes_;
     }
 
-    // NOTE: 0 means the last member ended and every trailer and the padding after it were verified.
-    // SECURITY: bytes are returned before their member's CRC-32 and ISIZE are checked; output is
-    // untrusted until a read returns 0.
     [[nodiscard]] Result<std::size_t> read(std::span<std::byte> out);
 
   private:

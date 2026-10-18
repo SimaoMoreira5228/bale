@@ -137,8 +137,6 @@ int renameNoReplace(int directory, const char* from, const char* to) {
     }
 #endif
 
-    // NOTE: linking the new name fails atomically if it exists, giving no-replace semantics where
-    // the filesystem lacks a no-replace rename.
     if (::linkat(directory, from, directory, to, 0) != 0) {
         return -1;
     }
@@ -261,9 +259,6 @@ Result<EntryResult> Extractor::place(
             return fail(ErrorKind::AlreadyExists, "existing target is not a regular file");
         }
 
-        // SECURITY: renameat swaps the directory entry itself and never follows a symlink, so a
-        // target changed after the check above is replaced, not written through. Renaming a
-        // directory over it fails.
         if (::renameat(directory.get(), tempName, directory.get(), name) != 0) {
             if (errno == EISDIR || errno == ENOTEMPTY || errno == EEXIST) {
                 return fail(ErrorKind::AlreadyExists, "existing target is not a regular file");
@@ -271,7 +266,6 @@ Result<EntryResult> Extractor::place(
             return systemFailure(ErrorKind::Io, "cannot move entry into place");
         }
 
-        // NOTE: rename between two links to the same inode is a no-op that keeps the temporary.
         ::unlinkat(directory.get(), tempName, 0);
         return EntryResult{};
     }
@@ -563,8 +557,6 @@ Extractor::createHardLink(const ArchivePath& path, const ArchivePath& existingPa
         return fail(ErrorKind::Io, "cannot find a free temporary file name");
     }
 
-    // SECURITY: the source name may have been swapped between the check and linkat, so the new
-    // link itself is verified to be the extracted inode before it is moved into place.
     struct stat linkStatus{};
     if (::fstatat(parent->get(), tempName.data(), &linkStatus, AT_SYMLINK_NOFOLLOW) != 0 ||
         !sameFile(linkStatus, sourceStatus)) {
@@ -588,9 +580,6 @@ Extractor::createHardLink(const ArchivePath& path, const ArchivePath& existingPa
 }
 
 Result<void> Extractor::applyDeferredTime(std::string_view path, const DeferredTime& time) {
-    // SECURITY: the directory is reached again component by component with O_NOFOLLOW from the
-    // root, and its device and inode must match the directory created earlier, so a directory
-    // swapped for a symlink or another directory after extraction is left alone.
     auto parent = openParent(path, false);
     if (!parent) {
         if (isGone(parent.error())) {

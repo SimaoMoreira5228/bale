@@ -42,12 +42,8 @@ struct ChunkSlot {
     }
 };
 
-// NOTE: one buffer allocated up front and handed out in FIFO order; regions are released in the
-// order they were reserved, so a chunk of any size takes only the bytes it needs.
 class ByteRing {
   public:
-    // PERF: left uninitialized so pages are touched only when a chunk needs them; zeroing the
-    // rings cost more than archiving a small input.
     explicit ByteRing(std::size_t capacity) :
         storage_(std::make_unique_for_overwrite<std::byte[]>(capacity)),
         bytes_(storage_.get(), capacity) {
@@ -82,10 +78,6 @@ struct PipelineEvent {
     PipelineStep step = PipelineStep::Decide;
 };
 
-// NOTE: workers hash and encode chunks; the writer thread fills slots, makes the dedup decision and
-// appends records strictly in submission order, so the output never depends on scheduling. Chunk
-// bytes live in two fixed rings, which bound memory however many small chunks are in flight. With
-// one worker nothing runs on another thread.
 class ChunkPipeline {
   public:
     [[nodiscard]] static Result<std::unique_ptr<ChunkPipeline>>

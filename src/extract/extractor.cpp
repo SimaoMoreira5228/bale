@@ -42,8 +42,6 @@ Result<void> checkComponent(std::string_view component) {
         return fail(ErrorKind::UnsafePath, "NUL byte in path");
     }
 #ifdef _WIN32
-    // SECURITY: a literal backslash would act as a separator and a colon would name an alternate
-    // data stream, so neither may reach the Windows API even if the path policy let them through.
     if (component.find_first_of("\\:") != std::string_view::npos) {
         return fail(ErrorKind::UnsafePath, "backslash or colon in path component");
     }
@@ -190,9 +188,6 @@ Result<Extractor::EntryPath> Extractor::beginEntry(const ArchivePath& path) {
     }
 
     if (policy_.caseInsensitive) {
-        // SECURITY: the id is the hash of the exact path, so a repeat of the same path is left to
-        // the overwrite policy. A forged hash collision can only downgrade a case collision to that
-        // policy, which never writes through an existing entry.
         const std::uint64_t exact = std::hash<std::string_view>{}(path.path);
         auto collision = caseFold_.insertOrFindCollision(path.path, exact);
         if (collision && *collision != exact) {
@@ -221,9 +216,7 @@ Extractor::normalizeLinkTarget(std::string_view target, std::uint32_t parentDept
         return fail(ErrorKind::UnsafePath, "backslash in symlink target");
     }
 
-    // SECURITY: the stored target is the lexically normalized form, with every ".." leading. A
-    // ".." after a name would be resolved physically by the kernel, and if that name is (or later
-    // becomes) a symlink to a shallower directory the link could climb above the root.
+    // SECURITY: a ".." after a name resolves physically, so stored targets keep every ".." leading.
     linkTarget_.clear();
     std::uint32_t ups = 0;
     std::size_t start = 0;
@@ -270,9 +263,6 @@ Extractor::normalizeLinkTarget(std::string_view target, std::uint32_t parentDept
 }
 
 std::uint32_t Extractor::fileMode(const EntryMetadata& metadata) const {
-    // SECURITY: setuid, setgid and sticky bits from an untrusted archive are privilege grants, so
-    // they are dropped unless the policy opts in; the mask then removes group and other write by
-    // default, giving the familiar 0644/0755 shapes whatever the archive claims.
     const std::uint32_t allowed = policy_.restoreSpecialModeBits ? allModeBits : permissionBits;
     return metadata.mode.value_or(defaultFileMode) & allowed & ~policy_.umask;
 }
@@ -281,7 +271,6 @@ std::uint32_t Extractor::directoryMode(const EntryMetadata& metadata) const {
     const std::uint32_t allowed = policy_.restoreSpecialModeBits ? allModeBits : permissionBits;
     const std::uint32_t mode = metadata.mode.value_or(defaultDirectoryMode) & allowed;
 
-    // NOTE: the owner keeps full access so later entries can still be written inside.
     return (mode & ~policy_.umask) | ownerAccess;
 }
 
@@ -338,8 +327,6 @@ void Extractor::deferDirectoryTime(
 }
 
 Result<void> Extractor::finish() {
-    // NOTE: the stable sort keeps archive order among equal depths, so a directory listed twice
-    // ends with the time of its last entry.
     std::ranges::stable_sort(deferredTimes_, std::ranges::greater{}, &DeferredTime::depth);
 
     Result<void> result;
