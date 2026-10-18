@@ -1,5 +1,6 @@
 #include "archive/reader.hpp"
 #include "cli/archive_commands.hpp"
+#include "cli/filesystem_path.hpp"
 #include "cli/terminal_text.hpp"
 #include "formats/compressed/stream.hpp"
 #include "formats/tar/reader.hpp"
@@ -389,8 +390,9 @@ ExitCode extractArchive(
     }
 
     std::error_code ignored;
-    std::filesystem::create_directories(std::filesystem::path(destination), ignored);
-    auto extractor = Extractor::open(std::filesystem::path(destination), policy);
+    auto output = pathFromUtf8(destination);
+    std::filesystem::create_directories(output, ignored);
+    auto extractor = Extractor::open(output, policy);
     if (!extractor) {
         return reportFailure(destination, extractor.error());
     }
@@ -411,6 +413,33 @@ ExitCode extractArchive(
         return extractSingleFile(argument, std::move(*archive), session);
     }
     return extractTar(argument, std::move(*archive), session);
+}
+
+ExitCode extractArchiveHere(std::string_view argument) {
+    auto archive = pathFromUtf8(argument);
+    auto destination = archive.parent_path();
+    if (destination.empty()) {
+        std::error_code error;
+        destination = std::filesystem::current_path(error);
+        if (error) {
+            Error failure{.kind = ErrorKind::Io, .what = "cannot get current directory"};
+            failure.systemCode = error.value();
+            return reportFailure(argument, failure);
+        }
+    }
+    return extractArchive(argument, pathToUtf8(destination), {});
+}
+
+ExitCode extractArchiveToFolder(std::string_view argument) {
+    auto archive = pathFromUtf8(argument);
+    auto destination = archive.parent_path() / archive.stem();
+    if (destination.empty()) {
+        return reportFailure(
+            argument,
+            Error{.kind = ErrorKind::Malformed, .what = "archive has no output folder name"}
+        );
+    }
+    return extractArchive(argument, pathToUtf8(destination), {});
 }
 
 }

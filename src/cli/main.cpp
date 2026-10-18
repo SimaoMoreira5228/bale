@@ -9,9 +9,15 @@
 #include <optional>
 #include <print>
 #include <span>
+#include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -32,6 +38,9 @@ commands:
       --skip-existing         keep existing files and skip those entries
       --allow-symlinks        create symlinks whose target stays inside the output
       --sync                  flush every file to disk before moving it into place
+  context add <path>         create <path>.bale from a file or directory
+  context extract-here <archive.bale>
+  context extract-folder <archive.bale>
   formats                   show which formats bale can read
   help                      show this message
 )";
@@ -189,6 +198,22 @@ int runExtract(std::span<const std::string_view> arguments) {
     return exitWith(bale::cli::extractArchive(archive, output, policy));
 }
 
+int runContext(std::span<const std::string_view> arguments) {
+    if (arguments.size() != 2) {
+        return usageError("context takes an action and one path");
+    }
+    if (arguments[0] == "add") {
+        return exitWith(bale::cli::createArchiveFromPath(arguments[1]));
+    }
+    if (arguments[0] == "extract-here") {
+        return exitWith(bale::cli::extractArchiveHere(arguments[1]));
+    }
+    if (arguments[0] == "extract-folder") {
+        return exitWith(bale::cli::extractArchiveToFolder(arguments[1]));
+    }
+    return usageError("unknown context action");
+}
+
 void printFormat(std::string_view format, std::string_view notes) {
     std::println("{:<8} {:<5} {:<5} {:<8} {}", format, "yes", "yes", "yes", notes);
 }
@@ -205,12 +230,11 @@ int runFormats() {
     return exitWith(ExitCode::Ok);
 }
 
-int run(std::span<char*> argv) {
+int run(std::span<const std::string_view> argv) {
     if (argv.size() < 2) {
         return usageError("missing command");
     }
-    std::vector<std::string_view> arguments(argv.begin() + 1, argv.end());
-
+    auto arguments = argv.subspan(1);
     std::string_view command = arguments.front();
     auto rest = std::span<const std::string_view>(arguments).subspan(1);
     if (command == "list") {
@@ -225,6 +249,9 @@ int run(std::span<char*> argv) {
     if (command == "extract") {
         return runExtract(rest);
     }
+    if (command == "context") {
+        return runContext(rest);
+    }
     if (command == "formats") {
         return runFormats();
     }
@@ -237,10 +264,65 @@ int run(std::span<char*> argv) {
 
 }
 
-// TODO: use wmain on Windows; the narrow argv there cannot carry every file name.
-int main(int argc, char** argv) {
+#ifdef _WIN32
+std::optional<std::string> toUtf8(std::wstring_view value) {
+    if (value.empty()) {
+        return std::string{};
+    }
+    if (std::cmp_greater(value.size(), std::numeric_limits<int>::max())) {
+        return std::nullopt;
+    }
+
+    int wideLength = static_cast<int>(value.size());
+    int byteLength = WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        value.data(),
+        wideLength,
+        nullptr,
+        0,
+        nullptr,
+        nullptr
+    );
+    if (byteLength <= 0) {
+        return std::nullopt;
+    }
+
+    std::string result(static_cast<std::size_t>(byteLength), '\0');
+    int converted = WideCharToMultiByte(
+        CP_UTF8,
+        WC_ERR_INVALID_CHARS,
+        value.data(),
+        wideLength,
+        result.data(),
+        byteLength,
+        nullptr,
+        nullptr
+    );
+    if (converted != byteLength) {
+        return std::nullopt;
+    }
+    return result;
+}
+
+int wmain(int argc, wchar_t** argv) {
     try {
-        return run(std::span(argv, static_cast<std::size_t>(argc)));
+        std::vector<std::string> storage;
+        storage.reserve(static_cast<std::size_t>(argc));
+        for (int index = 0; index < argc; ++index) {
+            auto converted = toUtf8(argv[index]);
+            if (!converted) {
+                return usageError("command line contains invalid UTF-16");
+            }
+            storage.push_back(std::move(*converted));
+        }
+
+        std::vector<std::string_view> arguments;
+        arguments.reserve(storage.size());
+        for (const auto& value : storage) {
+            arguments.push_back(value);
+        }
+        return run(arguments);
     } catch (const std::exception& error) {
         std::fputs("bale: internal error: ", stderr);
         std::fputs(error.what(), stderr);
@@ -248,3 +330,20 @@ int main(int argc, char** argv) {
         return exitWith(ExitCode::Io);
     }
 }
+#else
+int main(int argc, char** argv) {
+    try {
+        std::vector<std::string_view> arguments;
+        arguments.reserve(static_cast<std::size_t>(argc));
+        for (int index = 0; index < argc; ++index) {
+            arguments.emplace_back(argv[index]);
+        }
+        return run(arguments);
+    } catch (const std::exception& error) {
+        std::fputs("bale: internal error: ", stderr);
+        std::fputs(error.what(), stderr);
+        std::fputs("\n", stderr);
+        return exitWith(ExitCode::Io);
+    }
+}
+#endif

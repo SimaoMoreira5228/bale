@@ -18,5 +18,9 @@ target_link_libraries(bale PRIVATE
 )
 
 if(MINGW)
+    target_link_options(bale PRIVATE -municode)
+endif()
+
+if(MINGW)
     target_link_libraries(bale_cli PUBLIC stdc++exp)
 endif()

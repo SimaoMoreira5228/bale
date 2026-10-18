@@ -143,6 +143,51 @@ def test_native(work, source):
     check("bale corrupt", result.returncode in (EXIT_INVALID, EXIT_INTEGRITY), result.stderr)
 
 
+def test_native_unicode_paths(work):
+    source = work / "origem-ação-東京"
+    source.mkdir()
+    (source / "資料.txt").write_text("arquivo com acentos\n", encoding="utf-8")
+    archive = work / "arquivo-ação.bale"
+    expect_exit("unicode bale create", run("create", archive, source, cwd=work), EXIT_OK)
+    expect_exit("unicode bale test", run("test", archive, cwd=work), EXIT_OK)
+
+    output = work / "extração-東京"
+    expect_exit("unicode bale extract", run("extract", archive, "-o", output, cwd=work), EXIT_OK)
+    check("unicode bale contents", same_tree(source, output), "extracted tree differs")
+
+    context_source = work / "contexto-ação-東京"
+    context_source.mkdir()
+    (context_source / "arquivo.txt").write_text("context menu\n", encoding="utf-8")
+    context_archive = Path(str(context_source) + ".bale")
+    expect_exit(
+        "context add directory",
+        run("context", "add", context_source, cwd=work),
+        EXIT_OK,
+    )
+    original = work / "contexto-original"
+    context_source.rename(original)
+    expect_exit(
+        "context extract folder",
+        run("context", "extract-folder", context_archive, cwd=work),
+        EXIT_OK,
+    )
+    check("context directory contents", same_tree(original, context_source), "extracted tree differs")
+
+    single_dir = work / "context-single"
+    single_dir.mkdir()
+    single_file = single_dir / "nota-東京.txt"
+    single_file.write_text("single file\n", encoding="utf-8")
+    single_archive = Path(str(single_file) + ".bale")
+    expect_exit("context add file", run("context", "add", single_file, cwd=work), EXIT_OK)
+    single_file.unlink()
+    expect_exit(
+        "context extract here",
+        run("context", "extract-here", single_archive, cwd=work),
+        EXIT_OK,
+    )
+    check("context file contents", single_file.read_text(encoding="utf-8") == "single file\n")
+
+
 def test_single_gzip(work):
     archive = work / "note.txt.gz"
     archive.write_bytes(gzip.compress(b"just one file\n" * 100))
@@ -236,6 +281,7 @@ def main():
         checks = [
             lambda: test_round_trips(work, source),
             lambda: test_native(work, source),
+            lambda: test_native_unicode_paths(work),
             lambda: test_single_gzip(work),
             lambda: test_hostile_tar(work),
             lambda: test_corrupt_zip(work),

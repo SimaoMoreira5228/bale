@@ -1,6 +1,7 @@
 #include "cli/archive_commands.hpp"
 
 #include "archive/reader.hpp"
+#include "cli/filesystem_path.hpp"
 #include "cli/terminal_text.hpp"
 #include "formats/compressed/stream.hpp"
 #include "formats/detect.hpp"
@@ -446,7 +447,7 @@ ExitCode reportFailure(std::string_view context, const Error& error) {
 }
 
 Result<OpenedArchive> openArchive(std::string_view argument) {
-    auto file = File::openRead(std::filesystem::path(argument));
+    auto file = File::openRead(pathFromUtf8(argument));
     if (!file) {
         return std::unexpected(file.error());
     }
@@ -490,7 +491,7 @@ singleFileName(std::string_view archive, const CompressedStream& stream, std::st
         }
     }
 
-    auto leaf = std::filesystem::path(archive).filename().string();
+    auto leaf = pathToUtf8(pathFromUtf8(archive).filename());
     bool stripped = false;
     for (std::string_view suffix : {std::string_view(".gz"), std::string_view(".zst")}) {
         if (leaf.size() > suffix.size() && leaf.ends_with(suffix)) {
