@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 
 MEBIBYTE = 1 << 20
-DEFAULT_CODECS = ["raw", "zstd:1", "zstd:3", "zstd:9", "zstd:19", "deflate:1", "deflate:6", "deflate:9"]
+DEFAULT_CODECS = ["raw", "lz4:0", "lz4:9", "zstd:1", "zstd:3", "zstd:9", "zstd:19", "deflate:1", "deflate:6", "deflate:9"]
 PRESETS = ["fast", "balanced", "small", "restore-fast", "portable"]
 
 
@@ -170,10 +170,27 @@ def end_to_end_targets(corpus):
     return targets
 
 
+def profile_arguments(profile):
+    if profile in PRESETS:
+        return ["--preset", profile]
+    codec, _, level = profile.partition(":")
+    return ["--codec", codec, *(["--level", level] if level else [])]
+
+
+def parse_profile(text):
+    if text in PRESETS or text == "raw":
+        return text
+    codec, _, level = text.partition(":")
+    if codec in ("zstd", "lz4") and level.lstrip("-").isdigit():
+        return text
+    raise argparse.ArgumentTypeError(f"{text} is neither a preset nor a codec:level spec")
+
+
 def end_to_end_run(arguments, work, preset, source, run):
-    archive = work / f"{preset}-{run}.bale"
-    output = work / f"{preset}-{run}.out"
-    create = [str(arguments.bale), "create", str(archive), str(source), "--preset", preset]
+    name = preset.replace(":", "-")
+    archive = work / f"{name}-{run}.bale"
+    output = work / f"{name}-{run}.out"
+    create = [str(arguments.bale), "create", str(archive), str(source), *profile_arguments(preset)]
     _, create_seconds, create_peak = run_measured(pinned(create, arguments.cpu))
     archive_bytes = archive.stat().st_size
 
@@ -305,7 +322,13 @@ def main():
     parser.add_argument("--chunk-size", type=int, default=1 << 20)
     parser.add_argument("--cpu", type=int, help="pin every run to this CPU with taskset")
     parser.add_argument("--codec", action="append", help="codec spec, repeatable (default: a standard set)")
-    parser.add_argument("--preset", dest="presets", action="append", choices=PRESETS, help="preset for end-to-end runs, repeatable (default: all)")
+    parser.add_argument(
+        "--preset",
+        dest="presets",
+        action="append",
+        type=parse_profile,
+        help="preset or codec:level (raw, zstd:L, lz4:L) for end-to-end runs, repeatable (default: all presets)",
+    )
     parser.add_argument("--e2e-runs", type=int, default=3, help="repetitions of each end-to-end run")
     parser.add_argument(
         "--work-dir",

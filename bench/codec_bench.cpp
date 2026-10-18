@@ -1,6 +1,7 @@
 #include "archive/chunk.hpp"
 #include "codecs/decoders.hpp"
 #include "codecs/deflate_encoder.hpp"
+#include "codecs/lz4_frame.hpp"
 #include "codecs/zstd_encoder.hpp"
 #include "format/record.hpp"
 #include "io/file.hpp"
@@ -41,6 +42,7 @@ enum class CodecKind : std::uint8_t {
     Raw,
     Zstd,
     Deflate,
+    Lz4,
 };
 
 struct CodecSpec {
@@ -93,7 +95,12 @@ struct DeflateCodec {
     Inflater decoder;
 };
 
-using Codec = std::variant<RawCodec, ZstdCodec, DeflateCodec>;
+struct Lz4Codec {
+    Lz4FrameEncoder encoder;
+    Lz4FrameDecoder decoder;
+};
+
+using Codec = std::variant<RawCodec, ZstdCodec, DeflateCodec, Lz4Codec>;
 
 std::optional<Codec> createCodec(const CodecSpec& spec) {
     if (spec.kind == CodecKind::Zstd) {
@@ -118,6 +125,17 @@ std::optional<Codec> createCodec(const CodecSpec& spec) {
             .decoder = std::move(*decoder),
         }};
     }
+    if (spec.kind == CodecKind::Lz4) {
+        auto encoder = Lz4FrameEncoder::create(spec.level);
+        auto decoder = Lz4FrameDecoder::create();
+        if (!encoder || !decoder) {
+            return std::nullopt;
+        }
+        return Codec{Lz4Codec{
+            .encoder = std::move(*encoder),
+            .decoder = std::move(*decoder),
+        }};
+    }
     return Codec{RawCodec{}};
 }
 
@@ -127,6 +145,9 @@ std::size_t boundOf(const Codec& codec, std::size_t size) {
     }
     if (std::holds_alternative<DeflateCodec>(codec)) {
         return DeflateEncoder::compressBound(size);
+    }
+    if (std::holds_alternative<Lz4Codec>(codec)) {
+        return Lz4FrameEncoder::compressBound(size);
     }
     return size;
 }
@@ -138,6 +159,8 @@ encodeChunk(Codec& codec, std::span<const std::byte> input, std::span<std::byte>
         size = zstd->encoder.compress(input, output);
     } else if (auto* deflate = std::get_if<DeflateCodec>(&codec)) {
         size = deflate->encoder.compress(input, output);
+    } else if (auto* lz4 = std::get_if<Lz4Codec>(&codec)) {
+        size = lz4->encoder.compress(input, output);
     } else {
         std::memcpy(output.data(), input.data(), input.size());
     }
@@ -175,6 +198,9 @@ bool decodeChunk(Codec& codec, std::span<const std::byte> input, std::span<std::
     if (auto* deflate = std::get_if<DeflateCodec>(&codec)) {
         return decodeWhole(deflate->decoder, input, output);
     }
+    if (auto* lz4 = std::get_if<Lz4Codec>(&codec)) {
+        return lz4->decoder.decompress(input, output).has_value();
+    }
     std::memcpy(output.data(), input.data(), input.size());
     return input.size() == output.size();
 }
@@ -210,6 +236,10 @@ std::optional<CodecSpec> parseCodec(std::string_view text) {
     }
     if (name == "deflate") {
         spec.kind = CodecKind::Deflate;
+        return spec;
+    }
+    if (name == "lz4") {
+        spec.kind = CodecKind::Lz4;
         return spec;
     }
     return std::nullopt;
@@ -262,6 +292,8 @@ std::optional<Options> parseOptions(std::span<char*> arguments) {
     if (options.codecs.empty()) {
         constexpr std::array defaults{
             std::string_view{"raw"},
+            std::string_view{"lz4:0"},
+            std::string_view{"lz4:9"},
             std::string_view{"zstd:1"},
             std::string_view{"zstd:3"},
             std::string_view{"zstd:9"},
@@ -530,7 +562,7 @@ int run(std::span<char*> arguments) {
         std::println(
             stderr,
             "usage: bale_bench_codecs <corpus> [--chunk-size N] [--runs N] "
-            "[--codec raw|zstd:L|deflate:L]..."
+            "[--codec raw|zstd:L|lz4:L|deflate:L]..."
         );
         return 2;
     }
