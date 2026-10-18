@@ -199,6 +199,7 @@ case "$cmd" in
             gcovr --root "$repo_root" \
                 --filter "$repo_root/src/" \
                 --filter "$repo_root/include/" \
+                --merge-mode-functions merge-use-line-0 \
                 --print-summary \
                 "$cover_dir"
         else
