@@ -1,12 +1,18 @@
 #pragma once
 
 #include "archive/chunk.hpp"
+#include "archive/reader.hpp"
+#include "archive/writer.hpp"
 #include "io/file.hpp"
 
+#include <doctest/doctest.h>
+
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -50,6 +56,39 @@ inline std::vector<std::byte> readAll(const std::filesystem::path& path) {
     if (!file->readExactAt(0, out)) {
         out.clear();
     }
+    return out;
+}
+
+inline archive::WriterOptions fixedOptions(std::uint32_t chunkSize = archive::defaultChunkSize) {
+    archive::WriterOptions options;
+    options.chunkSize = chunkSize;
+    std::array<std::byte, 16> id{};
+    for (std::size_t index = 0; index < id.size(); ++index) {
+        id[index] = static_cast<std::byte>(0x10 + index);
+    }
+    options.archiveId = id;
+    options.creationTimeNanoseconds = 1700000000000000000;
+    return options;
+}
+
+inline archive::Writer newWriter(
+    const std::filesystem::path& path,
+    const archive::WriterOptions& options = fixedOptions()
+) {
+    auto file = File::createNew(path);
+    REQUIRE(file);
+    auto writer = archive::Writer::create(std::move(*file), options);
+    REQUIRE(writer);
+    return std::move(*writer);
+}
+
+inline std::string contents(archive::Reader& reader, const archive::ManifestEntry& entry) {
+    std::string out;
+    auto streamed = reader.streamFile(entry, [&out](std::span<const std::byte> chunk) {
+        out.append(reinterpret_cast<const char*>(chunk.data()), chunk.size());
+        return Result<void>{};
+    });
+    REQUIRE(streamed);
     return out;
 }
 
