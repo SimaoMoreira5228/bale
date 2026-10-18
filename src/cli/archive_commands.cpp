@@ -5,6 +5,7 @@
 #include "cli/terminal_text.hpp"
 #include "formats/compressed/stream.hpp"
 #include "formats/detect.hpp"
+#include "formats/sevenzip/reader.hpp"
 #include "formats/tar/reader.hpp"
 #include "formats/tar/source.hpp"
 #include "formats/zip/reader.hpp"
@@ -174,6 +175,38 @@ ExitCode listZip(std::string_view argument, File file, const ListOptions& option
     }
 }
 
+[[nodiscard]] std::optional<CivilTime> sevenZipTime(const sevenzip::Entry& entry) {
+    if (!entry.mtimeNanoseconds) {
+        return std::nullopt;
+    }
+
+    constexpr std::int64_t perSecond = 1'000'000'000;
+    std::int64_t seconds = *entry.mtimeNanoseconds / perSecond;
+    if (*entry.mtimeNanoseconds % perSecond < 0) {
+        --seconds;
+    }
+    return civilFromUnix(seconds);
+}
+
+ExitCode listSevenZip(std::string_view argument, File file, const ListOptions& options) {
+    auto reader = sevenzip::Reader::open(std::move(file));
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    std::string escaped;
+    for (const auto& entry : reader->entries()) {
+        auto name = escapeForTerminal(entry.name, escaped);
+        if (!options.detailed) {
+            std::println("{}", name);
+            continue;
+        }
+
+        printRow(entry.directory ? 'd' : '-', entry.size, sevenZipTime(entry), name);
+    }
+    return ExitCode::Ok;
+}
+
 ExitCode listTar(std::string_view argument, OpenedArchive archive, const ListOptions& options) {
     auto source = openTarSource(std::move(archive.file), archive.format.compression);
     if (!source) {
@@ -335,6 +368,45 @@ ExitCode testZip(std::string_view argument, File file) {
             result = exitCodeFor(checked.error().kind);
         }
         reportError(escapeForTerminal(*utf8Name, escaped), checked.error());
+    }
+
+    if (failures == 0) {
+        std::println("ok: {} entries", reader->entryCount());
+    } else {
+        std::println("{} of {} entries failed", failures, reader->entryCount());
+    }
+    return result;
+}
+
+ExitCode testSevenZip(std::string_view argument, File file) {
+    auto reader = sevenzip::Reader::open(std::move(file));
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    std::vector<std::byte> scratch(testChunkSize);
+    auto discard = [](std::span<const std::byte>) -> Result<void> {
+        return {};
+    };
+
+    std::uint64_t failures = 0;
+    ExitCode result = ExitCode::Ok;
+    std::string escaped;
+    for (const auto& entry : reader->entries()) {
+        if (!entry.folder) {
+            continue;
+        }
+
+        auto checked = reader->streamEntry(entry, scratch, discard);
+        if (checked) {
+            continue;
+        }
+
+        ++failures;
+        if (result == ExitCode::Ok) {
+            result = exitCodeFor(checked.error().kind);
+        }
+        reportError(escapeForTerminal(entry.name, escaped), checked.error());
     }
 
     if (failures == 0) {
@@ -531,10 +603,18 @@ ExitCode listArchive(std::string_view argument, const ListOptions& options) {
         return listBale(argument, std::move(archive->file), options);
     case Container::Zip:
         return listZip(argument, std::move(archive->file), options);
+    case Container::SevenZip:
+        return listSevenZip(argument, std::move(archive->file), options);
     case Container::SingleFile:
         return listSingleFile(argument, std::move(*archive), options);
-    default:
+    case Container::Tar:
         return listTar(argument, std::move(*archive), options);
+    case Container::Unknown:
+    default:
+        return reportFailure(
+            argument,
+            Error{.kind = ErrorKind::Unsupported, .what = "unrecognized archive format"}
+        );
     }
 }
 
@@ -549,10 +629,18 @@ ExitCode testArchive(std::string_view argument) {
         return testBale(argument, std::move(archive->file));
     case Container::Zip:
         return testZip(argument, std::move(archive->file));
+    case Container::SevenZip:
+        return testSevenZip(argument, std::move(archive->file));
     case Container::SingleFile:
         return testSingleFile(argument, std::move(*archive));
-    default:
+    case Container::Tar:
         return testTar(argument, std::move(*archive));
+    case Container::Unknown:
+    default:
+        return reportFailure(
+            argument,
+            Error{.kind = ErrorKind::Unsupported, .what = "unrecognized archive format"}
+        );
     }
 }
 

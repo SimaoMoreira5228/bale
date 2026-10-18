@@ -43,7 +43,7 @@ commands:
   update <archive.bale> <dir> [options]
       append a new snapshot of the directory, reusing unchanged chunks; takes create's options
   convert <input> <output> [--format <name>] [--level <n>]
-      rewrite a bale, zip or tar archive entry by entry in another format
+      rewrite a bale, zip, tar or 7z archive entry by entry in another format
   compact <archive.bale> <output.bale> [--sync]
       write the current snapshot to a new archive and keep the source
   list <archive> [--long]   list entries, --long adds type, size and modification time
@@ -469,6 +469,11 @@ int runFormats() {
         "notes"
     );
     printFormat("zip", true, "stored and deflate, ZIP64, no encryption");
+    printFormat(
+        "7z",
+        false,
+        "read-only; copy, lzma1, lzma2, deflate, bzip2; solid blocks decode from the block start"
+    );
     printFormat("tar", true, "ustar, pax, GNU long names; no sparse files");
     printFormat("tar.gz", true, "tar inside gzip, recognized by content; read as one stream");
     printFormat("tar.zst", true, "tar inside zstd, recognized by content; read as one stream");

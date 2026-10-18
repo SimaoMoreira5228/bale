@@ -3,6 +3,7 @@
 #include "cli/archive_output.hpp"
 #include "cli/filesystem_path.hpp"
 #include "cli/terminal_text.hpp"
+#include "formats/sevenzip/reader.hpp"
 #include "formats/tar/reader.hpp"
 #include "formats/zip/reader.hpp"
 #include "security/archive_path.hpp"
@@ -281,6 +282,63 @@ Result<void> convertZip(Conversion& conversion, File file) {
     }
 }
 
+Result<void> convertSevenZipEntry(
+    Conversion& conversion,
+    sevenzip::Reader& reader,
+    const sevenzip::Entry& entry
+) {
+    auto path = conversion.path(entry.name);
+    if (!path) {
+        return {};
+    }
+
+    archive::EntryAttributes attributes{
+        .mtimeNanoseconds = entry.mtimeNanoseconds,
+        .mode = maskedMode(entry.mode),
+    };
+    if (path->directory || entry.directory) {
+        return conversion.output().addDirectory(path->path, attributes);
+    }
+
+    if (entry.mode && (*entry.mode & fileTypeMask) == symlinkType) {
+        if (entry.size == 0 || entry.size > maxSymlinkTargetBytes) {
+            conversion.skip(entry.name, "symlink target empty or too long");
+            return {};
+        }
+
+        std::string& target = conversion.text();
+        target.clear();
+        auto read = reader.streamEntry(entry, conversion.scratch(), [&target](auto chunk) {
+            target.append(reinterpret_cast<const char*>(chunk.data()), chunk.size());
+            return Result<void>{};
+        });
+        if (!read) {
+            return read;
+        }
+        attributes.mode.reset();
+        return conversion.output().addSymlink(path->path, target, attributes);
+    }
+
+    return conversion.copyFile(*path, entry.size, attributes, [&](auto&& sink) {
+        return reader.streamEntry(entry, conversion.scratch(), sink);
+    });
+}
+
+Result<void> convertSevenZip(Conversion& conversion, File file) {
+    auto reader = sevenzip::Reader::open(std::move(file));
+    if (!reader) {
+        return std::unexpected(reader.error());
+    }
+
+    for (const auto& entry : reader->entries()) {
+        auto converted = convertSevenZipEntry(conversion, *reader, entry);
+        if (!converted) {
+            return converted;
+        }
+    }
+    return {};
+}
+
 Result<void> convertBaleEntry(
     Conversion& conversion,
     archive::Reader& reader,
@@ -352,6 +410,9 @@ Result<OutputSummary> convert(OpenedArchive archive, File file, const ConvertOpt
         break;
     case Container::Zip:
         converted = convertZip(conversion, std::move(archive.file));
+        break;
+    case Container::SevenZip:
+        converted = convertSevenZip(conversion, std::move(archive.file));
         break;
     case Container::Tar:
         converted = convertTar(conversion, std::move(archive));

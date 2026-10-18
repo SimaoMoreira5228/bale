@@ -3,6 +3,7 @@
 #include "format/envelope.hpp"
 #include "formats/bzip2/stream.hpp"
 #include "formats/gzip/header.hpp"
+#include "formats/sevenzip/reader.hpp"
 #include "formats/tar/header.hpp"
 #include "formats/xz/stream.hpp"
 #include "formats/zip/reader.hpp"
@@ -77,6 +78,8 @@ std::string_view name(ArchiveFormat format) {
         return "bale";
     case Container::Zip:
         return "zip";
+    case Container::SevenZip:
+        return "7z";
     case Container::Tar:
         switch (format.compression) {
         case Compression::None:
@@ -128,6 +131,9 @@ Result<ArchiveFormat> detectFormat(const File& file) {
     }
     if (zip::looksLikeZip(headBytes, {})) {
         return ArchiveFormat{.container = Container::Zip};
+    }
+    if (sevenzip::looksLikeSevenZip(headBytes)) {
+        return ArchiveFormat{.container = Container::SevenZip};
     }
     if (headSize == tar::blockSize && tar::looksLikeTar(tar::Block(head))) {
         return ArchiveFormat{.container = Container::Tar};
