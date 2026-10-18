@@ -363,22 +363,88 @@ Result<std::span<const std::byte>> Reader::loadChunk(const ChunkKey& key) {
         );
     }
 
-    // TODO: decode zstd chunks here once the writer can produce them.
-    if (record->header.codec != CodecId::Raw) {
+    std::span<const std::byte> decoded;
+    if (record->header.codec == CodecId::Raw) {
+        if (data->encoded.size() != key.length) {
+            return fail(
+                ErrorKind::Malformed,
+                "raw chunk length does not match its key",
+                payloadOffset
+            );
+        }
+        decoded = data->encoded;
+    } else if (record->header.codec == CodecId::Zstd) {
+        if (key.length > maxChunkSize) {
+            return fail(ErrorKind::LimitExceeded, "zstd chunk exceeds the supported size");
+        }
+        if (!zstdDecoder_) {
+            auto decoder = ZstdDecoder::create();
+            if (!decoder) {
+                return std::unexpected(decoder.error());
+            }
+            zstdDecoder_.emplace(std::move(*decoder));
+        }
+        auto reset = zstdDecoder_->reset();
+        if (!reset) {
+            return std::unexpected(reset.error());
+        }
+
+        decodedBuffer_.resize(static_cast<std::size_t>(key.length));
+        std::size_t consumed = 0;
+        std::size_t produced = 0;
+        bool finished = false;
+        while (!finished) {
+            std::span<std::byte> output;
+            if (produced == decodedBuffer_.size()) {
+                std::array<std::byte, 1> probe{};
+                auto step = zstdDecoder_->decompress(data->encoded.subspan(consumed), probe);
+                if (!step) {
+                    auto error = step.error();
+                    error.offset = payloadOffset + consumed;
+                    return std::unexpected(error);
+                }
+                if (step->produced != 0) {
+                    return fail(ErrorKind::Malformed, "zstd chunk exceeds its declared size");
+                }
+                consumed += step->consumed;
+                finished = step->finished;
+                if (!finished && step->consumed == 0) {
+                    return fail(ErrorKind::Malformed, "zstd decoder made no progress");
+                }
+                continue;
+            }
+
+            output = std::span(decodedBuffer_).subspan(produced);
+            auto step = zstdDecoder_->decompress(data->encoded.subspan(consumed), output);
+            if (!step) {
+                auto error = step.error();
+                error.offset = payloadOffset + consumed;
+                return std::unexpected(error);
+            }
+            if (step->consumed == 0 && step->produced == 0 && !step->finished) {
+                return fail(ErrorKind::Malformed, "zstd decoder made no progress");
+            }
+            consumed += step->consumed;
+            produced += step->produced;
+            finished = step->finished;
+        }
+
+        if (consumed != data->encoded.size() || produced != decodedBuffer_.size()) {
+            return fail(ErrorKind::Malformed, "zstd chunk size or frame boundary is invalid");
+        }
+        decoded = decodedBuffer_;
+    } else {
         return fail(ErrorKind::Unsupported, "chunk codec not supported", entry->recordOffset);
     }
-    if (data->encoded.size() != key.length) {
-        return fail(ErrorKind::Malformed, "raw chunk length does not match its key", payloadOffset);
-    }
 
-    if (chunkKeyOf(data->encoded).digest != key.digest) {
+    if (chunkKeyOf(decoded).digest != key.digest) {
         return fail(
             ErrorKind::Integrity,
             "chunk content does not match its BLAKE3 digest",
             payloadOffset + data->descriptorSize
         );
     }
-    return data->encoded;
+    return decoded;
 }
 
 Result<VerifyReport> Reader::walkRecords() {

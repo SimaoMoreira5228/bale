@@ -3,6 +3,7 @@
 #include "archive/chunk.hpp"
 #include "base/error.hpp"
 #include "extract/extractor.hpp"
+#include "format/record.hpp"
 #include "formats/compressed/stream.hpp"
 #include "formats/detect.hpp"
 #include "formats/tar/source.hpp"
@@ -56,6 +57,7 @@ struct ListOptions {
 
 struct CreateOptions {
     std::uint32_t chunkSize = archive::defaultChunkSize;
+    CodecId codec = CodecId::Raw;
     bool durable = false;
 };
 

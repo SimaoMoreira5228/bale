@@ -20,6 +20,7 @@ ExitCode writeArchive(
 ) {
     archive::WriterOptions writerOptions;
     writerOptions.chunkSize = options.chunkSize;
+    writerOptions.codec = options.codec;
     writerOptions.durable = options.durable;
     auto writer = archive::Writer::create(std::move(file), writerOptions);
     if (!writer) {

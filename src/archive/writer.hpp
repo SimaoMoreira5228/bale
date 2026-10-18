@@ -4,6 +4,7 @@
 #include "archive/index.hpp"
 #include "archive/manifest.hpp"
 #include "base/error.hpp"
+#include "codecs/zstd_encoder.hpp"
 #include "format/record.hpp"
 #include "io/file.hpp"
 #include "security/budget.hpp"
@@ -27,6 +28,7 @@ struct EntryAttributes {
 
 struct WriterOptions {
     std::uint32_t chunkSize = defaultChunkSize;
+    CodecId codec = CodecId::Raw;
     std::optional<std::array<std::byte, 16>> archiveId;
     std::optional<std::int64_t> creationTimeNanoseconds;
     std::string_view comment;
@@ -129,8 +131,13 @@ class Writer {
     [[nodiscard]] NameRef storeName(std::string_view path);
     [[nodiscard]] Result<PendingEntry*> beginEntry(std::string_view path, EntryKind kind);
     [[nodiscard]] Result<void> appendRaw(std::span<const std::byte> data);
-    [[nodiscard]] Result<RecordSpan>
-    writeRecord(RecordType type, std::span<const std::byte> head, std::span<const std::byte> body);
+    [[nodiscard]] Result<RecordSpan> writeRecord(
+        RecordType type,
+        std::span<const std::byte> head,
+        std::span<const std::byte> body,
+        CodecId codec = CodecId::Raw,
+        std::uint64_t decodedLength = 0
+    );
     [[nodiscard]] Result<void> storeChunk(std::span<const std::byte> chunk);
     [[nodiscard]] std::string_view nameAt(std::size_t offset, std::size_t size) const;
     [[nodiscard]] Result<void> sortEntries();
@@ -149,6 +156,8 @@ class Writer {
     std::optional<Error> failure_;
     bool finished_ = false;
     std::vector<std::byte> buffer_;
+    std::vector<std::byte> compressionBuffer_;
+    std::optional<ZstdEncoder> encoder_;
     std::vector<std::byte> descriptor_;
     std::vector<std::byte> payload_;
     std::string names_;
