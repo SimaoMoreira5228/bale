@@ -1,5 +1,6 @@
 #include "extract/extractor.hpp"
 
+#include <algorithm>
 #include <functional>
 #include <random>
 #include <utility>
@@ -317,6 +318,43 @@ Extractor::skipOrRefuseSpecialFile(const ArchivePath& path, SpecialFileKind kind
         .outcome = EntryOutcome::Skipped,
         .reason = "device nodes, FIFOs and sockets are never created",
     };
+}
+
+void Extractor::deferDirectoryTime(
+    const ArchivePath& path,
+    FileId id,
+    std::int64_t mtimeNanoseconds
+) {
+    deferredTimes_.push_back(
+        DeferredTime{
+            .id = id,
+            .mtimeNanoseconds = mtimeNanoseconds,
+            .pathOffset = deferredPaths_.size(),
+            .pathSize = static_cast<std::uint32_t>(path.path.size()),
+            .depth = path.depth,
+        }
+    );
+    deferredPaths_.append(path.path);
+}
+
+Result<void> Extractor::finish() {
+    // NOTE: the stable sort keeps archive order among equal depths, so a directory listed twice
+    // ends with the time of its last entry.
+    std::ranges::stable_sort(deferredTimes_, std::ranges::greater{}, &DeferredTime::depth);
+
+    Result<void> result;
+    for (const DeferredTime& time : deferredTimes_) {
+        const std::string_view path =
+            std::string_view(deferredPaths_).substr(time.pathOffset, time.pathSize);
+        auto applied = applyDeferredTime(path, time);
+        if (!applied && result) {
+            result = applied;
+        }
+    }
+
+    deferredTimes_.clear();
+    deferredPaths_.clear();
+    return result;
 }
 
 void Extractor::FileIdSet::insert(FileId id) {

@@ -150,6 +150,20 @@ int renameNoReplace(int directory, const char* from, const char* to) {
     return left.st_dev == right.st_dev && left.st_ino == right.st_ino;
 }
 
+[[nodiscard]] Extractor::FileId fileIdOf(const struct stat& status) {
+    return Extractor::FileId{
+        .device = static_cast<std::uint64_t>(status.st_dev),
+        .inode = static_cast<std::uint64_t>(status.st_ino),
+    };
+}
+
+[[nodiscard]] bool isGone(const Error& error) {
+    if (error.kind == ErrorKind::UnsafePath || error.kind == ErrorKind::AlreadyExists) {
+        return true;
+    }
+    return error.kind == ErrorKind::Io && error.systemCode == ENOENT;
+}
+
 }
 
 void OsHandle::reset() {
@@ -315,11 +329,17 @@ Extractor::createDirectory(const ArchivePath& path, const EntryMetadata& metadat
         return systemFailure(ErrorKind::Io, "cannot set directory permissions");
     }
 
-    // TODO: entries written into this directory later move its mtime again; restoring it exactly
-    // needs a deferred pass once the last entry is extracted.
-    auto times = applyTimes(fd, nullptr, metadata, policy_.restoreMtime);
-    if (!times) {
-        return std::unexpected(times.error());
+    if (policy_.restoreMtime && metadata.mtimeNanoseconds) {
+        auto checked = toTimespec(*metadata.mtimeNanoseconds);
+        if (!checked) {
+            return std::unexpected(checked.error());
+        }
+
+        struct stat status{};
+        if (::fstat(fd, &status) != 0) {
+            return systemFailure(ErrorKind::Io, "cannot inspect directory");
+        }
+        deferDirectoryTime(path, fileIdOf(status), *metadata.mtimeNanoseconds);
     }
 
     if (policy_.durable && created) {
@@ -402,12 +422,7 @@ Result<EntryResult> Extractor::finishFile(PendingFile& file) {
         return placed;
     }
 
-    extractedFiles_.insert(
-        FileId{
-            .device = static_cast<std::uint64_t>(status.st_dev),
-            .inode = static_cast<std::uint64_t>(status.st_ino),
-        }
-    );
+    extractedFiles_.insert(fileIdOf(status));
 
     if (policy_.durable) {
         auto synced = syncHandle(file.directory_.get());
@@ -524,11 +539,7 @@ Extractor::createHardLink(const ArchivePath& path, const ArchivePath& existingPa
         return fail(ErrorKind::UnsafePath, "hard link target is not a regular file");
     }
 
-    const FileId sourceId{
-        .device = static_cast<std::uint64_t>(sourceStatus.st_dev),
-        .inode = static_cast<std::uint64_t>(sourceStatus.st_ino),
-    };
-    if (!extractedFiles_.contains(sourceId)) {
+    if (!extractedFiles_.contains(fileIdOf(sourceStatus))) {
         return fail(ErrorKind::UnsafePath, "hard link target was not extracted in this session");
     }
 
@@ -574,6 +585,42 @@ Extractor::createHardLink(const ArchivePath& path, const ArchivePath& existingPa
         }
     }
     return placed;
+}
+
+Result<void> Extractor::applyDeferredTime(std::string_view path, const DeferredTime& time) {
+    // SECURITY: the directory is reached again component by component with O_NOFOLLOW from the
+    // root, and its device and inode must match the directory created earlier, so a directory
+    // swapped for a symlink or another directory after extraction is left alone.
+    auto parent = openParent(path, false);
+    if (!parent) {
+        if (isGone(parent.error())) {
+            return {};
+        }
+        return std::unexpected(parent.error());
+    }
+
+    const std::size_t slash = path.rfind('/');
+    component_.assign(slash == std::string_view::npos ? path : path.substr(slash + 1));
+    const int fd = openAt(parent->get(), component_.c_str(), directoryFlags);
+    if (fd < 0) {
+        if (errno == ENOENT || isNotDirectoryError(errno)) {
+            return {};
+        }
+        return systemFailure(ErrorKind::Io, "cannot reopen directory");
+    }
+
+    OsHandle directory(fd);
+    struct stat status{};
+    if (::fstat(fd, &status) != 0) {
+        return systemFailure(ErrorKind::Io, "cannot inspect directory");
+    }
+    if (fileIdOf(status) != time.id) {
+        return {};
+    }
+
+    EntryMetadata metadata;
+    metadata.mtimeNanoseconds = time.mtimeNanoseconds;
+    return applyTimes(fd, nullptr, metadata, true);
 }
 
 }

@@ -2,67 +2,21 @@
 
 #include "extract/extractor.hpp"
 
+#include "extract/windows_nt.hpp"
+
 #include <algorithm>
 #include <cstring>
 
-#include <windows.h>
-#include <winternl.h>
-
-#ifndef FILE_OPEN
-#define FILE_OPEN 0x00000001
-#endif
-#ifndef FILE_CREATE
-#define FILE_CREATE 0x00000002
-#endif
-#ifndef FILE_OPEN_IF
-#define FILE_OPEN_IF 0x00000003
-#endif
-#ifndef FILE_DIRECTORY_FILE
-#define FILE_DIRECTORY_FILE 0x00000001
-#endif
-#ifndef FILE_SYNCHRONOUS_IO_NONALERT
-#define FILE_SYNCHRONOUS_IO_NONALERT 0x00000020
-#endif
-#ifndef FILE_NON_DIRECTORY_FILE
-#define FILE_NON_DIRECTORY_FILE 0x00000040
-#endif
-#ifndef FILE_OPEN_REPARSE_POINT
-#define FILE_OPEN_REPARSE_POINT 0x00200000
-#endif
-
-#ifdef _MSC_VER
-extern "C" NTSTATUS NTAPI NtSetInformationFile(
-    HANDLE file,
-    PIO_STATUS_BLOCK status,
-    PVOID information,
-    ULONG length,
-    FILE_INFORMATION_CLASS informationClass
-);
-#endif
-
 namespace bale {
+
+namespace nt {
 
 namespace {
 
-// SECURITY: every component is opened with NtCreateFile relative to the handle of its already
-// verified parent, with FILE_OPEN_REPARSE_POINT so junctions and symlinks are opened rather than
-// followed and then refused. No full path is ever resolved after the root, so there is no window
-// in which a swapped component could redirect the walk.
-
-using WideName = std::array<wchar_t, maxLeafBytes + 1>;
-
-constexpr NTSTATUS statusNameNotFound = static_cast<NTSTATUS>(0xC0000034L);
-constexpr NTSTATUS statusNameCollision = static_cast<NTSTATUS>(0xC0000035L);
-constexpr NTSTATUS statusPathNotFound = static_cast<NTSTATUS>(0xC000003AL);
-constexpr NTSTATUS statusNotADirectory = static_cast<NTSTATUS>(0xC0000103L);
-constexpr NTSTATUS statusFileIsADirectory = static_cast<NTSTATUS>(0xC00000BAL);
 constexpr ULONG_PTR fileCreated = 2;
-constexpr auto fileRenameInformation = static_cast<FILE_INFORMATION_CLASS>(10);
-constexpr ULONG shareAll = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
-constexpr ACCESS_MASK directoryAccess = FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES |
-    FILE_WRITE_ATTRIBUTES | FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY;
-constexpr int maxTempAttempts = 16;
 constexpr std::int64_t unixEpochTicks = 116'444'736'000'000'000;
+
+}
 
 std::unexpected<Error> systemFailure(ErrorKind kind, std::string_view what) {
     auto failure = fail(kind, what);
@@ -76,15 +30,15 @@ std::unexpected<Error> statusFailure(ErrorKind kind, std::string_view what, NTST
     return failure;
 }
 
-[[nodiscard]] bool isSuccess(NTSTATUS status) {
-    return status >= 0;
+bool isGone(const Error& error) {
+    if (error.kind == ErrorKind::UnsafePath || error.kind == ErrorKind::AlreadyExists) {
+        return true;
+    }
+    return error.kind == ErrorKind::Io &&
+        (error.systemCode == ERROR_FILE_NOT_FOUND || error.systemCode == ERROR_PATH_NOT_FOUND);
 }
 
-[[nodiscard]] bool isMissing(NTSTATUS status) {
-    return status == statusNameNotFound || status == statusPathNotFound;
-}
-
-Result<std::wstring_view> widen(std::string_view utf8, WideName& out) {
+Result<std::wstring_view> widen(std::string_view utf8, std::span<wchar_t> out) {
     const int count = MultiByteToWideChar(
         CP_UTF8,
         MB_ERR_INVALID_CHARS,
@@ -93,17 +47,14 @@ Result<std::wstring_view> widen(std::string_view utf8, WideName& out) {
         out.data(),
         static_cast<int>(out.size() - 1)
     );
+    if (count <= 0 && GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
+        return fail(ErrorKind::LimitExceeded, "name too long for the target");
+    }
     if (count <= 0) {
         return fail(ErrorKind::UnsafePath, "path component is not valid UTF-8");
     }
     return std::wstring_view(out.data(), static_cast<std::size_t>(count));
 }
-
-struct Opened {
-    NTSTATUS status = 0;
-    OsHandle handle;
-    bool created = false;
-};
 
 Opened openRelative(
     HANDLE parent,
@@ -152,34 +103,15 @@ Result<DWORD> attributesOf(const OsHandle& handle) {
     return info.FileAttributes;
 }
 
-Result<OsHandle> openDirectoryAt(HANDLE parent, std::wstring_view name, bool create) {
-    auto opened = openRelative(
-        parent,
-        name,
-        directoryAccess,
-        shareAll,
-        create ? FILE_OPEN_IF : FILE_OPEN,
-        FILE_DIRECTORY_FILE
-    );
-    if (opened.status == statusNotADirectory) {
-        return fail(ErrorKind::AlreadyExists, "non-directory in extraction path");
+Result<Extractor::FileId> fileIdOf(const OsHandle& handle) {
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (!GetFileInformationByHandle(handle.get(), &info)) {
+        return systemFailure(ErrorKind::Io, "cannot query file identity");
     }
-    if (!isSuccess(opened.status)) {
-        return statusFailure(
-            ErrorKind::Io,
-            "cannot open directory in extraction path",
-            opened.status
-        );
-    }
-
-    auto attributes = attributesOf(opened.handle);
-    if (!attributes) {
-        return std::unexpected(attributes.error());
-    }
-    if ((*attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
-        return fail(ErrorKind::UnsafePath, "reparse point in extraction path");
-    }
-    return std::move(opened.handle);
+    return Extractor::FileId{
+        .device = info.dwVolumeSerialNumber,
+        .inode = (static_cast<std::uint64_t>(info.nFileIndexHigh) << 32) | info.nFileIndexLow,
+    };
 }
 
 Result<FILETIME> toFileTime(std::int64_t nanoseconds) {
@@ -215,11 +147,47 @@ Result<void> applyTimes(const OsHandle& handle, const EntryMetadata& metadata, b
     return {};
 }
 
+}
+
+using namespace nt;
+
+namespace {
+
 Result<void> syncHandle(const OsHandle& handle) {
     if (!FlushFileBuffers(handle.get())) {
         return systemFailure(ErrorKind::Io, "flush failed");
     }
     return {};
+}
+
+Result<OsHandle> openDirectoryAt(HANDLE parent, std::wstring_view name, bool create) {
+    auto opened = openRelative(
+        parent,
+        name,
+        directoryAccess,
+        shareAll,
+        create ? FILE_OPEN_IF : FILE_OPEN,
+        FILE_DIRECTORY_FILE
+    );
+    if (opened.status == statusNotADirectory) {
+        return fail(ErrorKind::AlreadyExists, "non-directory in extraction path");
+    }
+    if (!isSuccess(opened.status)) {
+        return statusFailure(
+            ErrorKind::Io,
+            "cannot open directory in extraction path",
+            opened.status
+        );
+    }
+
+    auto attributes = attributesOf(opened.handle);
+    if (!attributes) {
+        return std::unexpected(attributes.error());
+    }
+    if ((*attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+        return fail(ErrorKind::UnsafePath, "reparse point in extraction path");
+    }
+    return std::move(opened.handle);
 }
 
 }
@@ -453,9 +421,17 @@ Extractor::createDirectory(const ArchivePath& path, const EntryMetadata& metadat
     }
 
     // NOTE: Windows has no POSIX permission bits; the mode is not restored there.
-    auto times = applyTimes(opened.handle, metadata, policy_.restoreMtime);
-    if (!times) {
-        return std::unexpected(times.error());
+    if (policy_.restoreMtime && metadata.mtimeNanoseconds) {
+        auto checked = toFileTime(*metadata.mtimeNanoseconds);
+        if (!checked) {
+            return std::unexpected(checked.error());
+        }
+
+        auto id = fileIdOf(opened.handle);
+        if (!id) {
+            return std::unexpected(id.error());
+        }
+        deferDirectoryTime(path, *id, *metadata.mtimeNanoseconds);
     }
     return EntryResult{};
 }
@@ -529,55 +505,67 @@ Result<EntryResult> Extractor::finishFile(PendingFile& file) {
         }
     }
 
-    return place(file.directory_, file.file_, file.tempName_.data(), file.leaf());
+    auto id = fileIdOf(file.file_);
+    if (!id) {
+        return std::unexpected(id.error());
+    }
+
+    auto placed = place(file.directory_, file.file_, file.tempName_.data(), file.leaf());
+    if (placed && placed->outcome == EntryOutcome::Extracted) {
+        extractedFiles_.insert(*id);
+    }
+    return placed;
 }
 
-Result<EntryResult>
-Extractor::createSymlink(const ArchivePath& path, std::string_view target, const EntryMetadata&) {
-    auto entry = beginEntry(path);
-    if (!entry) {
-        return std::unexpected(entry.error());
+Result<void> Extractor::applyDeferredTime(std::string_view path, const DeferredTime& time) {
+    // SECURITY: the directory is reached again handle by handle from the root without following
+    // reparse points, and its volume serial and file index must match the directory created
+    // earlier, so a directory swapped after extraction is left alone.
+    auto parent = openParent(path, false);
+    if (!parent) {
+        if (isGone(parent.error())) {
+            return {};
+        }
+        return std::unexpected(parent.error());
     }
 
-    if (policy_.symlinks == SymlinkPolicy::Refuse) {
-        return fail(ErrorKind::UnsafePath, "symlink entries are refused");
-    }
-    if (policy_.symlinks == SymlinkPolicy::Skip) {
-        return EntryResult{
-            .outcome = EntryOutcome::Skipped,
-            .reason = "symlink entries are skipped by policy",
-        };
+    const std::size_t slash = path.rfind('/');
+    WideName wide{};
+    auto name = widen(slash == std::string_view::npos ? path : path.substr(slash + 1), wide);
+    if (!name) {
+        return std::unexpected(name.error());
     }
 
-    auto normalized = normalizeLinkTarget(target, entry->parentDepth);
-    if (!normalized) {
-        return std::unexpected(normalized.error());
+    auto opened = openRelative(
+        parent->get(),
+        *name,
+        FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES,
+        shareAll,
+        FILE_OPEN,
+        FILE_DIRECTORY_FILE
+    );
+    if (isMissing(opened.status) || opened.status == statusNotADirectory) {
+        return {};
+    }
+    if (!isSuccess(opened.status)) {
+        return statusFailure(ErrorKind::Io, "cannot reopen directory", opened.status);
     }
 
-    // TODO: create the link relative to the parent handle (NtCreateFile plus
-    // FSCTL_SET_REPARSE_POINT), which also needs SeCreateSymbolicLinkPrivilege or developer mode.
-    return fail(ErrorKind::Unsupported, "symlink extraction is not implemented on Windows");
-}
-
-Result<EntryResult>
-Extractor::createHardLink(const ArchivePath& path, const ArchivePath& existingPath) {
-    auto entry = beginEntry(path);
-    if (!entry) {
-        return std::unexpected(entry.error());
+    auto attributes = attributesOf(opened.handle);
+    if (!attributes) {
+        return std::unexpected(attributes.error());
+    }
+    auto id = fileIdOf(opened.handle);
+    if (!id) {
+        return std::unexpected(id.error());
+    }
+    if ((*attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 || *id != time.id) {
+        return {};
     }
 
-    if (policy_.hardLinks == HardLinkPolicy::Refuse) {
-        return fail(ErrorKind::UnsafePath, "hard link entries are refused");
-    }
-
-    auto source = splitPath(existingPath.path);
-    if (!source) {
-        return std::unexpected(source.error());
-    }
-
-    // TODO: link relative to the parent handle with FileLinkInformation and track extracted file
-    // identities (volume serial plus file index) as the POSIX side does.
-    return fail(ErrorKind::Unsupported, "hard link extraction is not implemented on Windows");
+    EntryMetadata metadata;
+    metadata.mtimeNanoseconds = time.mtimeNanoseconds;
+    return applyTimes(opened.handle, metadata, true);
 }
 
 }
