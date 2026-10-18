@@ -1,4 +1,5 @@
 add_library(bale_codecs STATIC
+    deflate_encoder.cpp
     inflater.cpp
     zstd_decoder.cpp
     zstd_encoder.cpp

@@ -1,4 +1,5 @@
 #include "codecs/decoders.hpp"
+#include "codecs/deflate_encoder.hpp"
 
 #include "codecs/codec_fixture.hpp"
 
@@ -217,4 +218,35 @@ TEST_CASE("ZstdDecoder rejects frames whose window exceeds the caller limit") {
     auto outOfRange = ZstdDecoder::create({.maxWindowLog = 5});
     REQUIRE_FALSE(outOfRange);
     CHECK(outOfRange.error().kind == ErrorKind::Unsupported);
+}
+
+TEST_CASE("DeflateEncoder output inflates back and short buffers or bad levels are refused") {
+    std::string text;
+    for (int line = 0; line < 2000; ++line) {
+        text += "line " + std::to_string(line % 37) + " of a repetitive input\n";
+    }
+
+    for (int level : {0, 1, 6, 9}) {
+        auto encoder = DeflateEncoder::create(level);
+        REQUIRE(encoder);
+        std::vector<std::byte> encoded(DeflateEncoder::compressBound(text.size()));
+        auto size = encoder->compress(asBytes(text), encoded);
+        REQUIRE(size);
+
+        auto inflater = Inflater::create();
+        REQUIRE(inflater);
+        auto drained = drain(*inflater, std::span(encoded).first(*size), 4096, 4096);
+        CHECK(drained.finished);
+        CHECK(drained.output == text);
+    }
+
+    auto encoder = DeflateEncoder::create(6);
+    REQUIRE(encoder);
+    std::vector<std::byte> tiny(8);
+    auto tooSmall = encoder->compress(asBytes(text), tiny);
+    REQUIRE_FALSE(tooSmall);
+    CHECK(tooSmall.error().kind == ErrorKind::LimitExceeded);
+
+    CHECK_FALSE(DeflateEncoder::create(10));
+    CHECK_FALSE(DeflateEncoder::create(-1));
 }
