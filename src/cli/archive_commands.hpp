@@ -67,6 +67,12 @@ struct CreateOptions {
     const CreateOptions& options
 );
 
+[[nodiscard]] ExitCode updateArchive(
+    std::string_view archivePath,
+    std::string_view directory,
+    const CreateOptions& options
+);
+
 [[nodiscard]] ExitCode createArchiveFromPath(std::string_view input);
 
 [[nodiscard]] ExitCode extractArchive(

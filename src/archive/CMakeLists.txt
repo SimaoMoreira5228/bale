@@ -4,6 +4,7 @@ add_library(bale_archive STATIC
     index.cpp
     manifest.cpp
     reader.cpp
+    reader_commit.cpp
     tree_walk.cpp
     writer.cpp
 )

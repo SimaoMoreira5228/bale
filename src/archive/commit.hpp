@@ -22,6 +22,7 @@ struct RecordReference {
 struct Commit {
     std::uint64_t generation = 1;
     Blake3Digest previous{};
+    std::uint64_t previousFooterOffset = 0;
     std::uint64_t requiredFeatures = 0;
     RecordReference manifest;
     RecordReference index;

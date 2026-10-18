@@ -12,9 +12,8 @@ namespace bale::archive {
 
 namespace {
 
-constexpr std::size_t maxFooterCandidates = 64;
-constexpr std::uint64_t maxCommitPayload = 4096;
 constexpr std::uint64_t maxDataPayload = 1 + maxDataDescriptorSize + maxChunkSize;
+constexpr std::uint64_t maxCommitPayload = 4096;
 
 bool spansOverlap(std::uint64_t offset, std::uint64_t length, const RecordReference& record) {
     return offset < record.offset + record.length && record.offset < offset + length;
@@ -49,111 +48,6 @@ Result<Reader> Reader::open(File file, const ReaderOptions& options) {
         return std::unexpected(found.error());
     }
     return reader;
-}
-
-Result<void> Reader::findCommit() {
-    if (fileSize_ - superblockSize < footerSize) {
-        return fail(
-            ErrorKind::Truncated,
-            "no footer found: the archive is incomplete or truncated"
-        );
-    }
-
-    std::uint64_t window = std::max<std::uint64_t>(options_.footerScanWindow, footerSize);
-    std::uint64_t start = superblockSize;
-    if (fileSize_ - superblockSize > window) {
-        start = fileSize_ - window;
-    }
-
-    std::vector<std::byte> tail(static_cast<std::size_t>(fileSize_ - start));
-    auto read = file_.readExactAt(start, tail);
-    if (!read) {
-        return read;
-    }
-
-    // SECURITY: footer magic can occur inside chunk data, so every candidate is validated down
-    // to the manifest and index before it is trusted.
-    std::optional<Error> nearest;
-    std::size_t attempts = 0;
-    for (std::size_t at = tail.size() - footerSize;; --at) {
-        auto candidate = std::span(tail).subspan(at, footerSize);
-        if (std::ranges::equal(candidate.first(footerMagic.size()), footerMagic)) {
-            auto accepted = tryFooter(candidate, start + at);
-            if (accepted) {
-                return {};
-            }
-            if (!nearest) {
-                nearest = accepted.error();
-            }
-            ++attempts;
-            if (attempts == maxFooterCandidates) {
-                break;
-            }
-        }
-        if (at == 0) {
-            break;
-        }
-    }
-
-    if (nearest) {
-        return std::unexpected(*nearest);
-    }
-    return fail(ErrorKind::Truncated, "no footer found: the archive is incomplete or truncated");
-}
-
-Result<void> Reader::tryFooter(std::span<const std::byte> bytes, std::uint64_t offset) {
-    auto footer = decodeFooter(bytes, offset);
-    if (!footer) {
-        return std::unexpected(footer.error());
-    }
-    if (footer->commitOffset + footer->commitLength != offset) {
-        return fail(ErrorKind::Malformed, "footer does not directly follow its commit", offset);
-    }
-
-    auto record = readRecord(
-        footer->commitOffset,
-        footer->commitLength,
-        RecordType::Commit,
-        maxCommitPayload,
-        buffer_
-    );
-    if (!record) {
-        return std::unexpected(record.error());
-    }
-    if (record->header.codec != CodecId::Raw) {
-        return fail(ErrorKind::Malformed, "commit record is not stored raw", footer->commitOffset);
-    }
-
-    auto digest = Blake3::of(HashDomain::Commit, record->payload);
-    if (digest != footer->commitDigest) {
-        return fail(ErrorKind::Integrity, "commit digest mismatch", footer->commitOffset);
-    }
-
-    auto commit = decodeCommit(record->payload, footer->commitOffset + recordPrefixSize);
-    if (!commit) {
-        return std::unexpected(commit.error());
-    }
-    if (commit->generation != footer->generation) {
-        return fail(ErrorKind::Malformed, "footer and commit disagree on generation", offset);
-    }
-    // TODO: follow and validate parent commits once append generations are written.
-    if (commit->generation != 1) {
-        return fail(ErrorKind::Unsupported, "archives with several generations are not supported");
-    }
-    if (commit->previous != Blake3Digest{}) {
-        return fail(ErrorKind::Malformed, "first generation names a previous commit", offset);
-    }
-
-    footer_ = *footer;
-    footerOffset_ = offset;
-    commit_ = *commit;
-    commitDigest_ = digest;
-
-    auto metadata = loadMetadata();
-    if (!metadata) {
-        return metadata;
-    }
-    return checkLocations();
 }
 
 Result<Record> Reader::readRecord(
@@ -457,7 +351,14 @@ Result<VerifyReport> Reader::walkRecords() {
     std::array<std::byte, recordPrefixSize> prefix{};
     std::uint64_t position = superblockSize;
     std::size_t nextIndexed = 0;
+    std::size_t generation = 0;
+    std::vector<std::byte> metadata;
     while (position < footerOffset_) {
+        if (generation < generations_.size() && position == generations_[generation].footerOffset) {
+            position += footerSize;
+            ++generation;
+            continue;
+        }
         if (footerOffset_ - position < recordFramingSize) {
             return fail(ErrorKind::Malformed, "stray bytes before the footer", position);
         }
@@ -492,13 +393,56 @@ Result<VerifyReport> Reader::walkRecords() {
             }
             break;
         case RecordType::Manifest:
-            expected = position == commit_.manifest.offset && size == commit_.manifest.length;
+            expected = generation < generations_.size() &&
+                position == generations_[generation].commit.manifest.offset &&
+                size == generations_[generation].commit.manifest.length;
+            if (expected) {
+                auto record = readRecord(
+                    position,
+                    size,
+                    RecordType::Manifest,
+                    options_.maxMetadataBytes,
+                    metadata
+                );
+                if (!record) {
+                    return std::unexpected(record.error());
+                }
+                expected = Blake3::of(HashDomain::Manifest, record->payload) ==
+                    generations_[generation].commit.manifest.digest;
+            }
             break;
         case RecordType::Index:
-            expected = position == commit_.index.offset && size == commit_.index.length;
+            expected = generation < generations_.size() &&
+                position == generations_[generation].commit.index.offset &&
+                size == generations_[generation].commit.index.length;
+            if (expected) {
+                auto record = readRecord(
+                    position,
+                    size,
+                    RecordType::Index,
+                    options_.maxMetadataBytes,
+                    metadata
+                );
+                if (!record) {
+                    return std::unexpected(record.error());
+                }
+                expected = Blake3::of(HashDomain::Index, record->payload) ==
+                    generations_[generation].commit.index.digest;
+            }
             break;
         case RecordType::Commit:
-            expected = position == footer_.commitOffset;
+            expected = generation < generations_.size() &&
+                position == generations_[generation].footer.commitOffset &&
+                size == generations_[generation].footer.commitLength;
+            if (expected) {
+                auto record =
+                    readRecord(position, size, RecordType::Commit, maxCommitPayload, metadata);
+                if (!record) {
+                    return std::unexpected(record.error());
+                }
+                expected = Blake3::of(HashDomain::Commit, record->payload) ==
+                    generations_[generation].digest;
+            }
             break;
         case RecordType::Extension:
             break;
@@ -517,6 +461,9 @@ Result<VerifyReport> Reader::walkRecords() {
 
     if (nextIndexed != byOffset_.size()) {
         return fail(ErrorKind::Malformed, "index entry does not point at a record boundary");
+    }
+    if (generation + 1 != generations_.size()) {
+        return fail(ErrorKind::Malformed, "generation footer is missing from the record stream");
     }
     return report;
 }

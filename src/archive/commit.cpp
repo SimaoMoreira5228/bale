@@ -19,6 +19,7 @@ constexpr std::uint32_t manifestLengthField = manifestOffsetField + 1;
 constexpr std::uint32_t manifestDigestField = manifestOffsetField + 2;
 constexpr std::uint32_t indexLengthField = indexOffsetField + 1;
 constexpr std::uint32_t indexDigestField = indexOffsetField + 2;
+constexpr std::uint32_t previousFooterField = 12;
 
 constexpr bool isDigestField(std::uint32_t number) {
     return number == previousField || number == manifestDigestField || number == indexDigestField;
@@ -68,7 +69,15 @@ Result<void> encodeCommit(const Commit& commit, std::vector<std::byte>& out) {
     if (!manifest) {
         return manifest;
     }
-    return writeRecord(writer, indexOffsetField, commit.index);
+    auto index = writeRecord(writer, indexOffsetField, commit.index);
+    if (!index) {
+        return index;
+    }
+    if (commit.generation == 1) {
+        return {};
+    }
+    return writer
+        .unsignedValue(previousFooterField, Criticality::Noncritical, commit.previousFooterOffset);
 }
 
 Result<Commit> decodeCommit(std::span<const std::byte> payload, std::uint64_t offset) {
@@ -82,6 +91,7 @@ Result<Commit> decodeCommit(std::span<const std::byte> payload, std::uint64_t of
     TlvReader reader(payload, offset);
     TlvField field;
     std::uint32_t seen = 0;
+    bool hasPreviousFooter = false;
     while (true) {
         auto more = reader.next(field);
         if (!more) {
@@ -91,6 +101,22 @@ Result<Commit> decodeCommit(std::span<const std::byte> payload, std::uint64_t of
             break;
         }
 
+        if (field.number == previousFooterField) {
+            auto critical = requireCriticality(field, Criticality::Noncritical);
+            if (!critical) {
+                return std::unexpected(critical.error());
+            }
+            if (hasPreviousFooter) {
+                return fail(ErrorKind::Malformed, "duplicate previous footer field", field.offset);
+            }
+            auto value = decodeTlvUnsigned(field);
+            if (!value) {
+                return std::unexpected(value.error());
+            }
+            commit.previousFooterOffset = *value;
+            hasPreviousFooter = true;
+            continue;
+        }
         if (field.number > indexDigestField) {
             auto skipped = skipUnknownField(field);
             if (!skipped) {
@@ -132,6 +158,12 @@ Result<Commit> decodeCommit(std::span<const std::byte> payload, std::uint64_t of
     }
     if (values[generationField] == 0) {
         return fail(ErrorKind::Malformed, "commit generation zero", offset);
+    }
+    if (values[generationField] > 1 && !hasPreviousFooter) {
+        return fail(ErrorKind::Malformed, "commit is missing its previous footer", offset);
+    }
+    if (values[generationField] == 1 && hasPreviousFooter) {
+        return fail(ErrorKind::Malformed, "first generation has a previous footer", offset);
     }
 
     commit.generation = values[generationField];
