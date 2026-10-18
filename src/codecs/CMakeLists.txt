@@ -3,6 +3,7 @@ add_library(bale_codecs STATIC
     deflate_encoder.cpp
     inflater.cpp
     lz4_frame.cpp
+    lzma2.cpp
     xz_decoder.cpp
     zstd_decoder.cpp
     zstd_encoder.cpp
