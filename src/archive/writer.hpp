@@ -1,11 +1,11 @@
 #pragma once
 
 #include "archive/chunk.hpp"
+#include "archive/chunk_codec.hpp"
 #include "archive/index.hpp"
 #include "archive/manifest.hpp"
 #include "archive/writer_profile.hpp"
 #include "base/error.hpp"
-#include "codecs/zstd_encoder.hpp"
 #include "format/record.hpp"
 #include "io/file.hpp"
 #include "security/budget.hpp"
@@ -167,8 +167,7 @@ class Writer {
     std::uint64_t previousFooterOffset_ = 0;
     std::optional<WriterMetadata> inheritedWriter_;
     std::vector<std::byte> buffer_;
-    std::vector<std::byte> compressionBuffer_;
-    std::optional<ZstdEncoder> encoder_;
+    ChunkEncoder chunkEncoder_;
     std::vector<std::byte> descriptor_;
     std::vector<std::byte> payload_;
     std::string names_;

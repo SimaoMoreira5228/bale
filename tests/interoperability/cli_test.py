@@ -151,20 +151,31 @@ def test_native(work, source):
         compacted_listing.stdout,
     )
 
-    compressed = work / "compressed.bale"
-    expect_exit(
-        "bale zstd create",
-        run("create", "--codec", "zstd", compressed, source, cwd=work),
-        EXIT_OK,
-    )
-    expect_exit("bale zstd test", run("test", compressed, cwd=work), EXIT_OK)
-    compressed_output = work / "compressed.out"
-    expect_exit(
-        "bale zstd extract",
-        run("extract", compressed, "-o", compressed_output, cwd=work),
-        EXIT_OK,
-    )
-    check("bale zstd contents", same_tree(source, compressed_output), "extracted tree differs")
+    for codec, level, shown in (("zstd", "9", "zstd level 9"), ("lz4", "12", "lz4 level 12")):
+        compressed = work / f"{codec}.bale"
+        expect_exit(
+            f"bale {codec} create",
+            run("create", "--level", level, "--codec", codec, compressed, source, cwd=work),
+            EXIT_OK,
+        )
+        expect_exit(f"bale {codec} test", run("test", compressed, cwd=work), EXIT_OK)
+        info = run("info", compressed, cwd=work)
+        check(f"bale {codec} info", shown in info.stdout, info.stdout)
+        compressed_output = work / f"{codec}.out"
+        expect_exit(
+            f"bale {codec} extract",
+            run("extract", compressed, "-o", compressed_output, cwd=work),
+            EXIT_OK,
+        )
+        check(f"bale {codec} contents", same_tree(source, compressed_output), "extracted tree differs")
+
+    rejected = work / "rejected.bale"
+    for codec, level in (("zstd", "0"), ("zstd", "23"), ("lz4", "-1"), ("lz4", "13"), ("raw", "1")):
+        expect_exit(
+            f"bale {codec} level {level}",
+            run("create", "--codec", codec, "--level", level, rejected, source, cwd=work),
+            EXIT_USAGE,
+        )
 
     corrupt = work / "corrupt.bale"
     data = bytearray(archive.read_bytes())

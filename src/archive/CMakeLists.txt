@@ -1,5 +1,6 @@
 add_library(bale_archive STATIC
     chunk.cpp
+    chunk_codec.cpp
     commit.cpp
     compactor.cpp
     index.cpp

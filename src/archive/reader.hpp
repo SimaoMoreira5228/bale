@@ -1,11 +1,11 @@
 #pragma once
 
 #include "archive/chunk.hpp"
+#include "archive/chunk_codec.hpp"
 #include "archive/commit.hpp"
 #include "archive/index.hpp"
 #include "archive/manifest.hpp"
 #include "base/error.hpp"
-#include "codecs/decoders.hpp"
 #include "format/envelope.hpp"
 #include "format/record.hpp"
 #include "io/chunk_sink.hpp"
@@ -136,7 +136,7 @@ class Reader {
     std::vector<std::byte> buffer_;
     std::vector<std::byte> decodedBuffer_;
     std::vector<std::byte> descriptor_;
-    std::optional<ZstdDecoder> zstdDecoder_;
+    ChunkDecoder chunkDecoder_;
     Manifest manifest_;
     std::vector<IndexEntry> index_;
     std::vector<std::uint32_t> byOffset_;

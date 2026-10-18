@@ -19,10 +19,13 @@ enum class RecordType : std::uint8_t {
 };
 
 // NOTE: matches the wire width so unregistered codec IDs survive framing for later rejection.
+// Each ID names one exact stream per chunk: Zstd is one zstd frame; Lz4 is one LZ4 frame
+// (frame format v1.6.x) with independent blocks, the content size and no checksums or dictionary.
 // NOLINTNEXTLINE(performance-enum-size)
 enum class CodecId : std::uint32_t {
     Raw = 0,
     Zstd = 1,
+    Lz4 = 2,
 };
 
 [[nodiscard]] constexpr std::string_view codecName(CodecId codec) {
@@ -31,6 +34,8 @@ enum class CodecId : std::uint32_t {
         return "raw";
     case CodecId::Zstd:
         return "zstd";
+    case CodecId::Lz4:
+        return "lz4";
     }
     return "unknown";
 }

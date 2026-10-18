@@ -1,11 +1,12 @@
 option(
     BALE_USE_SYSTEM_CODECS
-    "Link system zlib-ng, zstd and BLAKE3 instead of building pinned sources"
+    "Link system zlib-ng, zstd, LZ4 and BLAKE3 instead of building pinned sources"
     OFF
 )
 
 add_library(bale_zlib_ng INTERFACE)
 add_library(bale_zstd INTERFACE)
+add_library(bale_lz4 INTERFACE)
 add_library(bale_blake3 INTERFACE)
 
 if(BALE_USE_SYSTEM_CODECS)
@@ -35,6 +36,22 @@ if(BALE_USE_SYSTEM_CODECS)
         message(FATAL_ERROR "BALE_USE_SYSTEM_CODECS: zstd not found")
     endif()
 
+    find_package(lz4 1.9 CONFIG QUIET)
+    if(TARGET LZ4::lz4)
+        target_link_libraries(bale_lz4 INTERFACE LZ4::lz4)
+    elseif(TARGET lz4::lz4)
+        target_link_libraries(bale_lz4 INTERFACE lz4::lz4)
+    elseif(TARGET LZ4::lz4_shared)
+        target_link_libraries(bale_lz4 INTERFACE LZ4::lz4_shared)
+    elseif(TARGET LZ4::lz4_static)
+        target_link_libraries(bale_lz4 INTERFACE LZ4::lz4_static)
+    elseif(PkgConfig_FOUND)
+        pkg_check_modules(BALE_SYSTEM_LZ4 REQUIRED IMPORTED_TARGET liblz4>=1.9.0)
+        target_link_libraries(bale_lz4 INTERFACE PkgConfig::BALE_SYSTEM_LZ4)
+    else()
+        message(FATAL_ERROR "BALE_USE_SYSTEM_CODECS: LZ4 not found")
+    endif()
+
     find_package(blake3 1.5 CONFIG QUIET)
     if(TARGET BLAKE3::blake3)
         target_link_libraries(bale_blake3 INTERFACE BLAKE3::blake3)
@@ -58,6 +75,12 @@ FetchContent_Declare(zlib_ng
 FetchContent_Declare(zstd
     URL https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz
     URL_HASH SHA256=eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3
+    SOURCE_SUBDIR build/cmake
+    SYSTEM
+)
+FetchContent_Declare(lz4
+    URL https://github.com/lz4/lz4/releases/download/v1.10.0/lz4-1.10.0.tar.gz
+    URL_HASH SHA256=537512904744b35e232912055ccf8ec66d768639ff3abe5788d90d792ec5f48b
     SOURCE_SUBDIR build/cmake
     SYSTEM
 )
@@ -99,6 +122,13 @@ block(SCOPE_FOR VARIABLES)
     set(ZSTD_LEGACY_SUPPORT OFF)
     set(ZSTD_MULTITHREAD_SUPPORT OFF)
 
+    # NOTE: LZ4 1.10 still declares cmake_minimum_required(3.5), which CMake 3.31+ flags as
+    # deprecated; the other projects already require 3.10 or newer, so only LZ4 is affected.
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.10)
+    set(BUILD_STATIC_LIBS ON)
+    set(LZ4_BUILD_CLI OFF)
+    set(LZ4_BUNDLED_MODE ON)
+
     # NOTE: BLAKE3 picks its SIMD kernels at run time through CPUID, so the default amd64
     # assembly and NEON builds stay portable; no -march flags are involved.
     set(BLAKE3_USE_TBB OFF)
@@ -106,9 +136,10 @@ block(SCOPE_FOR VARIABLES)
     set(BLAKE3_EXAMPLES OFF)
     set(BLAKE3_TESTING OFF)
 
-    FetchContent_MakeAvailable(zlib_ng zstd blake3)
+    FetchContent_MakeAvailable(zlib_ng zstd lz4 blake3)
 endblock()
 
 target_link_libraries(bale_zlib_ng INTERFACE zlib-ng::zlib)
 target_link_libraries(bale_zstd INTERFACE libzstd_static)
+target_link_libraries(bale_lz4 INTERFACE lz4_static)
 target_link_libraries(bale_blake3 INTERFACE BLAKE3::blake3)
