@@ -22,8 +22,9 @@ struct PresetPolicy {
     std::int32_t level;
 };
 
-// TODO: replace these with choices measured by the codec benchmark (whitepaper 5.4.2); fast and
-// restore-fast are LZ4 candidates once that codec exists.
+// NOTE: zstd levels follow bench/results/2026-10-18-*: 3 is the knee (9 costs 3-4x the time for
+// about 4.5% less) and 19 keeps the size goal.
+// TODO: measure LZ4 for fast and restore-fast.
 constexpr std::array presetPolicies{
     PresetPolicy{
         .preset = Preset::Fast,
