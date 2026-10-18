@@ -38,13 +38,15 @@ systemFailure(std::string_view what, std::uint64_t offset = Error::noOffset) {
 
 }
 
-File::File(File&& other) noexcept : handle_(std::exchange(other.handle_, invalidHandle)) {
+File::File(File&& other) noexcept :
+    handle_(std::exchange(other.handle_, invalidHandle)), appendOnly_(other.appendOnly_) {
 }
 
 File& File::operator=(File&& other) noexcept {
     if (this != &other) {
         close();
         handle_ = std::exchange(other.handle_, invalidHandle);
+        appendOnly_ = other.appendOnly_;
     }
     return *this;
 }
@@ -100,7 +102,7 @@ Result<File> File::openAppend(const std::filesystem::path& path) {
     if (handle == INVALID_HANDLE_VALUE) {
         return systemFailure("cannot open file for appending");
     }
-    File file(handle);
+    File file(handle, true);
 
     BY_HANDLE_FILE_INFORMATION information{};
     if (!GetFileInformationByHandle(handle, &information)) {
@@ -142,7 +144,7 @@ Result<File> File::openRegularNoFollow(const std::filesystem::path& path) {
 Result<File> File::createNew(const std::filesystem::path& path) {
     HANDLE handle = CreateFileW(
         path.c_str(),
-        GENERIC_READ | FILE_APPEND_DATA,
+        GENERIC_READ | GENERIC_WRITE,
         FILE_SHARE_READ,
         nullptr,
         CREATE_NEW,
@@ -172,7 +174,7 @@ Result<File> File::duplicate() const {
     if (!DuplicateHandle(process, handle_, process, &copy, 0, FALSE, DUPLICATE_SAME_ACCESS)) {
         return systemFailure("cannot duplicate file handle");
     }
-    return File(copy);
+    return File(copy, appendOnly_);
 }
 
 Result<std::uint64_t> File::size() const {
@@ -208,6 +210,34 @@ Result<void> File::append(std::span<const std::byte> data) {
         }
 
         data = data.subspan(count);
+    }
+    return {};
+}
+
+Result<void> File::writeAt(std::uint64_t offset, std::span<const std::byte> data) {
+    if (appendOnly_) {
+        return fail(ErrorKind::Unsupported, "file is open for appending only");
+    }
+
+    auto position = offset;
+    while (!data.empty()) {
+        OVERLAPPED overlapped{};
+        overlapped.Offset = static_cast<DWORD>(position);
+        overlapped.OffsetHigh = static_cast<DWORD>(position >> 32);
+
+        auto request = static_cast<DWORD>(std::min<std::size_t>(data.size(), MAXDWORD));
+        DWORD count = 0;
+        if (!WriteFile(handle_, data.data(), request, &count, &overlapped)) {
+            return systemFailure("write failed", position);
+        }
+
+        data = data.subspan(count);
+        position += count;
+    }
+
+    LARGE_INTEGER zero{};
+    if (!SetFilePointerEx(handle_, zero, nullptr, FILE_END)) {
+        return systemFailure("cannot seek to the end of the file");
     }
     return {};
 }
@@ -254,7 +284,7 @@ Result<File> File::openAppend(const std::filesystem::path& path) {
     if (fd < 0) {
         return systemFailure("cannot open file for appending");
     }
-    File file(fd);
+    File file(fd, true);
 
     struct stat status{};
     if (::fstat(fd, &status) != 0) {
@@ -290,7 +320,7 @@ Result<File> File::openRegularNoFollow(const std::filesystem::path& path) {
 Result<File> File::createNew(const std::filesystem::path& path) {
     int fd = -1;
     do {
-        fd = ::open(path.c_str(), O_RDWR | O_APPEND | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
+        fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
     } while (fd < 0 && errno == EINTR);
 
     if (fd < 0) {
@@ -315,7 +345,7 @@ Result<File> File::duplicate() const {
     if (fd < 0) {
         return systemFailure("cannot duplicate file handle");
     }
-    return File(fd);
+    return File(fd, appendOnly_);
 }
 
 Result<std::uint64_t> File::size() const {
@@ -358,6 +388,32 @@ Result<void> File::append(std::span<const std::byte> data) {
     return {};
 }
 
+Result<void> File::writeAt(std::uint64_t offset, std::span<const std::byte> data) {
+    if (appendOnly_) {
+        return fail(ErrorKind::Unsupported, "file is open for appending only");
+    }
+
+    auto position = offset;
+    while (!data.empty()) {
+        auto start = checkedCast<off_t>(position);
+        if (!start) {
+            return fail(ErrorKind::Io, "write offset exceeds platform limit", position);
+        }
+
+        ssize_t count = ::pwrite(handle_, data.data(), data.size(), *start);
+        if (count < 0 && errno == EINTR) {
+            continue;
+        }
+        if (count < 0) {
+            return systemFailure("write failed", position);
+        }
+
+        data = data.subspan(static_cast<std::size_t>(count));
+        position += static_cast<std::uint64_t>(count);
+    }
+    return {};
+}
+
 Result<void> File::truncate(std::uint64_t size) {
     auto length = checkedCast<off_t>(size);
     if (!length) {
@@ -365,6 +421,9 @@ Result<void> File::truncate(std::uint64_t size) {
     }
     if (::ftruncate(handle_, *length) != 0) {
         return systemFailure("cannot truncate file", size);
+    }
+    if (::lseek(handle_, *length, SEEK_SET) < 0) {
+        return systemFailure("cannot seek after truncating", size);
     }
     return {};
 }

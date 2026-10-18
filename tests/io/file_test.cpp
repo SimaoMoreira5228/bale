@@ -40,6 +40,32 @@ TEST_CASE("File appends, reports size and reads at offsets") {
     CHECK(truncated.error().kind == ErrorKind::Truncated);
 }
 
+TEST_CASE("File::writeAt patches in place while append and truncate keep writing at the end") {
+    TempPath temp;
+    std::array<std::byte, 2> patch{std::byte{7}, std::byte{8}};
+    {
+        auto file = File::createNew(temp.path());
+        REQUIRE(file);
+
+        std::array<std::byte, 4> zeros{};
+        std::array<std::byte, 1> tail{std::byte{9}};
+        REQUIRE(file->append(zeros));
+        REQUIRE(file->writeAt(1, patch));
+        REQUIRE(file->append(tail));
+        REQUIRE(file->truncate(3));
+        REQUIRE(file->append(tail));
+
+        std::array<std::byte, 4> contents{};
+        REQUIRE(file->readExactAt(0, contents));
+        CHECK(contents == std::array{std::byte{0}, std::byte{7}, std::byte{8}, std::byte{9}});
+        CHECK(file->size() == 4);
+    }
+
+    auto appendOnly = File::openAppend(temp.path());
+    REQUIRE(appendOnly);
+    CHECK_FALSE(appendOnly->writeAt(0, patch));
+}
+
 TEST_CASE("File::createNew refuses an existing path") {
     TempPath temp;
     REQUIRE(File::createNew(temp.path()));

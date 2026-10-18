@@ -32,6 +32,7 @@ class File {
     [[nodiscard]] Result<void> readExactAt(std::uint64_t offset, std::span<std::byte> out) const;
 
     [[nodiscard]] Result<void> append(std::span<const std::byte> data);
+    [[nodiscard]] Result<void> writeAt(std::uint64_t offset, std::span<const std::byte> data);
     [[nodiscard]] Result<void> truncate(std::uint64_t size);
     [[nodiscard]] Result<void> sync();
 
@@ -42,12 +43,14 @@ class File {
     using Handle = int;
 #endif
 
-    explicit File(Handle handle) : handle_(handle) {
+    explicit File(Handle handle, bool appendOnly = false) :
+        handle_(handle), appendOnly_(appendOnly) {
     }
 
     void close();
 
     Handle handle_;
+    bool appendOnly_ = false;
 };
 
 }
