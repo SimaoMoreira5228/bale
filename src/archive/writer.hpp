@@ -152,6 +152,7 @@ class Writer {
 
     [[nodiscard]] Result<void> walkDirectory(Walk& walk, const std::filesystem::path& directory);
     [[nodiscard]] Result<void> addNode(Walk& walk, const std::filesystem::path& node);
+    [[nodiscard]] Result<void> skipNode(const Walk& walk, std::string_view reason);
 
     File file_;
     WriterOptions options_;
