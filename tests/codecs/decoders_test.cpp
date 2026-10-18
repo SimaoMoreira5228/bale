@@ -1,5 +1,5 @@
 #include "codecs/decoders.hpp"
-#include "codecs/deflate_encoder.hpp"
+#include "codecs/encoders.hpp"
 
 #include "codecs/codec_fixture.hpp"
 

@@ -1,5 +1,6 @@
-#include "codecs/deflate_encoder.hpp"
+#include "codecs/encoders.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <utility>
 
@@ -11,6 +12,19 @@ namespace {
 
 constexpr int rawWindowBits = -15;
 constexpr int defaultMemoryLevel = 8;
+constexpr std::size_t maxStepBytes = std::numeric_limits<std::uint32_t>::max();
+
+int flushMode(EncodeFlush flush) {
+    switch (flush) {
+    case EncodeFlush::None:
+        return Z_NO_FLUSH;
+    case EncodeFlush::Sync:
+        return Z_SYNC_FLUSH;
+    case EncodeFlush::Finish:
+        return Z_FINISH;
+    }
+    return Z_NO_FLUSH;
+}
 
 }
 
@@ -94,6 +108,55 @@ DeflateEncoder::compress(std::span<const std::byte> input, std::span<std::byte> 
         return fail(ErrorKind::LimitExceeded, "deflate output buffer is too small");
     }
     return fail(ErrorKind::Malformed, "deflate compression failed");
+}
+
+Result<EncodeStep> DeflateEncoder::stream(
+    std::span<const std::byte> input,
+    std::span<std::byte> output,
+    EncodeFlush flush
+) {
+    auto inputSize = std::min(input.size(), maxStepBytes);
+    auto outputSize = std::min(output.size(), maxStepBytes);
+    if (inputSize < input.size()) {
+        flush = EncodeFlush::None;
+    }
+
+    zng_stream& stream = state_->stream;
+    stream.next_in = reinterpret_cast<const std::uint8_t*>(input.data());
+    stream.avail_in = static_cast<std::uint32_t>(inputSize);
+    stream.next_out = reinterpret_cast<std::uint8_t*>(output.data());
+    stream.avail_out = static_cast<std::uint32_t>(outputSize);
+
+    int status = zng_deflate(&stream, flushMode(flush));
+
+    EncodeStep step{
+        .consumed = inputSize - stream.avail_in,
+        .produced = outputSize - stream.avail_out,
+    };
+    bool drained = stream.avail_in == 0 && stream.avail_out != 0;
+    stream.next_in = nullptr;
+    stream.avail_in = 0;
+    stream.next_out = nullptr;
+    stream.avail_out = 0;
+
+    switch (status) {
+    case Z_STREAM_END:
+        step.finished = true;
+        return step;
+    case Z_OK:
+    case Z_BUF_ERROR:
+        step.finished = flush != EncodeFlush::Finish && drained;
+        return step;
+    default:
+        return fail(ErrorKind::Malformed, "deflate compression failed");
+    }
+}
+
+Result<void> DeflateEncoder::reset() {
+    if (zng_deflateReset(&state_->stream) != Z_OK) {
+        return fail(ErrorKind::Malformed, "deflate encoder reset failed");
+    }
+    return {};
 }
 
 }

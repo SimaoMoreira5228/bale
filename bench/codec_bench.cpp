@@ -1,8 +1,7 @@
 #include "archive/chunk.hpp"
 #include "codecs/decoders.hpp"
-#include "codecs/deflate_encoder.hpp"
+#include "codecs/encoders.hpp"
 #include "codecs/lz4_frame.hpp"
-#include "codecs/zstd_encoder.hpp"
 #include "format/record.hpp"
 #include "io/file.hpp"
 

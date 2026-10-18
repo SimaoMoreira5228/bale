@@ -3,8 +3,8 @@
 #include "archive/writer_profile.hpp"
 #include "base/error.hpp"
 #include "codecs/decoders.hpp"
+#include "codecs/encoders.hpp"
 #include "codecs/lz4_frame.hpp"
-#include "codecs/zstd_encoder.hpp"
 #include "format/record.hpp"
 
 #include <cstddef>
