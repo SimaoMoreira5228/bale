@@ -23,14 +23,16 @@ struct PresetPolicy {
 };
 
 // NOTE: zstd levels follow bench/results/2026-10-18-*: 3 is the knee (9 costs 3-4x the time for
-// about 4.5% less) and 19 keeps the size goal.
-// TODO: measure LZ4 for fast and restore-fast.
+// about 4.5% less) and 19 keeps the size goal. LZ4 level 0 beat zstd 1 on both create and extract
+// time in every group of bench/results/2026-10-18-xeon-e5-2690v3-lz4, for archives 22% (real
+// data) to 58% (synthetic) bigger. LZ4 level 9 decoded slower on real data and created 7-35x
+// slower.
 constexpr std::array presetPolicies{
     PresetPolicy{
         .preset = Preset::Fast,
         .name = "fast",
-        .codec = CodecId::Zstd,
-        .level = 1,
+        .codec = CodecId::Lz4,
+        .level = 0,
     },
     PresetPolicy{
         .preset = Preset::Balanced,
@@ -47,8 +49,8 @@ constexpr std::array presetPolicies{
     PresetPolicy{
         .preset = Preset::RestoreFast,
         .name = "restore-fast",
-        .codec = CodecId::Zstd,
-        .level = 1,
+        .codec = CodecId::Lz4,
+        .level = 0,
     },
     PresetPolicy{
         .preset = Preset::Portable,
