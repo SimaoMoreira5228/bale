@@ -243,6 +243,29 @@ def test_corrupt_zip(work):
     check("zip crc leftovers", not output.exists() or not any(output.rglob("*")), "partial file left")
 
 
+def test_cp437_zip_name(work):
+    archive = work / "cp437.zip"
+    with zipfile.ZipFile(archive, "w") as handle:
+        handle.writestr("aaaa.txt", b"legacy name\n")
+
+    payload = archive.read_bytes()
+    check("cp437 fixture headers", payload.count(b"aaaa.txt") == 2, "unexpected ZIP layout")
+    archive.write_bytes(payload.replace(b"aaaa.txt", b"caf\x82.txt"))
+
+    listed = run("list", archive, cwd=work)
+    expect_exit("cp437 ZIP list", listed, EXIT_OK)
+    check("cp437 ZIP name", "café.txt" in listed.stdout, listed.stdout)
+
+    output = work / "cp437.out"
+    expect_exit("cp437 ZIP extract", run("extract", archive, "-o", output, cwd=work), EXIT_OK)
+    extracted = output / "café.txt"
+    check(
+        "cp437 ZIP contents",
+        extracted.is_file() and extracted.read_bytes() == b"legacy name\n",
+        "decoded path or contents differ",
+    )
+
+
 def zip_bytes_single(data):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED) as archive:
@@ -285,6 +308,7 @@ def main():
             lambda: test_single_gzip(work),
             lambda: test_hostile_tar(work),
             lambda: test_corrupt_zip(work),
+            lambda: test_cp437_zip_name(work),
             lambda: test_truncated_tgz(work, source),
             lambda: test_errors_and_escaping(work),
         ]

@@ -141,6 +141,31 @@ TEST_CASE("ZIP reader lists stored entries with metadata and reads their data") 
     CHECK(collect(*reader).size() == 2);
 }
 
+TEST_CASE("ZIP entry names without the UTF-8 flag decode as CP437") {
+    std::string rawName = "caf\x82.txt";
+    zip::Entry entry;
+    entry.name = rawName;
+    std::string storage;
+    auto decoded = zip::nameAsUtf8(entry, storage);
+    REQUIRE(decoded);
+    CHECK(*decoded == "café.txt");
+
+    zip::Entry ascii;
+    ascii.name = "readme.txt";
+    auto asciiName = zip::nameAsUtf8(ascii, storage);
+    REQUIRE(asciiName);
+    CHECK(*asciiName == "readme.txt");
+    CHECK(asciiName->data() == ascii.name.data());
+
+    zip::Entry utf8;
+    utf8.name = "café.txt";
+    utf8.flags = zip::flagUtf8;
+    auto utf8Name = zip::nameAsUtf8(utf8, storage);
+    REQUIRE(utf8Name);
+    CHECK(*utf8Name == utf8.name);
+    CHECK(utf8Name->data() == utf8.name.data());
+}
+
 TEST_CASE("ZIP reader accepts data descriptors and checks the local header against central") {
     ZipSpec spec;
     spec.entries.push_back({.name = "a.bin", .data = "descriptor data", .flags = 0x0008});

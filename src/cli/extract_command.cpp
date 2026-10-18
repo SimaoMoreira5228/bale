@@ -59,6 +59,10 @@ class Session {
         return linkTarget_;
     }
 
+    [[nodiscard]] std::string& zipName() {
+        return zipName_;
+    }
+
     void record(std::string_view name, const Result<EntryResult>& result) {
         if (!result) {
             fail(name, result.error());
@@ -108,6 +112,7 @@ class Session {
     std::string path_;
     std::string link_;
     std::string linkTarget_;
+    std::string zipName_;
     [[nodiscard]] bool repeatsLastFailure(const Error& error) const {
         if (!lastFailure_ || error.offset == Error::noOffset) {
             return false;
@@ -261,11 +266,13 @@ ExitCode extractSingleFile(std::string_view argument, OpenedArchive archive, Ses
     return entry.unixMode && (*entry.unixMode & fileTypeMask) == symlinkType;
 }
 
-[[nodiscard]] Result<EntryResult>
-extractZipEntry(Session& session, zip::Reader& reader, const zip::Entry& entry) {
-    // TODO: decode CP437 names when the UTF-8 flag is clear; non-ASCII legacy names are refused
-    // as invalid UTF-8 until then.
-    auto path = session.path(entry.name);
+[[nodiscard]] Result<EntryResult> extractZipEntry(
+    Session& session,
+    zip::Reader& reader,
+    const zip::Entry& entry,
+    std::string_view name
+) {
+    auto path = session.path(name);
     if (!path) {
         return std::unexpected(path.error());
     }
@@ -319,8 +326,13 @@ ExitCode extractZip(std::string_view argument, File file, Session& session) {
             return session.finish();
         }
 
-        auto result = extractZipEntry(session, *reader, entry);
-        session.record(entry.name, result);
+        auto name = zip::nameAsUtf8(entry, session.zipName());
+        if (!name) {
+            session.fail(argument, name.error());
+            continue;
+        }
+        auto result = extractZipEntry(session, *reader, entry, *name);
+        session.record(*name, result);
         if (!result && result.error().kind == ErrorKind::LimitExceeded) {
             return session.finish();
         }
