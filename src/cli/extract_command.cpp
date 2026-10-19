@@ -2,6 +2,7 @@
 #include "cli/archive_commands.hpp"
 #include "cli/filesystem_path.hpp"
 #include "cli/terminal_text.hpp"
+#include "cli/unlock.hpp"
 #include "formats/compressed/stream.hpp"
 #include "formats/sevenzip/reader.hpp"
 #include "formats/tar/reader.hpp"
@@ -444,14 +445,39 @@ extractBaleEntry(Session& session, archive::Reader& reader, const archive::Manif
     };
 }
 
-ExitCode extractBale(std::string_view argument, File file, Session& session) {
+ExitCode extractBale(
+    std::string_view argument,
+    File file,
+    Session& session,
+    const std::optional<std::string>& keyFile = std::nullopt
+) {
     auto reader = archive::Reader::open(std::move(file));
-    if (!reader) {
+    std::optional<archive::Reader> encrypted;
+    if (!reader && reader.error().kind == ErrorKind::PasswordRequired) {
+        auto unlock = buildUnlock(keyFile, true);
+        if (!unlock) {
+            return reportFailure(argument, unlock.error());
+        }
+        auto retry = File::openRead(pathFromUtf8(argument));
+        if (!retry) {
+            return reportFailure(argument, retry.error());
+        }
+        auto opened = archive::Reader::openEncrypted(
+            std::move(*retry),
+            archive::ReaderOptions{},
+            std::move(*unlock)
+        );
+        if (!opened) {
+            return reportFailure(argument, opened.error());
+        }
+        encrypted.emplace(std::move(*opened));
+    } else if (!reader) {
         return reportFailure(argument, reader.error());
     }
+    archive::Reader& active = encrypted ? *encrypted : *reader;
 
-    for (const auto& entry : reader->manifest().entries) {
-        auto result = extractBaleEntry(session, *reader, entry);
+    for (const auto& entry : active.manifest().entries) {
+        auto result = extractBaleEntry(session, active, entry);
         session.record(entry.path, result);
         if (!result && result.error().kind == ErrorKind::LimitExceeded) {
             break;
@@ -465,7 +491,8 @@ ExitCode extractBale(std::string_view argument, File file, Session& session) {
 ExitCode extractArchive(
     std::string_view argument,
     std::string_view destination,
-    const ExtractPolicy& policy
+    const ExtractPolicy& policy,
+    const std::optional<std::string>& keyFile
 ) {
     auto archive = openArchive(argument);
     if (!archive) {
@@ -483,7 +510,7 @@ ExitCode extractArchive(
     PathPolicy pathPolicy;
     if (archive->format.container == Container::Bale) {
         Session session(std::move(*extractor), destination, policy, pathPolicy);
-        return extractBale(argument, std::move(archive->file), session);
+        return extractBale(argument, std::move(archive->file), session, keyFile);
     }
     if (archive->format.container == Container::Zip) {
         pathPolicy.backslash = Backslash::Separator;
@@ -509,7 +536,7 @@ ExitCode extractArchive(
     );
 }
 
-ExitCode extractArchiveHere(std::string_view argument) {
+ExitCode extractArchiveHere(std::string_view argument, const std::optional<std::string>& keyFile) {
     auto archive = pathFromUtf8(argument);
     auto destination = archive.parent_path();
     if (destination.empty()) {
@@ -521,10 +548,11 @@ ExitCode extractArchiveHere(std::string_view argument) {
             return reportFailure(argument, failure);
         }
     }
-    return extractArchive(argument, pathToUtf8(destination), {});
+    return extractArchive(argument, pathToUtf8(destination), {}, keyFile);
 }
 
-ExitCode extractArchiveToFolder(std::string_view argument) {
+ExitCode
+extractArchiveToFolder(std::string_view argument, const std::optional<std::string>& keyFile) {
     auto archive = pathFromUtf8(argument);
     auto destination = archive.parent_path() / archive.stem();
     if (destination.empty()) {
@@ -533,7 +561,7 @@ ExitCode extractArchiveToFolder(std::string_view argument) {
             Error{.kind = ErrorKind::Malformed, .what = "archive has no output folder name"}
         );
     }
-    return extractArchive(argument, pathToUtf8(destination), {});
+    return extractArchive(argument, pathToUtf8(destination), {}, keyFile);
 }
 
 }

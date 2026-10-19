@@ -3,6 +3,7 @@
 #include "archive/reader.hpp"
 #include "cli/filesystem_path.hpp"
 #include "cli/terminal_text.hpp"
+#include "cli/unlock.hpp"
 #include "formats/compressed/stream.hpp"
 #include "formats/detect.hpp"
 #include "formats/sevenzip/reader.hpp"
@@ -272,13 +273,34 @@ ExitCode listTar(std::string_view argument, OpenedArchive archive, const ListOpt
 
 ExitCode listBale(std::string_view argument, File file, const ListOptions& options) {
     auto reader = archive::Reader::open(std::move(file));
-    if (!reader) {
+    std::optional<archive::Reader> encrypted;
+    if (!reader && reader.error().kind == ErrorKind::PasswordRequired) {
+        auto unlock = buildUnlock(options.keyFile, true);
+        if (!unlock) {
+            return reportFailure(argument, unlock.error());
+        }
+        // NOTE: reopen the file for the encrypted path; the moved-from File is unusable.
+        auto retry = File::openRead(pathFromUtf8(argument));
+        if (!retry) {
+            return reportFailure(argument, retry.error());
+        }
+        auto opened = archive::Reader::openEncrypted(
+            std::move(*retry),
+            archive::ReaderOptions{},
+            std::move(*unlock)
+        );
+        if (!opened) {
+            return reportFailure(argument, opened.error());
+        }
+        encrypted.emplace(std::move(*opened));
+    } else if (!reader) {
         return reportFailure(argument, reader.error());
     }
+    const archive::Reader& active = encrypted ? *encrypted : *reader;
 
     std::string escapedPath;
     std::string escapedTarget;
-    for (const auto& entry : reader->manifest().entries) {
+    for (const auto& entry : active.manifest().entries) {
         auto path = escapeForTerminal(entry.path, escapedPath);
         if (!options.detailed) {
             std::println("{}", path);
@@ -296,30 +318,55 @@ ExitCode listBale(std::string_view argument, File file, const ListOptions& optio
     return ExitCode::Ok;
 }
 
-ExitCode testBale(std::string_view argument, File file) {
+ExitCode testBale(
+    std::string_view argument,
+    File file,
+    const std::optional<std::string>& keyFile = std::nullopt
+) {
     auto reader = archive::Reader::open(std::move(file));
-    if (!reader) {
+    std::optional<archive::Reader> encrypted;
+    if (!reader && reader.error().kind == ErrorKind::PasswordRequired) {
+        auto unlock = buildUnlock(keyFile, true);
+        if (!unlock) {
+            return reportFailure(argument, unlock.error());
+        }
+        auto retry = File::openRead(pathFromUtf8(argument));
+        if (!retry) {
+            return reportFailure(argument, retry.error());
+        }
+        auto opened = archive::Reader::openEncrypted(
+            std::move(*retry),
+            archive::ReaderOptions{},
+            std::move(*unlock)
+        );
+        if (!opened) {
+            return reportFailure(argument, opened.error());
+        }
+        encrypted.emplace(std::move(*opened));
+    } else if (!reader) {
         return reportFailure(argument, reader.error());
     }
+    archive::Reader* activePtr = encrypted ? &*encrypted : &*reader;
+    archive::Reader& active = *activePtr;
 
-    auto report = reader->verify(archive::VerifyMode::Content);
+    auto report = active.verify(archive::VerifyMode::Content);
     if (!report) {
         return reportFailure(argument, report.error());
     }
 
     std::println(
         "ok: {} entries, {} chunks ({} bytes) match their BLAKE3 digests",
-        reader->manifest().entries.size(),
+        active.manifest().entries.size(),
         report->chunksVerified,
         report->bytesVerified
     );
     if (report->unindexedDataRecords != 0) {
         std::println("note: {} unreferenced data records", report->unindexedDataRecords);
     }
-    if (reader->ignoredTrailingBytes() != 0) {
+    if (active.ignoredTrailingBytes() != 0) {
         std::println(
             "note: ignored {} trailing bytes after the footer",
-            reader->ignoredTrailingBytes()
+            active.ignoredTrailingBytes()
         );
     }
     return ExitCode::Ok;
@@ -618,7 +665,7 @@ ExitCode listArchive(std::string_view argument, const ListOptions& options) {
     }
 }
 
-ExitCode testArchive(std::string_view argument) {
+ExitCode testArchive(std::string_view argument, const std::optional<std::string>& keyFile) {
     auto archive = openArchive(argument);
     if (!archive) {
         return reportFailure(argument, archive.error());
@@ -626,7 +673,7 @@ ExitCode testArchive(std::string_view argument) {
 
     switch (archive->format.container) {
     case Container::Bale:
-        return testBale(argument, std::move(archive->file));
+        return testBale(argument, std::move(archive->file), keyFile);
     case Container::Zip:
         return testZip(argument, std::move(archive->file));
     case Container::SevenZip:

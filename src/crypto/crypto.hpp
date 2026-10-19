@@ -86,4 +86,7 @@ wrapRecipientKey(std::span<const std::byte> key, std::span<const std::byte> publ
     std::span<const std::byte> secretKey
 );
 
+[[nodiscard]] Result<std::array<std::byte, publicKeySize>>
+publicKeyOf(std::span<const std::byte> secretKey);
+
 }

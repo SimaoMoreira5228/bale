@@ -1,4 +1,5 @@
 #include "cli/archive_commands.hpp"
+#include "cli/unlock.hpp"
 
 #include <charconv>
 #include <cstddef>
@@ -44,21 +45,25 @@ commands:
       --codec <raw|zstd|lz4|lzma2>  explicit chunk codec instead of a preset
       --codec <...> --level   zstd levels 1-22, lz4 levels 0-12, lzma2 levels 0-9
       --threads <1-64>        compression worker threads (default: CPU count, at most 8)
+      --experimental-encryption  emit experimental encrypted records (bale only)
+      --recipient <hex>       recipient X25519 public key, 64 hex chars (repeatable)
+      --key-file <path>       recipient secret keys for update/unlock (one hex key per line)
   update <archive.bale> <dir> [options]
       append a new snapshot of the directory, reusing unchanged chunks; takes create's options
   convert <input> <output> [--format <name>] [--level <n>]
       rewrite a bale, zip, tar or 7z archive entry by entry in another format
-  compact <archive.bale> <output.bale> [--sync]
+  compact <archive.bale> <output.bale> [--sync] [--experimental-encryption] [--key-file <path>]
       write the current snapshot to a new archive and keep the source
-  list <archive> [--long]   list entries, --long adds type, size and modification time
-  test <archive>            check archive structure and entry checksums
-  info <archive>            show the format and, for .bale, the recorded compression profile
+  list <archive> [--long] [--key-file <path>]   list entries, --long adds type, size and modification time
+  test <archive> [--key-file <path>]            check archive structure and entry checksums
+  info <archive> [--key-file <path>]            show the format and, for .bale, the recorded compression profile
   extract <archive> [options]
       -o, --output <dir>      extract into dir (default: current directory)
       --replace               replace existing regular files
       --skip-existing         keep existing files and skip those entries
       --allow-symlinks        create symlinks whose target stays inside the output
       --sync                  flush every file to disk before moving it into place
+      --key-file <path>       recipient secret keys for encrypted archives
   context add <path>         create <path>.bale from a file or directory
   context extract-here <archive.bale>
   context extract-folder <archive.bale>
@@ -79,9 +84,17 @@ int usageError(std::string_view message) {
 int runList(std::span<const std::string_view> arguments) {
     bale::cli::ListOptions options;
     std::string_view archive;
-    for (std::string_view argument : arguments) {
+    for (std::size_t index = 0; index < arguments.size(); ++index) {
+        std::string_view argument = arguments[index];
         if (argument == "--long" || argument == "-l") {
             options.detailed = true;
+            continue;
+        }
+        if (argument == "--key-file") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--key-file needs a path");
+            }
+            options.keyFile = std::string(arguments[++index]);
             continue;
         }
         if (argument.starts_with('-')) {
@@ -299,6 +312,30 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
             }
             continue;
         }
+        if (argument == "--experimental-encryption") {
+            options.experimentalEncryption = true;
+            continue;
+        }
+        if (argument == "--recipient") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--recipient needs a 64-hex-character key");
+            }
+            ++index;
+            auto parsed = bale::cli::parseRecipientHex(arguments[index]);
+            if (!parsed) {
+                return usageError("invalid --recipient key");
+            }
+            options.recipients.push_back(*parsed);
+            continue;
+        }
+        if (argument == "--key-file") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--key-file needs a path");
+            }
+            ++index;
+            options.keyFile = std::string(arguments[index]);
+            continue;
+        }
         if (argument.starts_with('-')) {
             return usageError(update ? "unknown option for update" : "unknown option for create");
         }
@@ -356,6 +393,13 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
         }
     } else if (cdcSizesSet) {
         return usageError("--chunk-min, --chunk-target and --chunk-max apply only to cdc");
+    }
+
+    if (!options.experimentalEncryption && !options.recipients.empty()) {
+        return usageError("--recipient requires --experimental-encryption");
+    }
+    if (options.experimentalEncryption && options.format != bale::cli::OutputFormat::Bale) {
+        return usageError("--experimental-encryption applies only to bale");
     }
 
     if (update) {
@@ -417,10 +461,24 @@ int runConvert(std::span<const std::string_view> arguments) {
 
 int runCompact(std::span<const std::string_view> arguments) {
     bool durable = false;
+    bool experimental = false;
+    std::optional<std::string> keyFile;
     std::vector<std::string_view> positional;
-    for (std::string_view argument : arguments) {
+    for (std::size_t index = 0; index < arguments.size(); ++index) {
+        std::string_view argument = arguments[index];
         if (argument == "--sync") {
             durable = true;
+            continue;
+        }
+        if (argument == "--experimental-encryption") {
+            experimental = true;
+            continue;
+        }
+        if (argument == "--key-file") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--key-file needs a path");
+            }
+            keyFile = std::string(arguments[++index]);
             continue;
         }
         if (argument.starts_with('-')) {
@@ -432,20 +490,42 @@ int runCompact(std::span<const std::string_view> arguments) {
     if (positional.size() != 2) {
         return usageError("compact takes a source archive and a new output path");
     }
-    return exitWith(bale::cli::compactArchive(positional[0], positional[1], durable));
+    return exitWith(
+        bale::cli::compactArchive(positional[0], positional[1], durable, experimental, keyFile)
+    );
 }
 
 int runTest(std::span<const std::string_view> arguments) {
-    if (arguments.size() != 1 || arguments[0].starts_with('-')) {
+    std::optional<std::string> keyFile;
+    std::string_view archive;
+    for (std::size_t index = 0; index < arguments.size(); ++index) {
+        std::string_view argument = arguments[index];
+        if (argument == "--key-file") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--key-file needs a path");
+            }
+            keyFile = std::string(arguments[++index]);
+            continue;
+        }
+        if (argument.starts_with('-')) {
+            return usageError("test takes an archive and --key-file");
+        }
+        if (!archive.empty()) {
+            return usageError("test takes exactly one archive");
+        }
+        archive = argument;
+    }
+    if (archive.empty()) {
         return usageError("test takes exactly one archive");
     }
-    return exitWith(bale::cli::testArchive(arguments[0]));
+    return exitWith(bale::cli::testArchive(archive, keyFile));
 }
 
 int runExtract(std::span<const std::string_view> arguments) {
     bale::ExtractPolicy policy;
     std::string_view archive;
     std::string_view output = ".";
+    std::optional<std::string> keyFile;
     for (std::size_t index = 0; index < arguments.size(); ++index) {
         std::string_view argument = arguments[index];
         if (argument == "-o" || argument == "--output") {
@@ -454,6 +534,13 @@ int runExtract(std::span<const std::string_view> arguments) {
             }
             ++index;
             output = arguments[index];
+            continue;
+        }
+        if (argument == "--key-file") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--key-file needs a path");
+            }
+            keyFile = std::string(arguments[++index]);
             continue;
         }
         if (argument == "--replace") {
@@ -484,7 +571,7 @@ int runExtract(std::span<const std::string_view> arguments) {
     if (archive.empty()) {
         return usageError("extract needs an archive");
     }
-    return exitWith(bale::cli::extractArchive(archive, output, policy));
+    return exitWith(bale::cli::extractArchive(archive, output, policy, keyFile));
 }
 
 int runContext(std::span<const std::string_view> arguments) {
@@ -571,10 +658,25 @@ int run(std::span<const std::string_view> argv) {
         return runConvert(rest);
     }
     if (command == "info") {
-        if (rest.size() != 1 || rest[0].starts_with('-')) {
+        std::optional<std::string> keyFile;
+        std::string_view archive;
+        for (std::size_t index = 0; index < rest.size(); ++index) {
+            if (rest[index] == "--key-file") {
+                if (index + 1 == rest.size()) {
+                    return usageError("--key-file needs a path");
+                }
+                keyFile = std::string(rest[++index]);
+                continue;
+            }
+            if (rest[index].starts_with('-') || !archive.empty()) {
+                return usageError("info takes exactly one archive and --key-file");
+            }
+            archive = rest[index];
+        }
+        if (archive.empty()) {
             return usageError("info takes exactly one archive");
         }
-        return exitWith(bale::cli::describeArchive(rest[0]));
+        return exitWith(bale::cli::describeArchive(archive, keyFile));
     }
     if (command == "test") {
         return runTest(rest);

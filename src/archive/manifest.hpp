@@ -40,11 +40,19 @@ struct ManifestEntry {
 struct Manifest {
     std::vector<ManifestEntry> entries;
     std::vector<ChunkKey> chunks;
+    // NOTE: empty for plain archives; parallel to chunks for encrypted archives, holding the
+    // NOTE: random object id per extent while chunks holds the plaintext BLAKE3 id for
+    // verification.
+    std::vector<std::array<std::byte, 32>> objectIds;
     std::string_view comment;
     WriterMetadata writer;
 
     [[nodiscard]] std::span<const ChunkKey> chunksOf(const ManifestEntry& entry) const {
         return std::span(chunks).subspan(entry.firstChunk, entry.chunkCount);
+    }
+
+    [[nodiscard]] bool encrypted() const {
+        return !objectIds.empty();
     }
 };
 

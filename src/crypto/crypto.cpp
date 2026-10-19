@@ -7,6 +7,7 @@
 #include <sodium/crypto_box.h>
 #include <sodium/crypto_pwhash.h>
 #include <sodium/crypto_pwhash_argon2id.h>
+#include <sodium/crypto_scalarmult.h>
 #include <sodium/randombytes.h>
 #include <sodium/utils.h>
 
@@ -175,6 +176,22 @@ Result<BoxKeyPair> makeKeyPair() {
         bytesOrDummy(pair.secretKey.mut())
     );
     return pair;
+}
+
+Result<std::array<std::byte, publicKeySize>> publicKeyOf(std::span<const std::byte> secretKey) {
+    if (auto init = ensureInit(); !init) {
+        return std::unexpected(init.error());
+    }
+    if (auto sized = requireSize(secretKey, secretKeySize, "recipient key must hold 32 bytes");
+        !sized) {
+        return std::unexpected(sized.error());
+    }
+    std::array<std::byte, publicKeySize> publicKey{};
+    crypto_scalarmult_base(
+        reinterpret_cast<unsigned char*>(publicKey.data()),
+        bytesOrDummy(secretKey)
+    );
+    return publicKey;
 }
 
 Result<std::vector<std::byte>> seal(

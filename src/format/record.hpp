@@ -48,7 +48,10 @@ inline constexpr std::size_t recordTrailerSize = 8;
 inline constexpr std::uint64_t recordFramingSize = recordPrefixSize + recordTrailerSize;
 
 inline constexpr std::uint16_t requiredRecordFlagMask = 0x00FF;
-inline constexpr std::uint16_t knownRequiredRecordFlags = 0;
+// NOTE: provisional experimental ENCRYPTED wire value; native format is unfrozen and later
+// builds may not read archives using it.
+inline constexpr std::uint16_t encryptedRecordFlag = 0x0001;
+inline constexpr std::uint16_t knownRequiredRecordFlags = encryptedRecordFlag;
 
 inline constexpr std::array recordMagic{
     std::byte{0x42},

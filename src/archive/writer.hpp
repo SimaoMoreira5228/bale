@@ -6,6 +6,7 @@
 #include "archive/manifest.hpp"
 #include "archive/writer_profile.hpp"
 #include "base/error.hpp"
+#include "crypto/crypto.hpp"
 #include "format/record.hpp"
 #include "fswalk/tree_walker.hpp"
 #include "io/file.hpp"
@@ -49,6 +50,25 @@ struct WriterOptions {
     Limits limits;
     bool durable = false;
     std::uint32_t workers = defaultWorkers();
+    // NOTE: provisional experimental gate; encrypted output is refused unless true.
+    bool experimentalEncryption = false;
+};
+
+struct WriterSecrets {
+    bool hasPassword = false;
+    crypto::SecretBytes password;
+    std::vector<std::array<std::byte, 32>> recipientPublicKeys;
+    crypto::KdfParams kdf = crypto::interactiveKdfParams();
+};
+
+struct ReaderUnlock {
+    bool hasPassword = false;
+    crypto::SecretBytes password;
+    struct RecipientKey {
+        std::array<std::byte, 32> publicKey{};
+        crypto::SecretBytes secretKey;
+    };
+    std::vector<RecipientKey> recipients;
 };
 
 struct WriteSummary {
@@ -62,9 +82,19 @@ struct WriteSummary {
 class Writer {
   public:
     [[nodiscard]] static Result<Writer> create(File file, const WriterOptions& options = {});
+    [[nodiscard]] static Result<Writer>
+    createEncrypted(File file, const WriterOptions& options, WriterSecrets&& secrets);
     [[nodiscard]] static Result<Writer> append(File file, const WriterOptions& options = {});
+    [[nodiscard]] static Result<Writer> appendEncrypted(
+        File file,
+        const WriterOptions& options,
+        WriterSecrets&& secrets,
+        ReaderUnlock&& unlock
+    );
     [[nodiscard]] static Result<WriteSummary>
     compact(File file, Reader& source, bool durable = false);
+    [[nodiscard]] static Result<WriteSummary>
+    compactEncrypted(File file, Reader& source, bool durable = false);
 
     Writer(Writer&& other) noexcept;
     Writer& operator=(Writer&& other) noexcept;
@@ -167,13 +197,16 @@ class Writer {
         std::span<const std::byte> head,
         std::span<const std::byte> body,
         CodecId codec = CodecId::Raw,
-        std::uint64_t decodedLength = 0
+        std::uint64_t decodedLength = 0,
+        std::uint16_t flags = 0
     );
+    [[nodiscard]] Result<RecordSpan> writeKeyslots();
     [[nodiscard]] Result<ChunkSlot*> acquireSlot();
     [[nodiscard]] Result<void> submitChunk(std::size_t size);
     [[nodiscard]] Result<void> pump(bool drain);
     [[nodiscard]] Result<void> handle(const PipelineEvent& event);
     [[nodiscard]] Result<void> appendChunk(ChunkSlot& slot);
+    [[nodiscard]] Result<void> appendChunkEncrypted(ChunkSlot& slot);
     [[nodiscard]] Result<void> failInOrder(const Error& error);
     [[nodiscard]] std::string_view nameAt(std::size_t offset, std::size_t size) const;
     [[nodiscard]] Result<void> sortEntries();
@@ -204,10 +237,19 @@ class Writer {
     std::string scratch_;
     std::vector<PendingEntry> entries_;
     std::vector<ChunkKey> chunks_;
+    std::vector<std::array<std::byte, 32>> objectIds_;
     std::vector<IndexEntry> index_;
     ChunkTable table_;
     std::vector<SkippedPath> skipped_;
     std::optional<OpenFile> openFile_;
+    bool encrypted_ = false;
+    std::uint64_t epoch_ = 0;
+    crypto::SecretBytes dataKey_;
+    std::vector<std::array<std::byte, 32>> recipientPubs_;
+    crypto::KdfParams kdf_ = crypto::interactiveKdfParams();
+    bool hasPassword_ = false;
+    crypto::SecretBytes password_;
+    std::array<std::byte, 16> archiveId_{};
 };
 
 }

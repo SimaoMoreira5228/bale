@@ -2,6 +2,7 @@
 
 #include "archive/chunk_pipeline.hpp"
 #include "archive/commit.hpp"
+#include "archive/encrypted.hpp"
 #include "archive/reader.hpp"
 #include "base/checked.hpp"
 #include "base/endian.hpp"
@@ -38,6 +39,10 @@ std::array<std::byte, 16> randomArchiveId() {
 std::int64_t currentTimeNanoseconds() {
     auto now = std::chrono::system_clock::now().time_since_epoch();
     return std::chrono::duration_cast<std::chrono::nanoseconds>(now).count();
+}
+
+std::span<const std::byte, 16> archiveIdSpan(const std::array<std::byte, 16>& id) {
+    return std::span<const std::byte, 16>(id.data(), 16);
 }
 
 }
@@ -102,6 +107,12 @@ Result<Writer> Writer::create(File file, const WriterOptions& options) {
     if (!valid) {
         return std::unexpected(valid.error());
     }
+    if (options.experimentalEncryption) {
+        return fail(
+            ErrorKind::Malformed,
+            "encrypted output requires createEncrypted with a password or recipient"
+        );
+    }
 
     Writer writer(std::move(file), options);
     auto started = writer.startPipeline();
@@ -126,6 +137,12 @@ Result<Writer> Writer::append(File file, const WriterOptions& options) {
     if (!valid) {
         return std::unexpected(valid.error());
     }
+    if (options.experimentalEncryption) {
+        return fail(
+            ErrorKind::Malformed,
+            "encrypted output requires appendEncrypted with a password or recipient"
+        );
+    }
 
     auto readFile = file.duplicate();
     if (!readFile) {
@@ -134,6 +151,9 @@ Result<Writer> Writer::append(File file, const WriterOptions& options) {
     auto reader = Reader::open(std::move(*readFile));
     if (!reader) {
         return std::unexpected(reader.error());
+    }
+    if ((reader->superblock().requiredFeatures & encryptedRequiredFeature) != 0) {
+        return fail(ErrorKind::PasswordRequired, "archive is encrypted");
     }
     auto verified = reader->verify(VerifyMode::Structure);
     if (!verified) {
@@ -265,11 +285,13 @@ Result<Writer::RecordSpan> Writer::writeRecord(
     std::span<const std::byte> head,
     std::span<const std::byte> body,
     CodecId codec,
-    std::uint64_t decodedLength
+    std::uint64_t decodedLength,
+    std::uint16_t flags
 ) {
     std::uint64_t payloadLength = std::uint64_t{head.size()} + body.size();
     RecordHeader header;
     header.type = type;
+    header.flags = flags;
     header.payloadLength = payloadLength;
     header.decodedLength = decodedLength == 0 ? payloadLength : decodedLength;
     header.sequence = sequence_;
@@ -456,6 +478,9 @@ Result<Writer::RecordSpan> Writer::writeManifest(Blake3Digest& digest) {
         entry.kind = pending.kind;
     }
     manifest.chunks = std::move(chunks_);
+    if (encrypted_) {
+        manifest.objectIds = std::move(objectIds_);
+    }
     manifest.comment = options_.comment;
     std::uint32_t chunkSize =
         options_.chunkPolicy == ChunkPolicy::Cdc ? options_.cdc.target : options_.chunkSize;
@@ -471,18 +496,39 @@ Result<Writer::RecordSpan> Writer::writeManifest(Blake3Digest& digest) {
 
     auto encoded = encodeManifest(manifest, payload_);
     chunks_ = std::move(manifest.chunks);
+    if (encrypted_) {
+        objectIds_ = std::move(manifest.objectIds);
+    }
     if (!encoded) {
         return std::unexpected(poison(encoded.error()).error());
     }
 
-    Manifest decoded;
-    auto valid = decodeManifest(payload_, 0, options_.limits, decoded);
-    if (!valid) {
-        return std::unexpected(poison(valid.error()).error());
+    if (!encrypted_) {
+        Manifest decoded;
+        auto valid = decodeManifest(payload_, 0, options_.limits, decoded);
+        if (!valid) {
+            return std::unexpected(poison(valid.error()).error());
+        }
+
+        digest = Blake3::of(HashDomain::Manifest, payload_);
+        return writeRecord(RecordType::Manifest, payload_, {});
     }
 
+    std::vector<std::byte> plain(payload_.begin(), payload_.end());
+    auto nonce = makeRecordNonce();
+    if (!nonce) {
+        return std::unexpected(poison(nonce.error()).error());
+    }
+    auto aad = manifestAad(archiveIdSpan(archiveId_), epoch_);
+    auto sealed = crypto::seal(dataKey_.bytes(), *nonce, plain, aad);
+    if (!sealed) {
+        return std::unexpected(poison(sealed.error()).error());
+    }
+    payload_.clear();
+    payload_.insert(payload_.end(), nonce->begin(), nonce->end());
+    payload_.insert(payload_.end(), sealed->begin(), sealed->end());
     digest = Blake3::of(HashDomain::Manifest, payload_);
-    return writeRecord(RecordType::Manifest, payload_, {});
+    return writeRecord(RecordType::Manifest, payload_, {}, CodecId::Raw, 0, encryptedRecordFlag);
 }
 
 Result<Writer::RecordSpan> Writer::writeIndex(Blake3Digest& digest) {
@@ -494,8 +540,25 @@ Result<Writer::RecordSpan> Writer::writeIndex(Blake3Digest& digest) {
         return std::unexpected(poison(encoded.error()).error());
     }
 
+    if (!encrypted_) {
+        digest = Blake3::of(HashDomain::Index, payload_);
+        return writeRecord(RecordType::Index, payload_, {});
+    }
+    std::vector<std::byte> plain(payload_.begin(), payload_.end());
+    auto nonce = makeRecordNonce();
+    if (!nonce) {
+        return std::unexpected(poison(nonce.error()).error());
+    }
+    auto aad = indexAad(archiveIdSpan(archiveId_), epoch_);
+    auto sealed = crypto::seal(dataKey_.bytes(), *nonce, plain, aad);
+    if (!sealed) {
+        return std::unexpected(poison(sealed.error()).error());
+    }
+    payload_.clear();
+    payload_.insert(payload_.end(), nonce->begin(), nonce->end());
+    payload_.insert(payload_.end(), sealed->begin(), sealed->end());
     digest = Blake3::of(HashDomain::Index, payload_);
-    return writeRecord(RecordType::Index, payload_, {});
+    return writeRecord(RecordType::Index, payload_, {}, CodecId::Raw, 0, encryptedRecordFlag);
 }
 
 Result<WriteSummary> Writer::finish() {
@@ -524,6 +587,10 @@ Result<WriteSummary> Writer::finish() {
     commit.generation = generation_;
     commit.previous = previousCommit_;
     commit.previousFooterOffset = previousFooterOffset_;
+    if (encrypted_) {
+        commit.requiredFeatures = encryptedCommitFeature;
+        commit.epoch = epoch_;
+    }
     auto manifest = writeManifest(commit.manifest.digest);
     if (!manifest) {
         return std::unexpected(manifest.error());
@@ -542,10 +609,73 @@ Result<WriteSummary> Writer::finish() {
     if (!encoded) {
         return std::unexpected(poison(encoded.error()).error());
     }
+    if (!encrypted_) {
+        auto commitDigest = Blake3::of(HashDomain::Commit, payload_);
+        auto record = writeRecord(RecordType::Commit, payload_, {});
+        if (!record) {
+            return std::unexpected(record.error());
+        }
+        auto flushed = flushOutput();
+        if (!flushed) {
+            return std::unexpected(flushed.error());
+        }
+
+        if (options_.durable) {
+            auto synced = file_.sync();
+            if (!synced) {
+                return std::unexpected(poison(synced.error()).error());
+            }
+        }
+
+        Footer footer;
+        footer.commitOffset = record->offset;
+        footer.commitLength = record->length;
+        footer.generation = commit.generation;
+        footer.commitDigest = commitDigest;
+        auto written = appendRaw(encodeFooter(footer));
+        if (!written) {
+            return std::unexpected(written.error());
+        }
+        flushed = flushOutput();
+        if (!flushed) {
+            return std::unexpected(flushed.error());
+        }
+
+        if (options_.durable) {
+            auto synced = file_.sync();
+            if (!synced) {
+                return std::unexpected(poison(synced.error()).error());
+            }
+        }
+
+        finished_ = true;
+        return WriteSummary{
+            .entries = entries_.size(),
+            .dataRecords = index_.size(),
+            .chunkReferences = chunks_.size(),
+            .contentBytes = contentBytes_,
+            .archiveSize = position_,
+        };
+    }
+
+    std::vector<std::byte> commitPlain(payload_.begin(), payload_.end());
+    auto commitNonce = makeRecordNonce();
+    if (!commitNonce) {
+        return std::unexpected(poison(commitNonce.error()).error());
+    }
+    auto commitAadBytes = commitAad(archiveIdSpan(archiveId_), epoch_);
+    auto commitSealed = crypto::seal(dataKey_.bytes(), *commitNonce, commitPlain, commitAadBytes);
+    if (!commitSealed) {
+        return std::unexpected(poison(commitSealed.error()).error());
+    }
+    payload_.clear();
+    payload_.insert(payload_.end(), commitNonce->begin(), commitNonce->end());
+    payload_.insert(payload_.end(), commitSealed->begin(), commitSealed->end());
     auto commitDigest = Blake3::of(HashDomain::Commit, payload_);
-    auto record = writeRecord(RecordType::Commit, payload_, {});
-    if (!record) {
-        return std::unexpected(record.error());
+    auto commitRecord =
+        writeRecord(RecordType::Commit, payload_, {}, CodecId::Raw, 0, encryptedRecordFlag);
+    if (!commitRecord) {
+        return std::unexpected(commitRecord.error());
     }
     auto flushed = flushOutput();
     if (!flushed) {
@@ -560,8 +690,8 @@ Result<WriteSummary> Writer::finish() {
     }
 
     Footer footer;
-    footer.commitOffset = record->offset;
-    footer.commitLength = record->length;
+    footer.commitOffset = commitRecord->offset;
+    footer.commitLength = commitRecord->length;
     footer.generation = commit.generation;
     footer.commitDigest = commitDigest;
     auto written = appendRaw(encodeFooter(footer));

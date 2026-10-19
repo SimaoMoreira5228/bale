@@ -2,7 +2,9 @@
 #include "cli/archive_commands.hpp"
 #include "cli/archive_output.hpp"
 #include "cli/filesystem_path.hpp"
+#include "cli/prompt.hpp"
 #include "cli/terminal_text.hpp"
+#include "cli/unlock.hpp"
 #include "fswalk/tree_walker.hpp"
 
 #include <filesystem>
@@ -70,6 +72,59 @@ ExitCode writeArchive(
     std::string_view directory,
     const CreateOptions& options
 ) {
+    if (options.experimentalEncryption) {
+        if (options.format != OutputFormat::Bale) {
+            return reportFailure(
+                archivePath,
+                Error{.kind = ErrorKind::Malformed, .what = "encryption only applies to bale"}
+            );
+        }
+        archive::WriterSecrets secrets;
+        secrets.recipientPublicKeys = options.recipients;
+        auto password = promptPassword("bale password: ");
+        if (password) {
+            secrets.hasPassword = true;
+            secrets.password = std::move(*password);
+        } else if (options.recipients.empty()) {
+            return reportFailure(archivePath, password.error());
+        } else {
+            std::println(stderr, "bale: no password prompt; using recipient slots only");
+        }
+        archive::WriterOptions writerOptions;
+        writerOptions.chunkSize = options.chunkSize;
+        writerOptions.chunkPolicy = options.chunkPolicy;
+        writerOptions.cdc = options.cdc;
+        writerOptions.compression = options.compression;
+        writerOptions.durable = options.durable;
+        writerOptions.workers = options.workers;
+        writerOptions.experimentalEncryption = true;
+        auto writer =
+            archive::Writer::createEncrypted(std::move(file), writerOptions, std::move(secrets));
+        if (!writer) {
+            return reportFailure(archivePath, writer.error());
+        }
+        auto added = writer->addTree(pathFromUtf8(directory), pathFromUtf8(archivePath));
+        reportSkipped(writer->skipped());
+        if (!added) {
+            return reportFailure(directory, added.error());
+        }
+        auto summary = writer->finish();
+        if (!summary) {
+            return reportFailure(archivePath, summary.error());
+        }
+        std::string escaped;
+        std::println(
+            "created {}: {} entries, {} bytes of content in {} unique of {} chunks, {} bytes total "
+            "(encrypted, experimental)",
+            escapeForTerminal(archivePath, escaped),
+            summary->entries,
+            summary->contentBytes,
+            summary->dataRecords,
+            summary->chunkReferences,
+            summary->archiveSize
+        );
+        return ExitCode::Ok;
+    }
     OutputOptions outputOptions;
     outputOptions.format = options.format;
     outputOptions.level = options.level;
@@ -156,6 +211,62 @@ ExitCode updateArchive(
     auto file = File::openAppend(pathFromUtf8(archivePath));
     if (!file) {
         return reportFailure(archivePath, file.error());
+    }
+
+    if (options.experimentalEncryption) {
+        archive::WriterSecrets secrets;
+        secrets.recipientPublicKeys = options.recipients;
+        auto password = promptPassword("bale password: ");
+        if (password) {
+            secrets.hasPassword = true;
+            secrets.password = std::move(*password);
+        } else if (options.recipients.empty()) {
+            return reportFailure(archivePath, password.error());
+        } else {
+            std::println(stderr, "bale: no password prompt; using recipient slots only");
+        }
+        auto unlock = buildUnlock(options.keyFile, options.recipients.empty());
+        if (!unlock) {
+            return reportFailure(archivePath, unlock.error());
+        }
+        archive::WriterOptions writerOptions;
+        writerOptions.chunkSize = options.chunkSize;
+        writerOptions.chunkPolicy = options.chunkPolicy;
+        writerOptions.cdc = options.cdc;
+        writerOptions.compression = options.compression;
+        writerOptions.durable = options.durable;
+        writerOptions.workers = options.workers;
+        writerOptions.experimentalEncryption = true;
+        auto writer = archive::Writer::appendEncrypted(
+            std::move(*file),
+            writerOptions,
+            std::move(secrets),
+            std::move(*unlock)
+        );
+        if (!writer) {
+            return reportFailure(archivePath, writer.error());
+        }
+        auto added = writer->addTree(pathFromUtf8(directory), pathFromUtf8(archivePath));
+        reportSkipped(writer->skipped());
+        if (!added) {
+            return reportFailure(directory, added.error());
+        }
+        auto summary = writer->finish();
+        if (!summary) {
+            return reportFailure(archivePath, summary.error());
+        }
+        std::string escaped;
+        std::println(
+            "updated {}: {} entries, {} bytes of content in {} unique of {} chunks, {} bytes total "
+            "(encrypted, experimental)",
+            escapeForTerminal(archivePath, escaped),
+            summary->entries,
+            summary->contentBytes,
+            summary->dataRecords,
+            summary->chunkReferences,
+            summary->archiveSize
+        );
+        return ExitCode::Ok;
     }
 
     archive::WriterOptions writerOptions;

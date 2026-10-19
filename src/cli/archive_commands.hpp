@@ -53,11 +53,13 @@ singleFileName(std::string_view archive, const CompressedStream& stream, std::st
 
 struct ListOptions {
     bool detailed = false;
+    std::optional<std::string> keyFile;
 };
 
 [[nodiscard]] ExitCode listArchive(std::string_view argument, const ListOptions& options);
 
-[[nodiscard]] ExitCode testArchive(std::string_view argument);
+[[nodiscard]] ExitCode
+testArchive(std::string_view argument, const std::optional<std::string>& keyFile = std::nullopt);
 
 struct CreateOptions {
     OutputFormat format = OutputFormat::Bale;
@@ -68,6 +70,9 @@ struct CreateOptions {
     archive::CompressionProfile compression = archive::profileFor(archive::Preset::Balanced);
     bool durable = false;
     std::uint32_t workers = archive::defaultWorkers();
+    bool experimentalEncryption = false;
+    std::vector<std::array<std::byte, 32>> recipients;
+    std::optional<std::string> keyFile;
 };
 
 [[nodiscard]] ExitCode createArchive(
@@ -82,8 +87,13 @@ struct CreateOptions {
     const CreateOptions& options
 );
 
-[[nodiscard]] ExitCode
-compactArchive(std::string_view archivePath, std::string_view outputPath, bool durable);
+[[nodiscard]] ExitCode compactArchive(
+    std::string_view archivePath,
+    std::string_view outputPath,
+    bool durable,
+    bool experimentalEncryption = false,
+    const std::optional<std::string>& keyFile = std::nullopt
+);
 
 struct ConvertOptions {
     OutputFormat format = OutputFormat::Bale;
@@ -93,17 +103,27 @@ struct ConvertOptions {
 [[nodiscard]] ExitCode
 convertArchive(std::string_view input, std::string_view output, const ConvertOptions& options);
 
-[[nodiscard]] ExitCode describeArchive(std::string_view argument);
+[[nodiscard]] ExitCode describeArchive(
+    std::string_view argument,
+    const std::optional<std::string>& keyFile = std::nullopt
+);
 
 [[nodiscard]] ExitCode createArchiveFromPath(std::string_view input);
 
 [[nodiscard]] ExitCode extractArchive(
     std::string_view argument,
     std::string_view destination,
-    const ExtractPolicy& policy
+    const ExtractPolicy& policy,
+    const std::optional<std::string>& keyFile = std::nullopt
 );
 
-[[nodiscard]] ExitCode extractArchiveHere(std::string_view argument);
-[[nodiscard]] ExitCode extractArchiveToFolder(std::string_view argument);
+[[nodiscard]] ExitCode extractArchiveHere(
+    std::string_view argument,
+    const std::optional<std::string>& keyFile = std::nullopt
+);
+[[nodiscard]] ExitCode extractArchiveToFolder(
+    std::string_view argument,
+    const std::optional<std::string>& keyFile = std::nullopt
+);
 
 }
