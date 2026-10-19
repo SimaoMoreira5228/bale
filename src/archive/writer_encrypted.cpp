@@ -132,8 +132,12 @@ Writer::createEncrypted(File file, const WriterOptions& options, WriterSecrets&&
 
     std::vector<Keyslot> slots;
     if (writer.hasPassword_) {
-        auto wrapped =
-            crypto::wrapPasswordKey(writer.dataKey_.bytes(), writer.password_.bytes(), writer.kdf_);
+        auto wrapped = crypto::wrapPasswordKey(
+            writer.dataKey_.bytes(),
+            writer.password_.bytes(),
+            writer.kdf_,
+            writer.epoch_
+        );
         if (!wrapped) {
             return std::unexpected(wrapped.error());
         }
@@ -239,8 +243,12 @@ Result<Writer> Writer::appendEncrypted(
 
     std::vector<Keyslot> slots;
     if (writer.hasPassword_) {
-        auto wrapped =
-            crypto::wrapPasswordKey(writer.dataKey_.bytes(), writer.password_.bytes(), writer.kdf_);
+        auto wrapped = crypto::wrapPasswordKey(
+            writer.dataKey_.bytes(),
+            writer.password_.bytes(),
+            writer.kdf_,
+            writer.epoch_
+        );
         if (!wrapped) {
             return std::unexpected(wrapped.error());
         }

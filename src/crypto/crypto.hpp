@@ -24,6 +24,15 @@ struct KdfParams {
     std::size_t memlimitBytes = 0;
 };
 
+// NOTE: bale-level KDF ceilings for password slots. The tree only ever emits INTERACTIVE
+// (opslimit 2, 64 MiB); MODERATE (3, 256 MiB) and SENSITIVE (4, 1 GiB) bound every
+// foreseeable tuning level. Memory is the allocation vector, so it stops exactly at the
+// SENSITIVE ceiling; ops gets 2x headroom because extra passes cost time, not allocation.
+// Anything above is corrupt or hostile: the opener pays the KDF cost, so every path below
+// rejects over-cap params before deriving.
+inline constexpr std::uint64_t maxSlotOpslimit = 8;
+inline constexpr std::size_t maxSlotMemlimitBytes = std::size_t{1} << 30;
+
 [[nodiscard]] KdfParams interactiveKdfParams();
 
 [[nodiscard]] KdfParams moderateKdfParams();
@@ -57,6 +66,7 @@ struct BoxKeyPair {
 );
 
 struct PasswordSlot {
+    std::uint64_t epoch = 0;
     std::array<std::byte, saltSize> salt{};
     std::uint64_t opslimit = 0;
     std::size_t memlimitBytes = 0;
@@ -67,7 +77,8 @@ struct PasswordSlot {
 [[nodiscard]] Result<PasswordSlot> wrapPasswordKey(
     std::span<const std::byte> key,
     std::span<const std::byte> password,
-    KdfParams params
+    KdfParams params,
+    std::uint64_t epoch
 );
 
 [[nodiscard]] Result<SecretBytes>

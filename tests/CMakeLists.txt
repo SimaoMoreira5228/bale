@@ -14,6 +14,7 @@ add_executable(bale_tests
     archive/cdc_test.cpp
     archive/compression_test.cpp
     archive/encrypted_test.cpp
+    archive/encrypted_attack_test.cpp
     archive/lzma2_chunk_test.cpp
     archive/pipeline_test.cpp
     archive/schema_test.cpp

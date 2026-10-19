@@ -33,6 +33,14 @@ bale formats
 
 Earlier snapshots stay in the file. `compact` writes the current snapshot and its referenced chunks to a new archive, leaving the source and its history alone.
 
+## Experimental encrypted archives
+
+Pass `--experimental-encryption` to `create` (bale only) to seal names, contents, sizes and counts under XChaCha20-Poly1305 with a password slot (Argon2id), an optional `--recipient` slot, or both. `update`, `compact`, `list`, `test`, `info` and `extract` take the same flag plus `--key-file` for recipient keys; the password still comes from the terminal. This is provisional: the wire values are not frozen, slot bytes just changed once already (the slot epoch is now bound into the seal), and a later build may not read these archives at all.
+
+Without the password nothing leaks beyond the format magic and a flag that says a password is needed: `list`, `test`, `info` and `extract` all stop at the password prompt (exit 6) before touching any entry. Slots that claim an Argon2id cost above ops 8 or 1 GiB of memory are rejected before any KDF work runs, and an archive holds at most 64 keyslots, so a hostile file cannot force unbounded derivation.
+
+Two known properties are pinned by tests so nobody "fixes" them into something worse. Truncating an archive back to a complete older generation opens cleanly as that generation with no warning; rollback detection is impossible in any append-only archive (plaintext behaves the same) and generations stay fully readable on purpose. And a wrong password (exit 6, password required) is deliberately distinct from a damaged archive (exit 5, integrity): merging them would only tell the user to retry a password when the file is actually corrupt.
+
 Names from the archive are escaped before they reach your terminal. A file called `\x1b[31m...` can't recolor your shell or hide behind a bidi override.
 
 Exit codes tell you what went wrong:
