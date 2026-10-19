@@ -13,6 +13,7 @@ enum class Container : std::uint8_t {
     Unknown,
     Bale,
     Zip,
+    SevenZip,
     Tar,
     SingleFile,
 };

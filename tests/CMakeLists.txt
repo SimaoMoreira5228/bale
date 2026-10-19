@@ -36,6 +36,7 @@ add_executable(bale_tests
     formats/tar/header_test.cpp
     formats/tar/reader_test.cpp
     formats/tar/writer_test.cpp
+    formats/sevenzip/reader_test.cpp
     formats/zip/reader_test.cpp
     formats/zip/writer_test.cpp
     formats/zstd/stream_test.cpp
@@ -55,6 +56,7 @@ target_link_libraries(bale_tests PRIVATE
     bale_format
     bale_formats_compressed
     bale_formats_gzip
+    bale_formats_sevenzip
     bale_formats_tar
     bale_formats_zip
     bale_formats_zstd

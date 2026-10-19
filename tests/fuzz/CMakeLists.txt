@@ -6,6 +6,7 @@ set(bale_fuzz_targets
     fuzz_gzip
     fuzz_native_archive
     fuzz_native_records
+    fuzz_sevenzip
     fuzz_tar
     fuzz_terminal_text
     fuzz_tlv
@@ -27,6 +28,7 @@ foreach(target IN LISTS bale_fuzz_targets)
         bale_formats_bzip2
         bale_formats_compressed
         bale_formats_gzip
+        bale_formats_sevenzip
         bale_formats_tar
         bale_formats_xz
         bale_formats_zip

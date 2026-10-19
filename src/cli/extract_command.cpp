@@ -3,6 +3,7 @@
 #include "cli/filesystem_path.hpp"
 #include "cli/terminal_text.hpp"
 #include "formats/compressed/stream.hpp"
+#include "formats/sevenzip/reader.hpp"
 #include "formats/tar/reader.hpp"
 #include "formats/zip/reader.hpp"
 #include "security/archive_path.hpp"
@@ -350,6 +351,65 @@ ExitCode extractZip(std::string_view argument, File file, Session& session) {
     }
 }
 
+[[nodiscard]] bool isSevenZipSymlink(const sevenzip::Entry& entry) {
+    constexpr std::uint32_t fileTypeMask = 0170000;
+    constexpr std::uint32_t symlinkType = 0120000;
+    return entry.mode && (*entry.mode & fileTypeMask) == symlinkType;
+}
+
+[[nodiscard]] Result<EntryResult>
+extractSevenZipEntry(Session& session, sevenzip::Reader& reader, const sevenzip::Entry& entry) {
+    auto path = session.path(entry.name);
+    if (!path) {
+        return std::unexpected(path.error());
+    }
+
+    EntryMetadata metadata{
+        .mode = entry.mode,
+        .mtimeNanoseconds = entry.mtimeNanoseconds,
+    };
+    if (path->directory || entry.directory) {
+        return session.extractor().createDirectory(*path, metadata);
+    }
+
+    if (isSevenZipSymlink(entry)) {
+        if (entry.size > maxSymlinkTargetBytes) {
+            return fail(ErrorKind::LimitExceeded, "symlink target too long");
+        }
+
+        std::string& target = session.linkTarget();
+        target.clear();
+        auto read = reader.streamEntry(entry, session.scratch(), [&target](auto chunk) {
+            target.append(reinterpret_cast<const char*>(chunk.data()), chunk.size());
+            return Result<void>{};
+        });
+        if (!read) {
+            return std::unexpected(read.error());
+        }
+        return session.extractor().createSymlink(*path, target, metadata);
+    }
+
+    return writeFile(session, *path, metadata, [&](auto&& sink) {
+        return reader.streamEntry(entry, session.scratch(), sink);
+    });
+}
+
+ExitCode extractSevenZip(std::string_view argument, File file, Session& session) {
+    auto reader = sevenzip::Reader::open(std::move(file));
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    for (const auto& entry : reader->entries()) {
+        auto result = extractSevenZipEntry(session, *reader, entry);
+        session.record(entry.name, result);
+        if (!result && result.error().kind == ErrorKind::LimitExceeded) {
+            return session.finish();
+        }
+    }
+    return session.finish();
+}
+
 [[nodiscard]] Result<EntryResult>
 extractBaleEntry(Session& session, archive::Reader& reader, const archive::ManifestEntry& entry) {
     auto path = session.path(entry.path);
@@ -430,12 +490,23 @@ ExitCode extractArchive(
         Session session(std::move(*extractor), destination, policy, pathPolicy);
         return extractZip(argument, std::move(archive->file), session);
     }
+    if (archive->format.container == Container::SevenZip) {
+        pathPolicy.backslash = Backslash::Separator;
+        Session session(std::move(*extractor), destination, policy, pathPolicy);
+        return extractSevenZip(argument, std::move(archive->file), session);
+    }
 
     Session session(std::move(*extractor), destination, policy, pathPolicy);
     if (archive->format.container == Container::SingleFile) {
         return extractSingleFile(argument, std::move(*archive), session);
     }
-    return extractTar(argument, std::move(*archive), session);
+    if (archive->format.container == Container::Tar) {
+        return extractTar(argument, std::move(*archive), session);
+    }
+    return reportFailure(
+        argument,
+        Error{.kind = ErrorKind::Unsupported, .what = "unrecognized archive format"}
+    );
 }
 
 ExitCode extractArchiveHere(std::string_view argument) {
