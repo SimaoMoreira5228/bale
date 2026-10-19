@@ -74,6 +74,8 @@ ExitCode writeArchive(
     outputOptions.format = options.format;
     outputOptions.level = options.level;
     outputOptions.native.chunkSize = options.chunkSize;
+    outputOptions.native.chunkPolicy = options.chunkPolicy;
+    outputOptions.native.cdc = options.cdc;
     outputOptions.native.compression = options.compression;
     outputOptions.native.durable = options.durable;
     outputOptions.native.workers = options.workers;
@@ -158,6 +160,8 @@ ExitCode updateArchive(
 
     archive::WriterOptions writerOptions;
     writerOptions.chunkSize = options.chunkSize;
+    writerOptions.chunkPolicy = options.chunkPolicy;
+    writerOptions.cdc = options.cdc;
     writerOptions.compression = options.compression;
     writerOptions.durable = options.durable;
     writerOptions.workers = options.workers;

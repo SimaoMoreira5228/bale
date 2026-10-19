@@ -14,6 +14,10 @@ constexpr std::uint32_t chunkPolicyField = 5;
 constexpr std::uint32_t chunkSizeField = 6;
 constexpr std::uint32_t reservedDictionaryField = 7;
 constexpr std::uint32_t workersField = 8;
+constexpr std::uint32_t chunkMinField = 9;
+constexpr std::uint32_t chunkTargetField = 10;
+constexpr std::uint32_t chunkMaxField = 11;
+constexpr std::uint32_t chunkAlgorithmField = 12;
 
 struct PresetPolicy {
     Preset preset;
@@ -106,13 +110,16 @@ std::optional<Preset> parsePreset(std::string_view name) {
 }
 
 bool WriterMetadata::empty() const {
-    return name.empty() && !preset && !codec && !level && !chunkPolicy && !chunkSize && !workers;
+    return name.empty() && !preset && !codec && !level && !chunkPolicy && !chunkSize && !workers &&
+        !chunkMin && !chunkTarget && !chunkMax && !chunkAlgorithm;
 }
 
 WriterMetadata describeWriter(
     std::string_view name,
     const CompressionProfile& compression,
+    ChunkPolicy policy,
     std::uint32_t chunkSize,
+    const CdcParams& cdc,
     std::uint32_t workers
 ) {
     WriterMetadata metadata;
@@ -122,10 +129,33 @@ WriterMetadata describeWriter(
     }
     metadata.codec = static_cast<std::uint64_t>(compression.codec);
     metadata.level = compression.level;
-    metadata.chunkPolicy = static_cast<std::uint64_t>(ChunkPolicy::Fixed);
+    metadata.chunkPolicy = static_cast<std::uint64_t>(policy);
     metadata.chunkSize = chunkSize;
     metadata.workers = workers;
+
+    if (policy == ChunkPolicy::Cdc) {
+        metadata.chunkMin = cdc.min;
+        metadata.chunkTarget = cdc.target;
+        metadata.chunkMax = cdc.max;
+        metadata.chunkAlgorithm = static_cast<std::uint64_t>(CdcAlgorithm::Gear);
+    }
     return metadata;
+}
+
+WriterMetadata describeWriter(
+    std::string_view name,
+    const CompressionProfile& compression,
+    std::uint32_t chunkSize,
+    std::uint32_t workers
+) {
+    return describeWriter(
+        name,
+        compression,
+        ChunkPolicy::Fixed,
+        chunkSize,
+        defaultCdcParams,
+        workers
+    );
 }
 
 Result<void> encodeWriterMetadata(
@@ -173,6 +203,22 @@ Result<void> encodeWriterMetadata(
     if (!workers) {
         return workers;
     }
+    auto chunkMin = putUnsigned(nested, chunkMinField, metadata.chunkMin);
+    if (!chunkMin) {
+        return chunkMin;
+    }
+    auto chunkTarget = putUnsigned(nested, chunkTargetField, metadata.chunkTarget);
+    if (!chunkTarget) {
+        return chunkTarget;
+    }
+    auto chunkMax = putUnsigned(nested, chunkMaxField, metadata.chunkMax);
+    if (!chunkMax) {
+        return chunkMax;
+    }
+    auto chunkAlgorithm = putUnsigned(nested, chunkAlgorithmField, metadata.chunkAlgorithm);
+    if (!chunkAlgorithm) {
+        return chunkAlgorithm;
+    }
 
     return writer.bytes(number, Criticality::Noncritical, scratch);
 }
@@ -190,7 +236,7 @@ Result<WriterMetadata> decodeWriterMetadata(const TlvField& field) {
             break;
         }
 
-        bool known = nested.number >= nameField && nested.number <= workersField &&
+        bool known = nested.number >= nameField && nested.number <= chunkAlgorithmField &&
             nested.number != reservedDictionaryField;
         if (!known) {
             auto skipped = skipUnknownField(nested);
@@ -237,6 +283,18 @@ Result<WriterMetadata> decodeWriterMetadata(const TlvField& field) {
             break;
         case chunkSizeField:
             metadata.chunkSize = *value;
+            break;
+        case chunkMinField:
+            metadata.chunkMin = *value;
+            break;
+        case chunkTargetField:
+            metadata.chunkTarget = *value;
+            break;
+        case chunkMaxField:
+            metadata.chunkMax = *value;
+            break;
+        case chunkAlgorithmField:
+            metadata.chunkAlgorithm = *value;
             break;
         default:
             metadata.workers = *value;

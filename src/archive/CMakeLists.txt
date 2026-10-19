@@ -1,4 +1,5 @@
 add_library(bale_archive STATIC
+    cdc.cpp
     chunk.cpp
     chunk_codec.cpp
     chunk_pipeline.cpp

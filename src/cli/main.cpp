@@ -35,7 +35,11 @@ commands:
       --level <n>             zip 0-9 (0 stores), tar.gz 1-9, tar.zst 1-22, bale: see --codec
       --sync                  flush the archive to disk before finishing
     native .bale only:
-      --chunk-size <n>        chunk size in bytes, K or M suffix allowed (default 1M)
+      --chunk-size <n>        chunk size in bytes, K or M suffix allowed (default 1M, fixed only)
+      --chunking <name>       fixed (default) or cdc content-defined chunking
+      --chunk-min <n>         cdc smallest chunk (default 256K)
+      --chunk-target <n>      cdc average chunk size (default 1M)
+      --chunk-max <n>         cdc largest chunk (default 4M)
       --preset <name>         fast, balanced (default), small, restore-fast or portable
       --codec <raw|zstd|lz4|lzma2>  explicit chunk codec instead of a preset
       --codec <...> --level   zstd levels 1-22, lz4 levels 0-12, lzma2 levels 0-9
@@ -164,10 +168,13 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
     std::optional<std::int32_t> explicitLevel;
     std::optional<bale::cli::OutputFormat> explicitFormat;
     std::string_view nativeOption;
+    bool chunkSizeSet = false;
+    bool cdcSizesSet = false;
     for (std::size_t index = 0; index < arguments.size(); ++index) {
         std::string_view argument = arguments[index];
         if (argument == "--chunk-size" || argument == "--threads" || argument == "--preset" ||
-            argument == "--codec") {
+            argument == "--codec" || argument == "--chunking" || argument == "--chunk-min" ||
+            argument == "--chunk-target" || argument == "--chunk-max") {
             nativeOption = argument;
         }
         if (argument == "--format") {
@@ -191,6 +198,41 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
                 return usageError("invalid --chunk-size");
             }
             options.chunkSize = *size;
+            chunkSizeSet = true;
+            continue;
+        }
+        if (argument == "--chunking") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--chunking needs fixed or cdc");
+            }
+            ++index;
+            if (arguments[index] == "fixed") {
+                options.chunkPolicy = bale::archive::ChunkPolicy::Fixed;
+            } else if (arguments[index] == "cdc") {
+                options.chunkPolicy = bale::archive::ChunkPolicy::Cdc;
+            } else {
+                return usageError("--chunking must be fixed or cdc");
+            }
+            continue;
+        }
+        if (argument == "--chunk-min" || argument == "--chunk-target" ||
+            argument == "--chunk-max") {
+            if (index + 1 == arguments.size()) {
+                return usageError("chunk bound needs a size");
+            }
+            ++index;
+            auto size = parseSize(arguments[index]);
+            if (!size) {
+                return usageError("invalid chunk bound");
+            }
+            if (argument == "--chunk-min") {
+                options.cdc.min = *size;
+            } else if (argument == "--chunk-target") {
+                options.cdc.target = *size;
+            } else {
+                options.cdc.max = *size;
+            }
+            cdcSizesSet = true;
             continue;
         }
         if (argument == "--sync") {
@@ -285,7 +327,10 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
 
     if (options.format != bale::cli::OutputFormat::Bale) {
         if (!nativeOption.empty()) {
-            return usageError("--chunk-size, --threads, --preset and --codec apply only to bale");
+            return usageError(
+                "--chunk-size, --chunking, --chunk-min, --chunk-target, --chunk-max, "
+                "--threads, --preset and --codec apply only to bale"
+            );
         }
         if (explicitLevel) {
             if (auto problem = bale::cli::checkOutputLevel(options.format, *explicitLevel)) {
@@ -299,6 +344,18 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
         }
         options.compression.level = *explicitLevel;
         options.compression.preset.reset();
+    }
+
+    if (options.chunkPolicy == bale::archive::ChunkPolicy::Cdc) {
+        if (chunkSizeSet) {
+            return usageError("--chunk-size applies only to fixed chunking");
+        }
+        auto valid = bale::archive::validateCdcParams(options.cdc);
+        if (!valid) {
+            return usageError(valid.error().what);
+        }
+    } else if (cdcSizesSet) {
+        return usageError("--chunk-min, --chunk-target and --chunk-max apply only to cdc");
     }
 
     if (update) {
