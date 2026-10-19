@@ -25,6 +25,7 @@ using bale::cli::ExitCode;
 
 constexpr std::int32_t defaultZstdLevel = 3;
 constexpr std::int32_t defaultLz4Level = 0;
+constexpr std::int32_t defaultLzma2Level = 6;
 
 constexpr std::string_view usage = R"(usage: bale <command> [arguments]
 
@@ -36,8 +37,8 @@ commands:
     native .bale only:
       --chunk-size <n>        chunk size in bytes, K or M suffix allowed (default 1M)
       --preset <name>         fast, balanced (default), small, restore-fast or portable
-      --codec <raw|zstd|lz4>  explicit chunk codec instead of a preset
-      --codec <...> --level   zstd levels 1-22, lz4 levels 0-12
+      --codec <raw|zstd|lz4|lzma2>  explicit chunk codec instead of a preset
+      --codec <...> --level   zstd levels 1-22, lz4 levels 0-12, lzma2 levels 0-9
       --threads <1-64>        compression worker threads (default: CPU count, at most 8)
   update <archive.bale> <dir> [options]
       append a new snapshot of the directory, reusing unchanged chunks; takes create's options
@@ -148,6 +149,11 @@ std::optional<std::string_view> checkLevel(bale::CodecId codec, std::int32_t lev
             return "--level must be between 0 and 12 for lz4";
         }
         return std::nullopt;
+    case bale::CodecId::Lzma2:
+        if (level < 0 || level > 9) {
+            return "--level must be between 0 and 9 for lzma2";
+        }
+        return std::nullopt;
     }
     return "codec has no levels";
 }
@@ -219,7 +225,7 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
         }
         if (argument == "--codec") {
             if (index + 1 == arguments.size()) {
-                return usageError("--codec needs raw, zstd or lz4");
+                return usageError("--codec needs raw, zstd, lz4 or lzma2");
             }
             ++index;
             if (arguments[index] == "raw") {
@@ -231,8 +237,11 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
             } else if (arguments[index] == "lz4") {
                 options.compression.codec = bale::CodecId::Lz4;
                 options.compression.level = defaultLz4Level;
+            } else if (arguments[index] == "lzma2") {
+                options.compression.codec = bale::CodecId::Lzma2;
+                options.compression.level = defaultLzma2Level;
             } else {
-                return usageError("--codec must be raw, zstd or lz4");
+                return usageError("--codec must be raw, zstd, lz4 or lzma2");
             }
             options.compression.preset.reset();
             continue;
@@ -469,7 +478,11 @@ int runFormats() {
     printFormat("zstd", false, "one compressed file, multi-frame, window up to 128 MiB");
     printFormat("xz", false, "one compressed file, multi-stream; memory capped at 256 MiB");
     printFormat("bzip2", false, "one compressed file, multi-stream; read as one stream");
-    printFormat("bale", true, "native format, raw and zstd chunks, presets; not frozen");
+    printFormat(
+        "bale",
+        true,
+        "native format, raw, zstd, lz4 and lzma2 chunks, presets; not frozen"
+    );
     return exitWith(ExitCode::Ok);
 }
 

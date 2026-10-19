@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 
 MEBIBYTE = 1 << 20
-DEFAULT_CODECS = ["raw", "lz4:0", "lz4:9", "zstd:1", "zstd:3", "zstd:9", "zstd:19", "deflate:1", "deflate:6", "deflate:9"]
+DEFAULT_CODECS = ["raw", "lz4:0", "lz4:9", "zstd:1", "zstd:3", "zstd:9", "zstd:19", "zstd:22", "lzma2:0", "lzma2:6", "lzma2:9", "deflate:1", "deflate:6", "deflate:9"]
 PRESETS = ["fast", "balanced", "small", "restore-fast", "portable"]
 
 
@@ -182,7 +182,7 @@ def parse_profile(text):
     if text in PRESETS or text == "raw":
         return text
     codec, _, level = text.partition(":")
-    if codec in ("zstd", "lz4") and level.lstrip("-").isdigit():
+    if codec in ("zstd", "lz4", "lzma2") and level.lstrip("-").isdigit():
         return text
     raise argparse.ArgumentTypeError(f"{text} is neither a preset nor a codec:level spec")
 
@@ -204,11 +204,68 @@ def end_to_end_run(arguments, work, preset, source, run):
     return archive_bytes, create_seconds, create_peak, extract_seconds, extract_peak
 
 
+def single_file_source(work, mebibytes):
+    import random
+
+    directory = work / f"single-{mebibytes}M"
+    directory.mkdir(parents=True, exist_ok=True)
+    source = directory / f"single-{mebibytes}M.bin"
+    rng = random.Random(20261019)
+    words = [f"word{n:04}" for n in range(4096)]
+    with open(source, "wb") as handle:
+        remaining = mebibytes * MEBIBYTE
+        while remaining > 0:
+            if rng.random() < 0.7:
+                block = " ".join(rng.choices(words, k=4096)).encode()
+            else:
+                block = rng.randbytes(65536)
+            block = block[:remaining]
+            handle.write(block)
+            remaining -= len(block)
+    return directory
+
+
+def single_file_results(arguments, work):
+    if not arguments.single_mib:
+        return []
+    source = single_file_source(work, arguments.single_mib)
+    input_bytes = directory_bytes(source)
+    rows = []
+    for preset in arguments.presets or PRESETS:
+        create_times = []
+        extract_times = []
+        create_peak = 0
+        extract_peak = 0
+        archive_bytes = 0
+        for run in range(arguments.e2e_runs):
+            measured = end_to_end_run(arguments, work, preset, source, run)
+            archive_bytes = measured[0]
+            create_times.append(measured[1])
+            create_peak = max(create_peak, measured[2] or 0)
+            extract_times.append(measured[3])
+            extract_peak = max(extract_peak, measured[4] or 0)
+        rows.append(
+            {
+                "target": f"single-{arguments.single_mib}M",
+                "preset": preset,
+                "input_bytes": input_bytes,
+                "archive_bytes": archive_bytes,
+                "create_seconds": spread(create_times),
+                "extract_seconds": spread(extract_times),
+                "create_peak_rss_kb": create_peak or None,
+                "extract_peak_rss_kb": extract_peak or None,
+            }
+        )
+        print(f"single-{arguments.single_mib}M {preset} done", file=sys.stderr)
+    return rows
+
+
 def end_to_end_results(arguments):
     rows = []
     arguments.work_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="bale-bench-", dir=arguments.work_dir) as directory:
         work = Path(directory)
+        rows = single_file_results(arguments, work)
         for target, source in end_to_end_targets(arguments.corpus):
             input_bytes = directory_bytes(source)
             for preset in arguments.presets or PRESETS:
@@ -340,6 +397,12 @@ def main():
         help="extra argument for bale create, repeatable (for example --create-arg=--threads --create-arg=4)",
     )
     parser.add_argument("--e2e-runs", type=int, default=3, help="repetitions of each end-to-end run")
+    parser.add_argument(
+        "--single-mib",
+        type=int,
+        default=0,
+        help="also time a generated single file of this many MiB per preset (single-file extraction latency)",
+    )
     parser.add_argument(
         "--work-dir",
         type=Path,

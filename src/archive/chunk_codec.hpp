@@ -5,6 +5,7 @@
 #include "codecs/decoders.hpp"
 #include "codecs/encoders.hpp"
 #include "codecs/lz4_frame.hpp"
+#include "codecs/lzma2.hpp"
 #include "format/record.hpp"
 
 #include <cstddef>
@@ -31,7 +32,7 @@ class ChunkEncoder {
     [[nodiscard]] Result<EncodedChunk> encode(std::span<const std::byte> chunk);
 
   private:
-    using Encoder = std::variant<std::monostate, ZstdEncoder, Lz4FrameEncoder>;
+    using Encoder = std::variant<std::monostate, ZstdEncoder, Lz4FrameEncoder, Lzma2Encoder>;
 
     Encoder encoder_;
     CodecId codec_ = CodecId::Raw;
@@ -47,8 +48,12 @@ class ChunkDecoder {
     [[nodiscard]] Result<void>
     decodeZstd(std::span<const std::byte> encoded, std::span<std::byte> output);
 
+    [[nodiscard]] Result<void>
+    decodeLzma2(std::span<const std::byte> encoded, std::span<std::byte> output);
+
     std::optional<ZstdDecoder> zstd_;
     std::optional<Lz4FrameDecoder> lz4_;
+    std::optional<XzDecoder> lzma2_;
 };
 
 }

@@ -1,5 +1,7 @@
 #include "archive/chunk_codec.hpp"
 
+#include "codecs/lzma2.hpp"
+
 #include <array>
 #include <utility>
 
@@ -30,6 +32,15 @@ ChunkEncoder::create(const CompressionProfile& profile, std::uint32_t chunkSize)
         chunkEncoder.buffer_.resize(Lz4FrameEncoder::compressBound(chunkSize));
         return chunkEncoder;
     }
+    case CodecId::Lzma2: {
+        auto encoder = Lzma2Encoder::create(profile.level);
+        if (!encoder) {
+            return std::unexpected(encoder.error());
+        }
+        chunkEncoder.encoder_.emplace<Lzma2Encoder>(std::move(*encoder));
+        chunkEncoder.buffer_.resize(Lzma2Encoder::compressBound(chunkSize));
+        return chunkEncoder;
+    }
     }
     return fail(ErrorKind::Unsupported, "writer codec not supported");
 }
@@ -40,6 +51,8 @@ Result<EncodedChunk> ChunkEncoder::encode(std::span<const std::byte> chunk) {
         compressed = zstd->compress(chunk, buffer_);
     } else if (auto* lz4 = std::get_if<Lz4FrameEncoder>(&encoder_)) {
         compressed = lz4->compress(chunk, buffer_);
+    } else if (auto* lzma2 = std::get_if<Lzma2Encoder>(&encoder_)) {
+        compressed = lzma2->compress(chunk, buffer_);
     }
     if (!compressed) {
         return std::unexpected(compressed.error());
@@ -64,6 +77,9 @@ Result<void> ChunkDecoder::decode(
 ) {
     if (codec == CodecId::Zstd) {
         return decodeZstd(encoded, output);
+    }
+    if (codec == CodecId::Lzma2) {
+        return decodeLzma2(encoded, output);
     }
     if (codec != CodecId::Lz4) {
         return fail(ErrorKind::Unsupported, "chunk codec not supported");
@@ -122,6 +138,57 @@ ChunkDecoder::decodeZstd(std::span<const std::byte> encoded, std::span<std::byte
 
     if (consumed != encoded.size() || produced != output.size()) {
         return fail(ErrorKind::Malformed, "zstd chunk size or frame boundary is invalid", consumed);
+    }
+    return {};
+}
+
+Result<void>
+ChunkDecoder::decodeLzma2(std::span<const std::byte> encoded, std::span<std::byte> output) {
+    if (!lzma2_) {
+        auto decoder = XzDecoder::create(XzLimits{.memLimitBytes = std::uint64_t{128} << 20});
+        if (!decoder) {
+            return std::unexpected(decoder.error());
+        }
+        lzma2_.emplace(std::move(*decoder));
+    }
+    auto reset = lzma2_->reset();
+    if (!reset) {
+        return reset;
+    }
+
+    std::size_t consumed = 0;
+    std::size_t produced = 0;
+    bool finished = false;
+    while (!finished) {
+        std::array<std::byte, 1> probe{};
+        bool full = produced == output.size();
+        std::span<std::byte> target = full ? std::span<std::byte>(probe) : output.subspan(produced);
+        auto step = lzma2_->decompress(encoded.subspan(consumed), target, true);
+        if (!step) {
+            auto error = step.error();
+            error.offset = consumed;
+            return std::unexpected(error);
+        }
+        if (full && step->produced != 0) {
+            return fail(ErrorKind::Malformed, "lzma2 chunk exceeds its declared size", consumed);
+        }
+        if (step->consumed == 0 && step->produced == 0 && !step->finished) {
+            return fail(ErrorKind::Malformed, "lzma2 decoder made no progress", consumed);
+        }
+
+        consumed += step->consumed;
+        if (!full) {
+            produced += step->produced;
+        }
+        finished = step->finished;
+    }
+
+    if (consumed != encoded.size() || produced != output.size()) {
+        return fail(
+            ErrorKind::Malformed,
+            "lzma2 chunk size or stream boundary is invalid",
+            consumed
+        );
     }
     return {};
 }

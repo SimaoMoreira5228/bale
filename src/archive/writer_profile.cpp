@@ -23,6 +23,10 @@ struct PresetPolicy {
 };
 
 // NOTE: levels chosen from bench/results/2026-10-18-*; read those summaries before changing one.
+// NOTE: lzma2 was measured against zstd:19 in bench/results/2026-10-19-xeon-e5-2690v3-lzma2 and
+// rejected for `small`: at most 1.8% smaller archives on mixed data, worse on code and small
+// files, for 2-3x slower end-to-end runs, ~9x slower single-file extraction and higher create
+// RSS. lzma2 stays an explicit --codec, not a preset.
 constexpr std::array presetPolicies{
     PresetPolicy{
         .preset = Preset::Fast,

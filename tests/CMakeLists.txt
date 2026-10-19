@@ -12,6 +12,7 @@ include(${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake)
 add_executable(bale_tests
     archive/archive_test.cpp
     archive/compression_test.cpp
+    archive/lzma2_chunk_test.cpp
     archive/pipeline_test.cpp
     archive/schema_test.cpp
     archive/snapshot_test.cpp
@@ -21,6 +22,7 @@ add_executable(bale_tests
     cli/single_file_test.cpp
     cli/terminal_text_test.cpp
     codecs/decoders_test.cpp
+    codecs/lzma2_test.cpp
     codecs/lz4_frame_test.cpp
     extract/extractor_test.cpp
     format/envelope_test.cpp
