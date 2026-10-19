@@ -27,6 +27,7 @@ using bale::cli::ExitCode;
 constexpr std::int32_t defaultZstdLevel = 3;
 constexpr std::int32_t defaultLz4Level = 0;
 constexpr std::int32_t defaultLzma2Level = 6;
+constexpr std::int32_t defaultBrotliLevel = 11;
 
 constexpr std::string_view usage = R"(usage: bale <command> [arguments]
 
@@ -42,8 +43,9 @@ commands:
       --chunk-target <n>      cdc average chunk size (default 1M)
       --chunk-max <n>         cdc largest chunk (default 4M)
       --preset <name>         fast, balanced (default), small, restore-fast or portable
-      --codec <raw|zstd|lz4|lzma2>  explicit chunk codec instead of a preset
-      --codec <...> --level   zstd levels 1-22, lz4 levels 0-12, lzma2 levels 0-9
+      --codec <raw|zstd|lz4|lzma2|brotli>  explicit chunk codec instead of a preset
+      --codec <...> --level   zstd levels 1-22, lz4 levels 0-12, lzma2 levels 0-9,
+                              brotli levels 0-11
       --threads <1-64>        compression worker threads (default: CPU count, at most 8)
       --experimental-encryption  emit experimental encrypted records (bale only)
       --recipient <hex>       recipient X25519 public key, 64 hex chars (repeatable)
@@ -171,6 +173,11 @@ std::optional<std::string_view> checkLevel(bale::CodecId codec, std::int32_t lev
             return "--level must be between 0 and 9 for lzma2";
         }
         return std::nullopt;
+    case bale::CodecId::Brotli:
+        if (level < 0 || level > 11) {
+            return "--level must be between 0 and 11 for brotli";
+        }
+        return std::nullopt;
     }
     return "codec has no levels";
 }
@@ -280,7 +287,7 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
         }
         if (argument == "--codec") {
             if (index + 1 == arguments.size()) {
-                return usageError("--codec needs raw, zstd, lz4 or lzma2");
+                return usageError("--codec needs raw, zstd, lz4, lzma2 or brotli");
             }
             ++index;
             if (arguments[index] == "raw") {
@@ -295,8 +302,11 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
             } else if (arguments[index] == "lzma2") {
                 options.compression.codec = bale::CodecId::Lzma2;
                 options.compression.level = defaultLzma2Level;
+            } else if (arguments[index] == "brotli") {
+                options.compression.codec = bale::CodecId::Brotli;
+                options.compression.level = defaultBrotliLevel;
             } else {
-                return usageError("--codec must be raw, zstd, lz4 or lzma2");
+                return usageError("--codec must be raw, zstd, lz4, lzma2 or brotli");
             }
             options.compression.preset.reset();
             continue;
@@ -630,7 +640,7 @@ int runFormats() {
     printFormat(
         "bale",
         true,
-        "native format, raw, zstd, lz4 and lzma2 chunks, presets; not frozen"
+        "native format, raw, zstd, lz4, lzma2 and brotli chunks, presets; not frozen"
     );
     return exitWith(ExitCode::Ok);
 }

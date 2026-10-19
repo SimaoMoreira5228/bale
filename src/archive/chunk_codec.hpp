@@ -2,6 +2,7 @@
 
 #include "archive/writer_profile.hpp"
 #include "base/error.hpp"
+#include "codecs/brotli.hpp"
 #include "codecs/decoders.hpp"
 #include "codecs/encoders.hpp"
 #include "codecs/lz4_frame.hpp"
@@ -32,7 +33,8 @@ class ChunkEncoder {
     [[nodiscard]] Result<EncodedChunk> encode(std::span<const std::byte> chunk);
 
   private:
-    using Encoder = std::variant<std::monostate, ZstdEncoder, Lz4FrameEncoder, Lzma2Encoder>;
+    using Encoder =
+        std::variant<std::monostate, ZstdEncoder, Lz4FrameEncoder, Lzma2Encoder, BrotliEncoder>;
 
     Encoder encoder_;
     CodecId codec_ = CodecId::Raw;
@@ -51,9 +53,13 @@ class ChunkDecoder {
     [[nodiscard]] Result<void>
     decodeLzma2(std::span<const std::byte> encoded, std::span<std::byte> output);
 
+    [[nodiscard]] Result<void>
+    decodeBrotli(std::span<const std::byte> encoded, std::span<std::byte> output);
+
     std::optional<ZstdDecoder> zstd_;
     std::optional<Lz4FrameDecoder> lz4_;
     std::optional<XzDecoder> lzma2_;
+    std::optional<BrotliDecoder> brotli_;
 };
 
 }

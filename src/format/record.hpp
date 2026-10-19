@@ -20,13 +20,17 @@ enum class RecordType : std::uint8_t {
 
 // NOTE: each ID names one exact stream per chunk: Zstd is one zstd frame; Lz4 is one LZ4 frame
 // (frame format v1.6.x) with independent blocks, the content size and no checksums or dictionary;
-// Lzma2 is one xz stream per chunk (liblzma easy encoder, CRC32 check).
+// Lzma2 is one xz stream per chunk (liblzma easy encoder, CRC32 check); Brotli is one brotli
+// stream per chunk (quality 0-11, default window, generic mode).
+// Appending Brotli as ID 4 keeps old readers failing clean: record framing decodes the ID as an
+// opaque number and the chunk decoder rejects what it does not know with Unsupported.
 // NOLINTNEXTLINE(performance-enum-size)
 enum class CodecId : std::uint32_t {
     Raw = 0,
     Zstd = 1,
     Lz4 = 2,
     Lzma2 = 3,
+    Brotli = 4,
 };
 
 [[nodiscard]] constexpr std::string_view codecName(CodecId codec) {
@@ -39,6 +43,8 @@ enum class CodecId : std::uint32_t {
         return "lz4";
     case CodecId::Lzma2:
         return "lzma2";
+    case CodecId::Brotli:
+        return "brotli";
     }
     return "unknown";
 }

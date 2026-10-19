@@ -2,7 +2,7 @@
 
 bale is two things that share one engine. It's an archive format of its own, built around content addressing, append-only snapshots and strict framing. It's also an archiver that reads and writes the formats you already have, ZIP and TAR (plain, gzip or zstd, plus reads of xz and bzip2) for now, with more on the way.
 
-It's early. The native format isn't frozen: `bale create` writes `.bale` files so the design can be tested, but a later build may not read them. Native archives use deduplicated, BLAKE3-verified chunks, compressed with zstd, LZ4 or LZMA2 unless a chunk would come out bigger, in which case it's stored as is.
+It's early. The native format isn't frozen: `bale create` writes `.bale` files so the design can be tested, but a later build may not read them. Native archives use deduplicated, BLAKE3-verified chunks, compressed with zstd, LZ4, LZMA2 or Brotli unless a chunk would come out bigger, in which case it's stored as is.
 
 ## What you can do with it right now
 
@@ -25,7 +25,7 @@ bale formats
 
 `extract` never writes outside the output directory. Paths with `..`, absolute paths, drive letters and Windows device names are refused. So are symlinks, unless you pass `--allow-symlinks`, and then only links that stay inside the output get created. Existing files are left alone unless you ask for `--replace` or `--skip-existing`. Every file is written to a temporary name first. It only moves into place once all of it is written and, if the format has a checksum, the checksum matches. A corrupt entry never shows up half-written under its real name.
 
-`create` and `update` take a preset: `fast`, `balanced` (the default), `small`, `restore-fast` or `portable`. `fast` and `restore-fast` use LZ4, which won both create and extract time against zstd in every measured group, at the cost of archives a fifth to over half bigger. The others are zstd at different levels. `small` is zstd:19 on purpose: LZMA2 was measured against it and lost (see `bench/results/2026-10-19-xeon-e5-2690v3-lzma2`), saving under 2% on mixed data while extracting several times slower, so LZMA2 stays opt-in. The names describe what you're after, not a guarantee that a preset wins on your data. If you want to experiment, `--codec raw|zstd|lz4|lzma2` and `--level N` (zstd 1-22, lz4 0-12, lzma2 0-9) pick the settings directly. Whatever you choose gets written into the snapshot, and `bale info` shows it back to you. Chunks are hashed and compressed on `--threads N` workers (default: one per CPU, at most 8); the archive comes out the same for any thread count apart from the recorded worker count. Chunking stays fixed at 1 MiB unless you pass `--chunking cdc`. Then cut points come from the file bytes, so inserting a byte near the start stops shifting every chunk after it. That costs roughly half the create speed and twice the create-time memory, and it only pays off on data with big shifted repeats: 56% smaller on the bench corpus's repeated group, no change anywhere else. The default 256K/1M/4M min/target/max triple is tuned for that trade; `--chunk-min`, `--chunk-target` and `--chunk-max` move it if your data wants bigger chunks.
+`create` and `update` take a preset: `fast`, `balanced` (the default), `small`, `restore-fast` or `portable`. `fast` and `restore-fast` use LZ4, which won both create and extract time against zstd in every measured group, at the cost of archives a fifth to over half bigger. The others are zstd at different levels. `small` is zstd:19 on purpose: LZMA2 was measured against it and lost (see `bench/results/2026-10-19-xeon-e5-2690v3-lzma2`), saving under 2% on mixed data while extracting several times slower, so LZMA2 stays opt-in. Brotli was measured the same way (see `bench/results/2026-10-19-xeon-e5-2690v3-brotli`): it does compress more than zstd:19 at quality 11 (notably source and structured data) but gives back only 0.2 of 14.5 MiB on mixed data for 8-9x slower creation, so Brotli stays opt-in too. The names describe what you're after, not a guarantee that a preset wins on your data. If you want to experiment, `--codec raw|zstd|lz4|lzma2|brotli` and `--level N` (zstd 1-22, lz4 0-12, lzma2 0-9, brotli 0-11) pick the settings directly. Whatever you choose gets written into the snapshot, and `bale info` shows it back to you. Chunks are hashed and compressed on `--threads N` workers (default: one per CPU, at most 8); the archive comes out the same for any thread count apart from the recorded worker count. Chunking stays fixed at 1 MiB unless you pass `--chunking cdc`. Then cut points come from the file bytes, so inserting a byte near the start stops shifting every chunk after it. That costs roughly half the create speed and twice the create-time memory, and it only pays off on data with big shifted repeats: 56% smaller on the bench corpus's repeated group, no change anywhere else. The default 256K/1M/4M min/target/max triple is tuned for that trade; `--chunk-min`, `--chunk-target` and `--chunk-max` move it if your data wants bigger chunks.
 
 `create` picks the format from the archive name (`.bale`, `.zip`, `.tar`, `.tar.gz` or `.tgz`, `.tar.zst` or `.tzst`); `--format` overrides it. ZIP entries are deflated unless deflate doesn't shrink them, in which case they're stored: entries up to 1 MiB are compressed in memory and compared exactly, larger ones decide on their first MiB. ZIP64 records only appear when sizes, offsets or the entry count need them. TAR output is POSIX ustar with pax headers only for long or non-ASCII names, big sizes and sub-second times. Output for the same tree is byte-identical across runs: entries are sorted and owner names are left out. `--level` takes 0-9 for zip (0 stores everything), 1-9 for tar.gz and 1-22 for tar.zst; presets, codecs, threads and chunk sizes only apply to `.bale`. `convert` rewrites a bale, ZIP or TAR archive entry by entry into any of those formats without unpacking it to disk.
 
@@ -60,7 +60,7 @@ Exit codes tell you what went wrong:
 
 ## Building
 
-You need CMake 3.25 or newer, a C++23 compiler (GCC 14+ or Clang 18+), and Ninja if you have it. zlib-ng, zstd, LZ4, BLAKE3, xz (liblzma), bzip2 and libsodium are fetched and pinned by hash on the first configure. Pass `-DBALE_USE_SYSTEM_CODECS=ON` to use the copies your system already has.
+You need CMake 3.25 or newer, a C++23 compiler (GCC 14+ or Clang 18+), and Ninja if you have it. zlib-ng, zstd, LZ4, BLAKE3, xz (liblzma), bzip2, brotli and libsodium are fetched and pinned by hash on the first configure. Pass `-DBALE_USE_SYSTEM_CODECS=ON` to use the copies your system already has.
 
 ```sh
 ./dev build
@@ -99,7 +99,7 @@ src/base       errors, checked arithmetic, byte order
 src/io         bounded byte reader, positional file I/O
 src/fswalk     sorted, non-following directory walk shared by every writer
 src/checksum   CRC-32, CRC32C and domain-separated BLAKE3
-src/codecs     DEFLATE, zstd and LZ4 frame encoders and decoders
+src/codecs     DEFLATE, zstd, LZ4 frame, LZMA2, xz and brotli encoders and decoders
 src/format     native wire format: ULEB128, canonical TLV, superblock, records, footer
 src/archive    native archive: chunk, manifest, index and commit schemas, writer, reader
 src/formats    ZIP, TAR, gzip and zstd readers and writers, format detection
@@ -111,4 +111,4 @@ tests          one doctest suite, organised the same way
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE). Bundled codecs keep their own licenses: zlib-ng under the zlib license, zstd and LZ4 under BSD, BLAKE3 under CC0 or Apache-2.0, liblzma under 0BSD, bzip2 under its BSD-style license, libsodium under the ISC license.
+Apache-2.0. See [LICENSE](LICENSE). Bundled codecs keep their own licenses: zlib-ng under the zlib license, zstd and LZ4 under BSD, BLAKE3 under CC0 or Apache-2.0, liblzma under 0BSD, bzip2 under its BSD-style license, brotli under the MIT license, libsodium under the ISC license.

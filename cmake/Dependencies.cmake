@@ -10,6 +10,7 @@ add_library(bale_lz4 INTERFACE)
 add_library(bale_blake3 INTERFACE)
 add_library(bale_lzma INTERFACE)
 add_library(bale_bz2 INTERFACE)
+add_library(bale_brotli INTERFACE)
 add_library(bale_sodium INTERFACE)
 
 if(BALE_USE_SYSTEM_CODECS)
@@ -86,6 +87,15 @@ if(BALE_USE_SYSTEM_CODECS)
     endif()
 
     if(PkgConfig_FOUND)
+        pkg_check_modules(
+            BALE_SYSTEM_BROTLI REQUIRED IMPORTED_TARGET libbrotlienc>=1.0.0 libbrotlidec>=1.0.0
+        )
+        target_link_libraries(bale_brotli INTERFACE PkgConfig::BALE_SYSTEM_BROTLI)
+    else()
+        message(FATAL_ERROR "BALE_USE_SYSTEM_CODECS: brotli not found")
+    endif()
+
+    if(PkgConfig_FOUND)
         pkg_check_modules(BALE_SYSTEM_SODIUM REQUIRED IMPORTED_TARGET libsodium>=1.0.18)
         target_link_libraries(bale_sodium INTERFACE PkgConfig::BALE_SYSTEM_SODIUM)
     else()
@@ -123,6 +133,15 @@ FetchContent_Declare(blake3
 FetchContent_Declare(xz
     URL https://github.com/tukaani-project/xz/releases/download/v5.8.4/xz-5.8.4.tar.gz
     URL_HASH SHA256=0014c7886930454fe8bd4228665b51af55eeae560ea135c9c4cd33f55b2591d9
+    SYSTEM
+)
+# NOTE: brotli 1.2.0 (MIT, https://github.com/google/brotli/releases/tag/v1.2.0).
+# Upstream ships a first-party CMake build, so bale pins the release tarball by hash
+# and builds only the C libraries statically. The Java/Python bindings, the `brotli`
+# tool and the round-trip tests stay out via BROTLI_BUILD_TOOLS=OFF below.
+FetchContent_Declare(brotli
+    URL https://github.com/google/brotli/archive/refs/tags/v1.2.0.tar.gz
+    URL_HASH SHA256=816c96e8e8f193b40151dad7e8ff37b1221d019dbcb9c35cd3fadbfe6477dfec
     SYSTEM
 )
 
@@ -183,7 +202,13 @@ block(SCOPE_FOR VARIABLES)
     # -fsanitize, which would needlessly break sanitizer builds (./dev sanitize).
     set(XZ_SANDBOX no)
 
-    FetchContent_MakeAvailable(zlib_ng zstd lz4 blake3 xz)
+    # NOTE: only the brotli libraries are needed; the command line tool, the Java and
+    # Python bindings and the test data stay out of the build. BROTLI_DISABLE_TESTS
+    # gates brotli's own CTest round trips separately from BUILD_TESTING.
+    set(BROTLI_BUILD_TOOLS OFF)
+    set(BROTLI_DISABLE_TESTS ON)
+
+    FetchContent_MakeAvailable(zlib_ng zstd lz4 blake3 xz brotli)
 endblock()
 
 # NOTE: bzip2 ships no CMake build, so bale verifies the tarball by hash and compiles
@@ -217,6 +242,11 @@ target_link_libraries(bale_blake3 INTERFACE BLAKE3::blake3)
 FetchContent_GetProperties(xz SOURCE_DIR XZ_SOURCE_DIR)
 target_include_directories(bale_lzma SYSTEM INTERFACE ${XZ_SOURCE_DIR}/src/liblzma/api)
 target_link_libraries(bale_lzma INTERFACE liblzma)
+
+# NOTE: with BUILD_SHARED_LIBS off the brotli targets above are static archives;
+# decoding never enables the large-window extension, so the ring buffer stays
+# within the RFC 7932 window of at most 2^24 bytes.
+target_link_libraries(bale_brotli INTERFACE brotlienc brotlidec brotlicommon)
 
 # NOTE: libsodium 1.0.20-stable (ISC, https://download.libsodium.org/libsodium/releases).
 # Upstream ships autotools configure plus Visual Studio projects and no first-party
