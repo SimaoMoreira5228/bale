@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -21,6 +22,27 @@ void decodeChunk(bale::CodecId codec, std::span<const std::byte> encoded, std::s
     std::vector<std::byte> output(length);
     static_cast<void>(decoder.decode(codec, encoded, output));
 }
+
+struct XzRunDecoder {
+    bale::XzDecoder decoder;
+
+    [[nodiscard]] static std::optional<XzRunDecoder> create() {
+        auto decoder = bale::XzDecoder::create();
+        if (!decoder) {
+            return std::nullopt;
+        }
+        return XzRunDecoder{std::move(*decoder)};
+    }
+
+    [[nodiscard]] bale::Result<bale::DecodeStep>
+    decompress(std::span<const std::byte> input, std::span<std::byte> output) {
+        return decoder.decompress(input, output, false);
+    }
+
+    [[nodiscard]] bale::Result<void> reset() {
+        return decoder.reset();
+    }
+};
 
 template <typename Decoder>
 void decodeStream(Decoder& decoder, std::span<const std::byte> input, std::size_t window) {
@@ -56,7 +78,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     auto body = input.subspan(headerSize);
     std::size_t window = 1 + length % 4096;
 
-    switch (selector % 4) {
+    switch (selector % 6) {
     case 0:
         decodeChunk(bale::CodecId::Zstd, body, length);
         break;
@@ -70,10 +92,24 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         }
         break;
     }
-    default: {
+    case 3: {
         static auto zstd = bale::ZstdDecoder::create();
         if (zstd && zstd->reset()) {
             decodeStream(*zstd, body, window);
+        }
+        break;
+    }
+    case 4: {
+        static auto bzip2 = bale::Bzip2Decoder::create();
+        if (bzip2 && bzip2->reset()) {
+            decodeStream(*bzip2, body, window);
+        }
+        break;
+    }
+    default: {
+        static auto xz = XzRunDecoder::create();
+        if (xz && xz->reset()) {
+            decodeStream(*xz, body, window);
         }
         break;
     }

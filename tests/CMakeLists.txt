@@ -25,6 +25,8 @@ add_executable(bale_tests
     extract/extractor_test.cpp
     format/envelope_test.cpp
     format/tlv_test.cpp
+    formats/bzip2/stream_test.cpp
+    formats/xz/stream_test.cpp
     fswalk/tree_walker_test.cpp
     formats/detect_test.cpp
     formats/gzip/stream_test.cpp
@@ -57,7 +59,9 @@ target_link_libraries(bale_tests PRIVATE
     bale_fswalk
     bale_io
     bale_security
+    bale_bz2
     bale_lz4
+    bale_lzma
     bale_warnings
     bale_zlib_ng
     bale_zstd

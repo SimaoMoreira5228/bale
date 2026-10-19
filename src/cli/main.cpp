@@ -463,8 +463,12 @@ int runFormats() {
     printFormat("tar", true, "ustar, pax, GNU long names; no sparse files");
     printFormat("tar.gz", true, "tar inside gzip, recognized by content; read as one stream");
     printFormat("tar.zst", true, "tar inside zstd, recognized by content; read as one stream");
+    printFormat("tar.xz", false, "tar inside xz, recognized by content; read as one stream");
+    printFormat("tar.bz2", false, "tar inside bzip2, recognized by content; read as one stream");
     printFormat("gzip", false, "one compressed file, multi-member; named by FNAME or archive name");
     printFormat("zstd", false, "one compressed file, multi-frame, window up to 128 MiB");
+    printFormat("xz", false, "one compressed file, multi-stream; memory capped at 256 MiB");
+    printFormat("bzip2", false, "one compressed file, multi-stream; read as one stream");
     printFormat("bale", true, "native format, raw and zstd chunks, presets; not frozen");
     return exitWith(ExitCode::Ok);
 }

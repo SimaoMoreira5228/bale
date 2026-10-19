@@ -1,7 +1,9 @@
 #pragma once
 
 #include "base/error.hpp"
+#include "formats/bzip2/stream.hpp"
 #include "formats/gzip/stream.hpp"
+#include "formats/xz/stream.hpp"
 #include "formats/zstd/stream.hpp"
 #include "io/chunk_sink.hpp"
 #include "io/file.hpp"
@@ -17,6 +19,8 @@ enum class Compression : std::uint8_t {
     None,
     Gzip,
     Zstd,
+    Xz,
+    Bzip2,
 };
 
 struct DecompressLimits {
@@ -56,7 +60,7 @@ class CompressedStream {
     }
 
   private:
-    using Codec = std::variant<gzip::Stream, zstd::Stream>;
+    using Codec = std::variant<gzip::Stream, zstd::Stream, xz::Stream, bzip2::Stream>;
 
     explicit CompressedStream(Codec codec) : codec_(std::move(codec)) {
     }

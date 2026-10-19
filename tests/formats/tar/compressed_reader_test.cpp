@@ -54,7 +54,13 @@ Bytes compress(const Bytes& data, Compression compression) {
     if (compression == Compression::Gzip) {
         return bale::test::gzipMember(data);
     }
-    return bale::test::zstdCompress(data, 20);
+    if (compression == Compression::Zstd) {
+        return bale::test::zstdCompress(data, 20);
+    }
+    if (compression == Compression::Xz) {
+        return bale::test::xzCompress(data);
+    }
+    return bale::test::bzip2Compress(data);
 }
 
 Bytes slice(const Bytes& bytes, std::size_t begin, std::size_t end) {
@@ -127,9 +133,10 @@ ErrorKind finalError(Reader& reader) {
 
 }
 
-TEST_CASE("Compressed tar round trips through gzip and zstd") {
+TEST_CASE("Compressed tar round trips through every compressed stream") {
     auto tar = sampleTar();
-    for (auto compression : {Compression::Gzip, Compression::Zstd}) {
+    for (auto compression :
+         {Compression::Gzip, Compression::Zstd, Compression::Xz, Compression::Bzip2}) {
         for (std::size_t chunk : {std::size_t{700}, std::size_t{64} << 10}) {
             CAPTURE(compression);
             CAPTURE(chunk);
@@ -186,7 +193,8 @@ TEST_CASE("Sequential reader skips unread and partly read entry data") {
 
 TEST_CASE("Compressed tar truncated mid-entry is reported as truncated") {
     auto tar = sampleTar();
-    for (auto compression : {Compression::Gzip, Compression::Zstd}) {
+    for (auto compression :
+         {Compression::Gzip, Compression::Zstd, Compression::Xz, Compression::Bzip2}) {
         CAPTURE(compression);
         auto bytes = compress(slice(tar, 0, 10'000), compression);
         auto rest = compress(slice(tar, 10'000, tar.size()), compression);

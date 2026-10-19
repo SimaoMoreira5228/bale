@@ -1,8 +1,10 @@
 #include "formats/detect.hpp"
 
 #include "format/envelope.hpp"
+#include "formats/bzip2/stream.hpp"
 #include "formats/gzip/header.hpp"
 #include "formats/tar/header.hpp"
+#include "formats/xz/stream.hpp"
 #include "formats/zip/reader.hpp"
 #include "formats/zstd/stream.hpp"
 
@@ -83,10 +85,26 @@ std::string_view name(ArchiveFormat format) {
             return "tar.gz";
         case Compression::Zstd:
             return "tar.zst";
+        case Compression::Xz:
+            return "tar.xz";
+        case Compression::Bzip2:
+            return "tar.bz2";
         }
         return "tar";
     case Container::SingleFile:
-        return format.compression == Compression::Gzip ? "gzip" : "zstd";
+        switch (format.compression) {
+        case Compression::None:
+            return "single";
+        case Compression::Gzip:
+            return "gzip";
+        case Compression::Zstd:
+            return "zstd";
+        case Compression::Xz:
+            return "xz";
+        case Compression::Bzip2:
+            return "bzip2";
+        }
+        return "single";
     }
     return "unknown";
 }
@@ -119,6 +137,12 @@ Result<ArchiveFormat> detectFormat(const File& file) {
     }
     if (zstd::looksLikeZstd(headBytes)) {
         return compressed(file, Compression::Zstd);
+    }
+    if (xz::looksLikeXz(headBytes)) {
+        return compressed(file, Compression::Xz);
+    }
+    if (bzip2::looksLikeBzip2(headBytes)) {
+        return compressed(file, Compression::Bzip2);
     }
 
     auto tailSize = static_cast<std::size_t>(std::min<std::uint64_t>(*size, zip::maxEndSearch));

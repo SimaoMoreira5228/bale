@@ -99,6 +99,14 @@ def round_trip(name, work, source, archive_name, payload):
     expect_exit(f"{name} list", listed, EXIT_OK)
     check(f"{name} list", "docs/deep/random.bin" in listed.stdout, listed.stdout)
 
+    converted = work / (archive_name + ".converted")
+    expect_exit(
+        f"{name} convert to tar",
+        run("convert", "--format", "tar", archive, converted, cwd=work),
+        EXIT_OK,
+    )
+    check(f"{name} converted", tar_members(converted, "r:") == expected_members(source))
+
     expect_exit(f"{name} extract", run("extract", archive, "-o", output, cwd=work), EXIT_OK)
     check(f"{name} contents", same_tree(source, output), "extracted tree differs")
 
@@ -106,6 +114,8 @@ def round_trip(name, work, source, archive_name, payload):
 def test_round_trips(work, source):
     round_trip("tar", work, source, "plain.tar", tar_bytes(source, "w"))
     round_trip("tar.gz", work, source, "packed.tgz", tar_bytes(source, "w:gz"))
+    round_trip("tar.xz", work, source, "packed.tar.xz", tar_bytes(source, "w:xz"))
+    round_trip("tar.bz2", work, source, "packed.tar.bz2", tar_bytes(source, "w:bz2"))
     round_trip("zip stored", work, source, "stored.zip", zip_bytes(source, zipfile.ZIP_STORED))
     round_trip("zip deflate", work, source, "deflate.zip", zip_bytes(source, zipfile.ZIP_DEFLATED))
     if zstd is not None:
@@ -262,6 +272,38 @@ def test_single_gzip(work):
         check("gzip contents", extracted[0].read_bytes() == b"just one file\n" * 100)
 
 
+def test_single_xz(work):
+    import lzma
+
+    archive = work / "note.txt.xz"
+    archive.write_bytes(lzma.compress(b"just one file\n" * 100, preset=6))
+    output = work / "xz.out"
+    expect_exit("xz list", run("list", archive, cwd=work), EXIT_OK)
+    expect_exit("xz test", run("test", archive, cwd=work), EXIT_OK)
+    expect_exit("xz extract", run("extract", archive, "-o", output, cwd=work), EXIT_OK)
+    extracted = list(output.iterdir())
+    check("xz extract", len(extracted) == 1, str(extracted))
+    if extracted:
+        check("xz names", extracted[0].name == "note.txt", str(extracted))
+        check("xz contents", extracted[0].read_bytes() == b"just one file\n" * 100)
+
+
+def test_single_bz2(work):
+    import bz2
+
+    archive = work / "note.txt.bz2"
+    archive.write_bytes(bz2.compress(b"just one file\n" * 100, compresslevel=9))
+    output = work / "bz2.out"
+    expect_exit("bzip2 list", run("list", archive, cwd=work), EXIT_OK)
+    expect_exit("bzip2 test", run("test", archive, cwd=work), EXIT_OK)
+    expect_exit("bzip2 extract", run("extract", archive, "-o", output, cwd=work), EXIT_OK)
+    extracted = list(output.iterdir())
+    check("bzip2 extract", len(extracted) == 1, str(extracted))
+    if extracted:
+        check("bzip2 names", extracted[0].name == "note.txt", str(extracted))
+        check("bzip2 contents", extracted[0].read_bytes() == b"just one file\n" * 100)
+
+
 def test_hostile_tar(work):
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w", format=tarfile.PAX_FORMAT) as archive:
@@ -341,6 +383,32 @@ def test_truncated_tgz(work, source):
     archive = work / "cut.tgz"
     archive.write_bytes(payload[: len(payload) // 2])
     expect_exit("truncated tgz", run("test", archive, cwd=work), EXIT_INVALID)
+
+    for name, mode in (("cut.tar.xz", "w:xz"), ("cut.tar.bz2", "w:bz2")):
+        payload = tar_bytes(source, mode)
+        archive = work / name
+        archive.write_bytes(payload[: len(payload) // 2])
+        expect_exit(f"truncated {name}", run("test", archive, cwd=work), EXIT_INVALID)
+
+
+def test_no_xz_bzip2_output(work, source):
+    archive = work / "plain.tar"
+    archive.write_bytes(tar_bytes(source, "w"))
+
+    for name in ("out.tar.xz", "out.tar.bz2", "out.txz", "out.tbz2"):
+        output = work / name
+        expect_exit(
+            f"no {name} output",
+            run("convert", archive, output, cwd=work),
+            EXIT_USAGE,
+        )
+        check(f"no {name} leftovers", not output.exists())
+        expect_exit(
+            f"no {name} create",
+            run("create", output, source, cwd=work),
+            EXIT_USAGE,
+        )
+        check(f"no {name} created", not output.exists())
 
 
 def test_errors_and_escaping(work):
@@ -524,6 +592,9 @@ def main():
             lambda: test_native_unicode_paths(work),
             lambda: test_reference_archive(work),
             lambda: test_single_gzip(work),
+            lambda: test_single_xz(work),
+            lambda: test_single_bz2(work),
+            lambda: test_no_xz_bzip2_output(work, source),
             lambda: test_hostile_tar(work),
             lambda: test_corrupt_zip(work),
             lambda: test_cp437_zip_name(work),

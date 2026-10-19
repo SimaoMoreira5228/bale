@@ -45,6 +45,9 @@ CompressedOutput::create(File file, Compression compression, std::optional<int> 
         }
         return CompressedOutput(std::move(file), Encoder(std::move(*encoder)), outputBufferSize);
     }
+    case Compression::Xz:
+    case Compression::Bzip2:
+        return fail(ErrorKind::Unsupported, "xz and bzip2 output is not supported");
     }
     return fail(ErrorKind::Unsupported, "unknown output compression");
 }

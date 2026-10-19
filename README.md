@@ -1,6 +1,6 @@
 # bale
 
-bale is two things that share one engine. It's an archive format of its own, built around content addressing, append-only snapshots and strict framing. It's also an archiver that reads and writes the formats you already have, ZIP and TAR (plain, gzip or zstd) for now, with more on the way.
+bale is two things that share one engine. It's an archive format of its own, built around content addressing, append-only snapshots and strict framing. It's also an archiver that reads and writes the formats you already have, ZIP and TAR (plain, gzip or zstd, plus reads of xz and bzip2) for now, with more on the way.
 
 It's early. The native format isn't frozen: `bale create` writes `.bale` files so the design can be tested, but a later build may not read them. Native archives use deduplicated, BLAKE3-verified chunks, compressed with zstd or LZ4 unless a chunk would come out bigger, in which case it's stored as is.
 
@@ -52,7 +52,7 @@ Exit codes tell you what went wrong:
 
 ## Building
 
-You need CMake 3.25 or newer, a C++23 compiler (GCC 14+ or Clang 18+), and Ninja if you have it. zlib-ng, zstd, LZ4 and BLAKE3 are fetched and pinned by hash on the first configure. Pass `-DBALE_USE_SYSTEM_CODECS=ON` to use the copies your system already has.
+You need CMake 3.25 or newer, a C++23 compiler (GCC 14+ or Clang 18+), and Ninja if you have it. zlib-ng, zstd, LZ4, BLAKE3, xz (liblzma) and bzip2 are fetched and pinned by hash on the first configure. Pass `-DBALE_USE_SYSTEM_CODECS=ON` to use the copies your system already has.
 
 ```sh
 ./dev build
@@ -103,4 +103,4 @@ tests          one doctest suite, organised the same way
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE). Bundled codecs keep their own licenses: zlib-ng under the zlib license, zstd and LZ4 under BSD, BLAKE3 under CC0 or Apache-2.0.
+Apache-2.0. See [LICENSE](LICENSE). Bundled codecs keep their own licenses: zlib-ng under the zlib license, zstd and LZ4 under BSD, BLAKE3 under CC0 or Apache-2.0, liblzma under 0BSD, bzip2 under its BSD-style license.

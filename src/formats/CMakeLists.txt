@@ -1,6 +1,8 @@
+add_subdirectory(bzip2)
 add_subdirectory(compressed)
 add_subdirectory(gzip)
 add_subdirectory(tar)
+add_subdirectory(xz)
 add_subdirectory(zip)
 add_subdirectory(zstd)
 

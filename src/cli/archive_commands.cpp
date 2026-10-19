@@ -503,7 +503,11 @@ singleFileName(std::string_view archive, const CompressedStream& stream, std::st
 
     auto leaf = pathToUtf8(pathFromUtf8(archive).filename());
     bool stripped = false;
-    for (std::string_view suffix : {std::string_view(".gz"), std::string_view(".zst")}) {
+    for (std::string_view suffix :
+         {std::string_view(".gz"),
+          std::string_view(".zst"),
+          std::string_view(".xz"),
+          std::string_view(".bz2")}) {
         if (leaf.size() > suffix.size() && leaf.ends_with(suffix)) {
             leaf.resize(leaf.size() - suffix.size());
             stripped = true;
