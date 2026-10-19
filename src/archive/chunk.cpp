@@ -54,10 +54,11 @@ Result<bool> ChunkKeyFields::accept(const TlvField& field) {
     }
 
     if (field.number == keyAlgorithmField) {
-        if (*value != static_cast<std::uint64_t>(HashAlgorithm::Blake3)) {
+        if (*value != static_cast<std::uint64_t>(HashAlgorithm::Blake3) &&
+            *value != static_cast<std::uint64_t>(HashAlgorithm::EncryptedObject)) {
             return fail(ErrorKind::Unsupported, "unknown chunk hash algorithm", field.offset);
         }
-        key_.algorithm = HashAlgorithm::Blake3;
+        key_.algorithm = static_cast<HashAlgorithm>(*value);
         hasAlgorithm_ = true;
         return true;
     }
@@ -146,6 +147,9 @@ Result<DataPayload> decodeDataPayload(std::span<const std::byte> payload, std::u
     auto key = decodeChunkKey(payload.subspan(size->size, descriptorSize), offset + size->size);
     if (!key) {
         return std::unexpected(key.error());
+    }
+    if (key->algorithm != HashAlgorithm::Blake3) {
+        return fail(ErrorKind::Unsupported, "unknown chunk hash algorithm", offset);
     }
 
     std::size_t prefix = size->size + descriptorSize;

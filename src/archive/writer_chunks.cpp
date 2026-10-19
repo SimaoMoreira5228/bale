@@ -126,6 +126,21 @@ Result<void> Writer::handle(const PipelineEvent& event) {
     }
 
     chunks_[slot.reference] = slot.key;
+    if (encrypted_) {
+        // NOTE: no cross-chunk dedup in encrypted mode, not even within one run beyond the
+        // NOTE: caller's own coalescing; every chunk gets a fresh random object id so equal
+        // NOTE: plaintexts produce unrelated ciphertext. Growth-indistinguishability pinned by
+        // test.
+        slot.indexPosition = static_cast<std::uint32_t>(index_.size());
+        ChunkKey objectKey{
+            .algorithm = HashAlgorithm::EncryptedObject,
+            .length = slot.key.length,
+        };
+        index_.push_back(IndexEntry{.key = objectKey});
+        objectIds_.emplace_back();
+        pipeline_->decided(true);
+        return {};
+    }
     if (table_.find(index_, slot.key) != nullptr) {
         slot.indexPosition.reset();
         pipeline_->decided(false);
@@ -145,6 +160,9 @@ Result<void> Writer::appendChunk(ChunkSlot& slot) {
     }
     if (!slot.indexPosition) {
         return {};
+    }
+    if (encrypted_) {
+        return appendChunkEncrypted(slot);
     }
 
     auto descriptor = encodeDataDescriptor(slot.key, descriptor_);

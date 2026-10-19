@@ -12,7 +12,10 @@ namespace bale {
 inline constexpr std::size_t superblockSize = 64;
 inline constexpr std::uint16_t formatMajor = 1;
 inline constexpr std::uint16_t formatMinor = 0;
-inline constexpr std::uint32_t knownRequiredFeatures = 0;
+// NOTE: provisional experimental ENCRYPTED wire value; native format is unfrozen and later
+// builds may not read archives using it.
+inline constexpr std::uint32_t encryptedRequiredFeature = 0x00000001;
+inline constexpr std::uint32_t knownRequiredFeatures = encryptedRequiredFeature;
 
 inline constexpr std::array superblockMagic{
     std::byte{0x42},

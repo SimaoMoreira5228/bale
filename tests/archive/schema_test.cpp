@@ -649,7 +649,9 @@ TEST_CASE("COMMIT golden bytes, digest and schema checks") {
     };
     CHECK(variant(2, 1, 0) == ErrorKind::Unsupported);
     CHECK(variant(1, 0, 0) == ErrorKind::Malformed);
-    CHECK(variant(1, 1, 1) == ErrorKind::Unsupported);
+    // NOTE: feature bit 1 is the provisional experimental ENCRYPTED flag and is known;
+    // without an epoch field the commit is malformed, not unsupported.
+    CHECK(variant(1, 1, 1) == ErrorKind::Malformed);
 
     auto extended = golden;
     extended.push_back(std::byte{0x16});

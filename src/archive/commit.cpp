@@ -73,11 +73,25 @@ Result<void> encodeCommit(const Commit& commit, std::vector<std::byte>& out) {
     if (!index) {
         return index;
     }
-    if (commit.generation == 1) {
-        return {};
+    bool encrypted = (commit.requiredFeatures & encryptedCommitFeature) != 0;
+    if (commit.generation > 1) {
+        auto footer = writer.unsignedValue(
+            previousFooterField,
+            Criticality::Noncritical,
+            commit.previousFooterOffset
+        );
+        if (!footer) {
+            return footer;
+        }
     }
-    return writer
-        .unsignedValue(previousFooterField, Criticality::Noncritical, commit.previousFooterOffset);
+    if (encrypted) {
+        // NOTE: provisional field 13 carries the key epoch for encrypted commits.
+        auto epoch = writer.unsignedValue(13, Criticality::Critical, commit.epoch);
+        if (!epoch) {
+            return epoch;
+        }
+    }
+    return {};
 }
 
 Result<Commit> decodeCommit(std::span<const std::byte> payload, std::uint64_t offset) {
@@ -92,6 +106,7 @@ Result<Commit> decodeCommit(std::span<const std::byte> payload, std::uint64_t of
     TlvField field;
     std::uint32_t seen = 0;
     bool hasPreviousFooter = false;
+    bool hasEpoch = false;
     while (true) {
         auto more = reader.next(field);
         if (!more) {
@@ -115,6 +130,25 @@ Result<Commit> decodeCommit(std::span<const std::byte> payload, std::uint64_t of
             }
             commit.previousFooterOffset = *value;
             hasPreviousFooter = true;
+            continue;
+        }
+        if (field.number == 13) {
+            auto critical = requireCriticality(field, Criticality::Critical);
+            if (!critical) {
+                return std::unexpected(critical.error());
+            }
+            if (hasEpoch) {
+                return fail(ErrorKind::Malformed, "duplicate epoch field", field.offset);
+            }
+            auto value = decodeTlvUnsigned(field);
+            if (!value) {
+                return std::unexpected(value.error());
+            }
+            if (*value == 0) {
+                return fail(ErrorKind::Malformed, "commit epoch is zero", field.offset);
+            }
+            commit.epoch = *value;
+            hasEpoch = true;
             continue;
         }
         if (field.number > indexDigestField) {
@@ -164,6 +198,13 @@ Result<Commit> decodeCommit(std::span<const std::byte> payload, std::uint64_t of
     }
     if (values[generationField] == 1 && hasPreviousFooter) {
         return fail(ErrorKind::Malformed, "first generation has a previous footer", offset);
+    }
+    bool encrypted = (values[featuresField] & encryptedCommitFeature) != 0;
+    if (encrypted && !hasEpoch) {
+        return fail(ErrorKind::Malformed, "encrypted commit missing epoch", offset);
+    }
+    if (!encrypted && hasEpoch) {
+        return fail(ErrorKind::Malformed, "plain commit has an epoch", offset);
     }
 
     commit.generation = values[generationField];

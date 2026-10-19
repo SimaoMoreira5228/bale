@@ -1,5 +1,6 @@
 #include "archive/reader.hpp"
 
+#include "archive/encrypted.hpp"
 #include "base/checked.hpp"
 
 #include <algorithm>
@@ -41,6 +42,9 @@ Result<Reader> Reader::open(File file, const ReaderOptions& options) {
         return std::unexpected(superblock.error());
     }
     reader.superblock_ = *superblock;
+    if ((reader.superblock_.requiredFeatures & encryptedRequiredFeature) != 0) {
+        return fail(ErrorKind::PasswordRequired, "archive is encrypted");
+    }
 
     auto found = reader.findCommit();
     if (!found) {
@@ -296,9 +300,13 @@ Result<std::span<const std::byte>> Reader::loadChunk(const ChunkKey& key) {
 
 Result<VerifyReport> Reader::walkRecords() {
     VerifyReport report;
+    std::uint64_t maxPayload = std::max(options_.maxMetadataBytes, maxDataPayload);
+    if (encrypted_) {
+        maxPayload += encryptedDataHeaderSize + crypto::tagSize + encryptedMetaNonceSize;
+    }
     RecordLimits limits{
-        .maxPayloadLength = std::max(options_.maxMetadataBytes, maxDataPayload),
-        .maxDecodedLength = std::max(options_.maxMetadataBytes, maxDataPayload),
+        .maxPayloadLength = maxPayload,
+        .maxDecodedLength = maxPayload,
     };
 
     std::array<std::byte, recordPrefixSize> prefix{};
@@ -333,6 +341,18 @@ Result<VerifyReport> Reader::walkRecords() {
         }
 
         bool expected = true;
+        bool isEncryptedRecord = (header->flags & encryptedRecordFlag) != 0;
+        if (encrypted_) {
+            if (!isEncryptedRecord) {
+                return fail(
+                    ErrorKind::Malformed,
+                    "plain record inside an encrypted archive",
+                    position
+                );
+            }
+        } else if (isEncryptedRecord) {
+            return fail(ErrorKind::Unsupported, "encrypted record in a plain archive", position);
+        }
         switch (header->type) {
         case RecordType::Data:
             ++report.dataRecords;
@@ -427,13 +447,32 @@ Result<VerifyReport> Reader::verify(VerifyMode mode) {
         return report;
     }
 
-    for (const auto& entry : index_) {
-        auto chunk = loadChunk(entry.key);
-        if (!chunk) {
-            return std::unexpected(chunk.error());
+    if (!encrypted_) {
+        for (const auto& entry : index_) {
+            auto chunk = loadChunk(entry.key);
+            if (!chunk) {
+                return std::unexpected(chunk.error());
+            }
+            ++report->chunksVerified;
+            report->bytesVerified += chunk->size();
         }
-        ++report->chunksVerified;
-        report->bytesVerified += chunk->size();
+        return report;
+    }
+
+    for (const auto& entry : manifest_.entries) {
+        if (entry.kind != EntryKind::Regular) {
+            continue;
+        }
+        auto objects = std::span(manifest_.objectIds).subspan(entry.firstChunk, entry.chunkCount);
+        auto plains = manifest_.chunksOf(entry);
+        for (std::size_t index = 0; index < plains.size(); ++index) {
+            auto chunk = loadEncryptedExtent(objects[index], plains[index]);
+            if (!chunk) {
+                return std::unexpected(chunk.error());
+            }
+            ++report->chunksVerified;
+            report->bytesVerified += chunk->size();
+        }
     }
     return report;
 }

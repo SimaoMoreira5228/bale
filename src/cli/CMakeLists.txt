@@ -6,11 +6,13 @@ add_library(bale_cli STATIC
     create_command.cpp
     extract_command.cpp
     info_command.cpp
+    prompt.cpp
     terminal_text.cpp
+    unlock.cpp
 )
 target_link_libraries(bale_cli
-    PUBLIC bale_archive bale_extract bale_formats
-    PRIVATE bale_warnings
+    PUBLIC bale_archive bale_extract bale_formats bale_crypto
+    PRIVATE bale_warnings bale_sodium
 )
 
 add_executable(bale

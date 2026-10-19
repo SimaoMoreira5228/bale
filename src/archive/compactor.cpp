@@ -14,6 +14,9 @@ constexpr std::uint64_t maxDataPayload = 1 + maxDataDescriptorSize + maxChunkSiz
 }
 
 Result<WriteSummary> Writer::compact(File file, Reader& source, bool durable) {
+    if (source.encrypted_) {
+        return fail(ErrorKind::PasswordRequired, "archive is encrypted");
+    }
     auto verified = source.verify(VerifyMode::Structure);
     if (!verified) {
         return std::unexpected(verified.error());

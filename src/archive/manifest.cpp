@@ -42,18 +42,37 @@ std::string_view textOf(std::span<const std::byte> bytes) {
 
 Result<void> writeChunkList(
     TlvWriter& writer,
-    std::span<const ChunkKey> chunks,
+    const Manifest& manifest,
+    const ManifestEntry& entry,
     std::vector<std::byte>& list,
     std::vector<std::byte>& element
 ) {
+    auto chunks = manifest.chunksOf(entry);
     list.clear();
     appendLeb128(list, chunks.size());
-    for (const auto& key : chunks) {
+    if (!manifest.encrypted()) {
+        for (const auto& key : chunks) {
+            element.clear();
+            TlvWriter keyWriter(element);
+            auto written = writeChunkKey(keyWriter, key);
+            if (!written) {
+                return written;
+            }
+            appendTlvListElement(list, element);
+        }
+        return writer.bytes(chunksField, Criticality::Critical, list);
+    }
+    auto objects = std::span(manifest.objectIds).subspan(entry.firstChunk, entry.chunkCount);
+    for (std::size_t index = 0; index < chunks.size(); ++index) {
         element.clear();
         TlvWriter keyWriter(element);
-        auto written = writeChunkKey(keyWriter, key);
+        auto written = writeChunkKey(keyWriter, chunks[index]);
         if (!written) {
             return written;
+        }
+        auto object = keyWriter.bytes(10, Criticality::Critical, objects[index]);
+        if (!object) {
+            return object;
         }
         appendTlvListElement(list, element);
     }
@@ -89,7 +108,7 @@ Result<void> encodeEntry(
             return length;
         }
         if (entry.chunkCount != 0) {
-            auto chunks = writeChunkList(writer, manifest.chunksOf(entry), list, element);
+            auto chunks = writeChunkList(writer, manifest, entry, list, element);
             if (!chunks) {
                 return chunks;
             }
@@ -151,7 +170,8 @@ Result<void> readChunkList(
     const TlvField& field,
     std::uint64_t declaredLength,
     std::uint64_t& count,
-    std::vector<ChunkKey>& chunks
+    std::vector<ChunkKey>& chunks,
+    std::vector<std::array<std::byte, 32>>& objectIds
 ) {
     auto list = TlvListReader::open(field, std::numeric_limits<std::uint32_t>::max());
     if (!list) {
@@ -168,6 +188,14 @@ Result<void> readChunkList(
     std::uint64_t sum = 0;
     std::span<const std::byte> element;
     std::uint64_t elementOffset = 0;
+    bool listEncrypted = !chunks.empty() && !objectIds.empty();
+    bool listPlain = !listEncrypted && (chunks.empty() || objectIds.empty());
+    // NOTE: detect per-list; first element decides, rest must match.
+    bool decided = !chunks.empty() || !objectIds.empty();
+    // NOTE: if this is the first chunk list in the manifest, decide from the first element.
+    bool firstList = chunks.empty() && objectIds.empty();
+    bool encrypted = false;
+    bool sawFirst = false;
     while (true) {
         auto more = list->next(element, elementOffset);
         if (!more) {
@@ -177,20 +205,131 @@ Result<void> readChunkList(
             break;
         }
 
-        auto key = decodeChunkKey(element, elementOffset);
-        if (!key) {
-            return std::unexpected(key.error());
+        // NOTE: try encrypted extent first; plain keys lack field 10.
+        bool hasObjectField = false;
+        {
+            TlvReader probe(element, elementOffset);
+            TlvField probeField;
+            while (true) {
+                auto next = probe.next(probeField);
+                if (!next) {
+                    return std::unexpected(next.error());
+                }
+                if (!*next) {
+                    break;
+                }
+                if (probeField.number == 10) {
+                    hasObjectField = true;
+                    break;
+                }
+                if (probeField.number > 10) {
+                    break;
+                }
+            }
         }
-        auto next = checkedAdd(sum, key->length);
-        if (!next || *next > declaredLength) {
+        if (!sawFirst) {
+            encrypted = hasObjectField;
+            sawFirst = true;
+            if (firstList) {
+                listEncrypted = encrypted;
+                listPlain = !encrypted;
+            } else if (encrypted != listEncrypted) {
+                return fail(
+                    ErrorKind::Malformed,
+                    "mixed plain and encrypted chunk lists",
+                    elementOffset
+                );
+            }
+            (void)listPlain;
+            (void)decided;
+        } else if (hasObjectField != encrypted) {
             return fail(
                 ErrorKind::Malformed,
-                "chunk lengths exceed the file length",
+                "mixed plain and encrypted chunk lists",
                 elementOffset
             );
         }
-        sum = *next;
-        chunks.push_back(*key);
+
+        if (encrypted) {
+            TlvReader reader(element, elementOffset);
+            TlvField extentField;
+            ChunkKeyFields keyFields;
+            bool hasObject = false;
+            std::array<std::byte, 32> object{};
+            while (true) {
+                auto next = reader.next(extentField);
+                if (!next) {
+                    return std::unexpected(next.error());
+                }
+                if (!*next) {
+                    break;
+                }
+                if (extentField.number == 10) {
+                    auto critical = requireCriticality(extentField, Criticality::Critical);
+                    if (!critical) {
+                        return std::unexpected(critical.error());
+                    }
+                    if (extentField.value.size() != 32) {
+                        return fail(
+                            ErrorKind::Malformed,
+                            "object id has a bad size",
+                            extentField.offset
+                        );
+                    }
+                    std::ranges::copy(extentField.value, object.begin());
+                    hasObject = true;
+                    continue;
+                }
+                auto accepted = keyFields.accept(extentField);
+                if (!accepted) {
+                    return std::unexpected(accepted.error());
+                }
+                if (*accepted) {
+                    continue;
+                }
+                auto skipped = skipUnknownField(extentField);
+                if (!skipped) {
+                    return std::unexpected(skipped.error());
+                }
+            }
+            auto key = keyFields.finish(elementOffset);
+            if (!key) {
+                return std::unexpected(key.error());
+            }
+            if (!hasObject) {
+                return fail(
+                    ErrorKind::Malformed,
+                    "encrypted extent missing object id",
+                    elementOffset
+                );
+            }
+            auto next = checkedAdd(sum, key->length);
+            if (!next || *next > declaredLength) {
+                return fail(
+                    ErrorKind::Malformed,
+                    "chunk lengths exceed the file length",
+                    elementOffset
+                );
+            }
+            sum = *next;
+            chunks.push_back(*key);
+            objectIds.push_back(object);
+        } else {
+            auto key = decodeChunkKey(element, elementOffset);
+            if (!key) {
+                return std::unexpected(key.error());
+            }
+            auto next = checkedAdd(sum, key->length);
+            if (!next || *next > declaredLength) {
+                return fail(
+                    ErrorKind::Malformed,
+                    "chunk lengths exceed the file length",
+                    elementOffset
+                );
+            }
+            sum = *next;
+            chunks.push_back(*key);
+        }
     }
 
     if (sum != declaredLength) {
@@ -207,7 +346,8 @@ Result<void> readChunkList(
 Result<RawEntry> readEntryFields(
     std::span<const std::byte> data,
     std::uint64_t offset,
-    std::vector<ChunkKey>& chunks
+    std::vector<ChunkKey>& chunks,
+    std::vector<std::array<std::byte, 32>>& objectIds
 ) {
     RawEntry raw;
     TlvReader reader(data, offset);
@@ -261,7 +401,7 @@ Result<RawEntry> readEntryFields(
             if (!raw.hasLength) {
                 return fail(ErrorKind::Malformed, "chunk list without a file length", field.offset);
             }
-            auto read = readChunkList(field, raw.length, raw.chunkCount, chunks);
+            auto read = readChunkList(field, raw.length, raw.chunkCount, chunks, objectIds);
             if (!read) {
                 return std::unexpected(read.error());
             }
@@ -347,10 +487,11 @@ Result<ManifestEntry> decodeEntry(
     std::uint64_t offset,
     const Limits& limits,
     std::string& scratch,
-    std::vector<ChunkKey>& chunks
+    std::vector<ChunkKey>& chunks,
+    std::vector<std::array<std::byte, 32>>& objectIds
 ) {
     std::size_t firstChunk = chunks.size();
-    auto raw = readEntryFields(data, offset, chunks);
+    auto raw = readEntryFields(data, offset, chunks, objectIds);
     if (!raw) {
         return std::unexpected(raw.error());
     }
@@ -451,7 +592,8 @@ Result<void> decodeEntries(const TlvField& field, const Limits& limits, Manifest
             break;
         }
 
-        auto entry = decodeEntry(element, elementOffset, limits, scratch, out.chunks);
+        auto entry =
+            decodeEntry(element, elementOffset, limits, scratch, out.chunks, out.objectIds);
         if (!entry) {
             return std::unexpected(entry.error());
         }
@@ -470,6 +612,9 @@ Result<void> decodeEntries(const TlvField& field, const Limits& limits, Manifest
 }
 
 Result<void> encodeManifest(const Manifest& manifest, std::vector<std::byte>& out) {
+    if (!manifest.objectIds.empty() && manifest.objectIds.size() != manifest.chunks.size()) {
+        return fail(ErrorKind::Malformed, "encrypted manifest object count differs from chunks");
+    }
     std::vector<std::byte> table;
     std::vector<std::byte> entry;
     std::vector<std::byte> list;

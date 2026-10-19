@@ -1,7 +1,9 @@
 #include "archive/reader.hpp"
 #include "archive/writer_profile.hpp"
 #include "cli/archive_commands.hpp"
+#include "cli/filesystem_path.hpp"
 #include "cli/terminal_text.hpp"
+#include "cli/unlock.hpp"
 
 #include <cstdint>
 #include <limits>
@@ -89,35 +91,62 @@ void printWriter(const archive::WriterMetadata& writer) {
     }
 }
 
-ExitCode describeNative(std::string_view argument, File file) {
+ExitCode describeNative(
+    std::string_view argument,
+    File file,
+    const std::optional<std::string>& keyFile = std::nullopt
+) {
     auto reader = archive::Reader::open(std::move(file));
-    if (!reader) {
+    std::optional<archive::Reader> encrypted;
+    if (!reader && reader.error().kind == ErrorKind::PasswordRequired) {
+        auto unlock = buildUnlock(keyFile, true);
+        if (!unlock) {
+            return reportFailure(argument, unlock.error());
+        }
+        auto retry = File::openRead(pathFromUtf8(argument));
+        if (!retry) {
+            return reportFailure(argument, retry.error());
+        }
+        auto opened = archive::Reader::openEncrypted(
+            std::move(*retry),
+            archive::ReaderOptions{},
+            std::move(*unlock)
+        );
+        if (!opened) {
+            return reportFailure(argument, opened.error());
+        }
+        encrypted.emplace(std::move(*opened));
+    } else if (!reader) {
         return reportFailure(argument, reader.error());
     }
+    const archive::Reader& active = encrypted ? *encrypted : *reader;
 
     std::uint64_t storedBytes = 0;
-    for (const archive::IndexEntry& entry : reader->index()) {
+    for (const archive::IndexEntry& entry : active.index()) {
         storedBytes += entry.recordLength;
     }
 
     std::println("format: bale");
-    std::println("generation: {}", reader->commit().generation);
-    std::println("entries: {}", reader->manifest().entries.size());
-    std::println("chunks: {} in {} stored bytes", reader->index().size(), storedBytes);
-    printWriter(reader->manifest().writer);
+    std::println("generation: {}", active.commit().generation);
+    std::println("entries: {}", active.manifest().entries.size());
+    std::println("chunks: {} in {} stored bytes", active.index().size(), storedBytes);
+    if (active.encrypted()) {
+        std::println("encryption: experimental XChaCha20-Poly1305, epoch {}", active.epoch());
+    }
+    printWriter(active.manifest().writer);
     return ExitCode::Ok;
 }
 
 }
 
-ExitCode describeArchive(std::string_view argument) {
+ExitCode describeArchive(std::string_view argument, const std::optional<std::string>& keyFile) {
     auto archive = openArchive(argument);
     if (!archive) {
         return reportFailure(argument, archive.error());
     }
 
     if (archive->format.container == Container::Bale) {
-        return describeNative(argument, std::move(archive->file));
+        return describeNative(argument, std::move(archive->file), keyFile);
     }
     std::println("format: {}", name(archive->format));
     return ExitCode::Ok;

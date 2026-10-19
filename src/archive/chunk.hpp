@@ -14,6 +14,8 @@ namespace bale::archive {
 
 enum class HashAlgorithm : std::uint8_t {
     Blake3 = 1,
+    // NOTE: provisional experimental value for random encrypted object ids.
+    EncryptedObject = 2,
 };
 
 inline constexpr std::uint32_t minChunkSize = std::uint32_t{4} * 1024;

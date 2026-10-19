@@ -5,7 +5,9 @@ set(bale_fuzz_targets
     fuzz_crypto_aead
     fuzz_crypto_slots
     fuzz_detect
+    fuzz_encrypted_record
     fuzz_gzip
+    fuzz_keyslot
     fuzz_native_archive
     fuzz_native_records
     fuzz_sevenzip

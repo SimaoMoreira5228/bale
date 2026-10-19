@@ -294,7 +294,14 @@ TEST_CASE(
     );
 
     header.type = RecordType::Extension;
-    for (int bit = 0; bit < 8; ++bit) {
+    // NOTE: bit 0 is the provisional experimental ENCRYPTED required flag and is known.
+    {
+        header.flags = static_cast<std::uint16_t>(1 << 0);
+        auto accepted = decodeRecordPrefix(encodeRecordPrefix(header), generousLimits);
+        REQUIRE(accepted);
+        CHECK(accepted->flags == static_cast<std::uint16_t>(1 << 0));
+    }
+    for (int bit = 1; bit < 8; ++bit) {
         header.flags = static_cast<std::uint16_t>(1 << bit);
         auto rejected = decodeRecordPrefix(encodeRecordPrefix(header), generousLimits);
         REQUIRE_FALSE(rejected);

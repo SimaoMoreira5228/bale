@@ -11,7 +11,9 @@
 namespace bale::archive {
 
 inline constexpr std::uint64_t commitSchemaVersion = 1;
-inline constexpr std::uint64_t knownCommitFeatures = 0;
+// NOTE: provisional experimental ENCRYPTED value; later builds may not read archives using it.
+inline constexpr std::uint64_t encryptedCommitFeature = 0x00000001;
+inline constexpr std::uint64_t knownCommitFeatures = encryptedCommitFeature;
 
 struct RecordReference {
     std::uint64_t offset = 0;
@@ -24,6 +26,7 @@ struct Commit {
     Blake3Digest previous{};
     std::uint64_t previousFooterOffset = 0;
     std::uint64_t requiredFeatures = 0;
+    std::uint64_t epoch = 0;
     RecordReference manifest;
     RecordReference index;
 };
