@@ -25,6 +25,10 @@ add_executable(bale_tests
     codecs/decoders_test.cpp
     codecs/lzma2_test.cpp
     codecs/lz4_frame_test.cpp
+    crypto/aead_test.cpp
+    crypto/kdf_test.cpp
+    crypto/secrets_test.cpp
+    crypto/slots_test.cpp
     extract/extractor_test.cpp
     format/envelope_test.cpp
     format/tlv_test.cpp
@@ -53,6 +57,7 @@ target_link_libraries(bale_tests PRIVATE
     bale_checksum
     bale_cli
     bale_codecs
+    bale_crypto
     bale_extract
     bale_format
     bale_formats_compressed
@@ -67,6 +72,7 @@ target_link_libraries(bale_tests PRIVATE
     bale_bz2
     bale_lz4
     bale_lzma
+    bale_sodium
     bale_warnings
     bale_zlib_ng
     bale_zstd

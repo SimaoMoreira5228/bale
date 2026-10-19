@@ -10,6 +10,7 @@ add_library(bale_lz4 INTERFACE)
 add_library(bale_blake3 INTERFACE)
 add_library(bale_lzma INTERFACE)
 add_library(bale_bz2 INTERFACE)
+add_library(bale_sodium INTERFACE)
 
 if(BALE_USE_SYSTEM_CODECS)
     find_package(zlib-ng CONFIG QUIET)
@@ -82,6 +83,13 @@ if(BALE_USE_SYSTEM_CODECS)
         target_link_libraries(bale_bz2 INTERFACE PkgConfig::BALE_SYSTEM_BZ2)
     else()
         message(FATAL_ERROR "BALE_USE_SYSTEM_CODECS: bzip2 not found")
+    endif()
+
+    if(PkgConfig_FOUND)
+        pkg_check_modules(BALE_SYSTEM_SODIUM REQUIRED IMPORTED_TARGET libsodium>=1.0.18)
+        target_link_libraries(bale_sodium INTERFACE PkgConfig::BALE_SYSTEM_SODIUM)
+    else()
+        message(FATAL_ERROR "BALE_USE_SYSTEM_CODECS: libsodium not found")
     endif()
     return()
 endif()
@@ -209,3 +217,190 @@ target_link_libraries(bale_blake3 INTERFACE BLAKE3::blake3)
 FetchContent_GetProperties(xz SOURCE_DIR XZ_SOURCE_DIR)
 target_include_directories(bale_lzma SYSTEM INTERFACE ${XZ_SOURCE_DIR}/src/liblzma/api)
 target_link_libraries(bale_lzma INTERFACE liblzma)
+
+# NOTE: libsodium 1.0.20-stable (ISC, https://download.libsodium.org/libsodium/releases).
+# Upstream ships autotools configure plus Visual Studio projects and no first-party
+# CMake build, and bale does not pull a third-party CMake shim in as a new dependency
+# to drive it. The static library below compiles libsodium's own portable C sources
+# directly, limited to what the encrypted profile needs: XChaCha20-Poly1305 AEAD,
+# Argon2id password hashing, X25519 sealed boxes and Ed25519 (reserved, no signing
+# yet). Everything else the tarball carries (AES-GCM, AEGIS, scrypt, secretstream,
+# short hashes, KDF/KX helpers, xchacha secretbox/box, salsa2012/208 streams, the
+# SIMD back ends for other ciphers) is left out. sodium_init still links because the
+# two AEGIS selector stubs in cmake/sodium_aegis_stubs.c satisfy its references;
+# those stubs are bale code, not patched upstream sources.
+set(BALE_SODIUM_URL https://download.libsodium.org/libsodium/releases/libsodium-1.0.20-stable.tar.gz)
+set(BALE_SODIUM_SHA256 b6b1d2a8802cd8bfa611638c0e9ce31d14ef324e16062c39a76854091cba6d7f)
+set(BALE_SODIUM_ARCHIVE ${CMAKE_BINARY_DIR}/libsodium-1.0.20-stable.tar.gz)
+set(BALE_SODIUM_SOURCE_DIR ${CMAKE_BINARY_DIR}/libsodium-stable/src/libsodium)
+if(NOT EXISTS ${BALE_SODIUM_SOURCE_DIR}/include/sodium.h)
+    file(DOWNLOAD ${BALE_SODIUM_URL} ${BALE_SODIUM_ARCHIVE} EXPECTED_HASH SHA256=${BALE_SODIUM_SHA256})
+    file(ARCHIVE_EXTRACT INPUT ${BALE_SODIUM_ARCHIVE} DESTINATION ${CMAKE_BINARY_DIR})
+endif()
+set(BALE_SODIUM_FILES
+    sodium/core.c
+    sodium/runtime.c
+    sodium/utils.c
+    sodium/codecs.c
+    sodium/version.c
+    randombytes/randombytes.c
+    randombytes/sysrandom/randombytes_sysrandom.c
+    crypto_verify/verify.c
+    crypto_aead/xchacha20poly1305/aead_xchacha20poly1305.c
+    crypto_aead/chacha20poly1305/aead_chacha20poly1305.c
+    crypto_stream/chacha20/stream_chacha20.c
+    crypto_stream/chacha20/ref/chacha20_ref.c
+    crypto_core/hchacha20/core_hchacha20.c
+    crypto_onetimeauth/crypto_onetimeauth.c
+    crypto_onetimeauth/poly1305/onetimeauth_poly1305.c
+    crypto_onetimeauth/poly1305/donna/poly1305_donna.c
+    crypto_stream/crypto_stream.c
+    crypto_stream/salsa20/stream_salsa20.c
+    crypto_stream/salsa20/ref/salsa20_ref.c
+    crypto_stream/xsalsa20/stream_xsalsa20.c
+    crypto_core/salsa/ref/core_salsa_ref.c
+    crypto_core/hsalsa20/core_hsalsa20.c
+    crypto_core/hsalsa20/ref2/core_hsalsa20_ref2.c
+    crypto_secretbox/crypto_secretbox.c
+    crypto_secretbox/crypto_secretbox_easy.c
+    crypto_secretbox/xsalsa20poly1305/secretbox_xsalsa20poly1305.c
+    crypto_box/crypto_box.c
+    crypto_box/crypto_box_easy.c
+    crypto_box/crypto_box_seal.c
+    crypto_box/curve25519xsalsa20poly1305/box_curve25519xsalsa20poly1305.c
+    crypto_scalarmult/crypto_scalarmult.c
+    crypto_scalarmult/curve25519/scalarmult_curve25519.c
+    crypto_scalarmult/curve25519/ref10/x25519_ref10.c
+    crypto_core/ed25519/ref10/ed25519_ref10.c
+    crypto_generichash/crypto_generichash.c
+    crypto_generichash/blake2b/ref/blake2b-ref.c
+    crypto_generichash/blake2b/ref/blake2b-compress-ref.c
+    crypto_generichash/blake2b/ref/generichash_blake2b.c
+    crypto_hash/crypto_hash.c
+    crypto_hash/sha256/hash_sha256.c
+    crypto_hash/sha256/cp/hash_sha256_cp.c
+    crypto_hash/sha512/hash_sha512.c
+    crypto_hash/sha512/cp/hash_sha512_cp.c
+    crypto_pwhash/crypto_pwhash.c
+    crypto_pwhash/argon2/argon2.c
+    crypto_pwhash/argon2/argon2-core.c
+    crypto_pwhash/argon2/argon2-encoding.c
+    crypto_pwhash/argon2/argon2-fill-block-ref.c
+    crypto_pwhash/argon2/blake2b-long.c
+    crypto_pwhash/argon2/pwhash_argon2i.c
+    crypto_pwhash/argon2/pwhash_argon2id.c
+    crypto_sign/crypto_sign.c
+    crypto_sign/ed25519/sign_ed25519.c
+    crypto_sign/ed25519/ref10/keypair.c
+    crypto_sign/ed25519/ref10/open.c
+    crypto_sign/ed25519/ref10/sign.c
+)
+list(TRANSFORM BALE_SODIUM_FILES PREPEND "${BALE_SODIUM_SOURCE_DIR}/")
+add_library(bale_sodium_static STATIC
+    ${BALE_SODIUM_FILES}
+    ${CMAKE_CURRENT_LIST_DIR}/sodium_aegis_stubs.c
+)
+# NOTE: CONFIGURED=1 only silences upstream's "undocumented build method" notice in
+# private/common.h. Feature selection stays explicit: the portable reference files
+# above plus the optional x86 SIMD files below, nothing probed by configure.
+target_compile_definitions(bale_sodium_static PRIVATE CONFIGURED=1)
+target_include_directories(bale_sodium_static SYSTEM PUBLIC
+    ${BALE_SODIUM_SOURCE_DIR}/include
+    ${BALE_SODIUM_SOURCE_DIR}/include/sodium
+    ${CMAKE_CURRENT_BINARY_DIR}/sodium_include
+)
+target_include_directories(bale_sodium_static PRIVATE
+    ${BALE_SODIUM_SOURCE_DIR}/include/sodium
+    ${BALE_SODIUM_SOURCE_DIR}/randombytes/sysrandom
+    ${CMAKE_CURRENT_BINARY_DIR}/sodium_include/sodium
+)
+# NOTE: version.h is generated by upstream's configure step; bale generates the same
+# file from the shipped template so no configured tree is needed.
+set(BALE_SODIUM_VERSION "1.0.20")
+set(SODIUM_LIBRARY_VERSION_MAJOR 26)
+set(SODIUM_LIBRARY_VERSION_MINOR 2)
+set(SODIUM_LIBRARY_MINIMAL_DEF "")
+configure_file(
+    ${BALE_SODIUM_SOURCE_DIR}/include/sodium/version.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/sodium_include/sodium/version.h
+    @ONLY
+)
+if(UNIX)
+    # NOTE: these unlock libsodium's own mmap/mlock and pthread paths. Without them
+    # the code still runs, but secret storage would lose guard pages and locking.
+    target_compile_definitions(bale_sodium_static PRIVATE HAVE_SYS_MMAN_H HAVE_MLOCK HAVE_PTHREAD)
+    find_package(Threads REQUIRED)
+    target_link_libraries(bale_sodium_static PUBLIC Threads::Threads)
+endif()
+if(WIN32)
+    target_link_libraries(bale_sodium_static PRIVATE advapi32)
+endif()
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|x86|i[3-6]86)$")
+    # NOTE: on x86 the runtime dispatchers pick the fastest compiled-in back end, so
+    # the SIMD sources below must be present wherever the feature macros are defined.
+    # GCC and Clang get the macros explicitly with per-file ISA flags; MSVC defines
+    # the macros itself in private/common.h, so it only needs the files with /arch
+    # flags (except poly1305_sse2, which needs 128-bit integers MSVC lacks).
+    set(BALE_SODIUM_SIMD_COMMON
+        crypto_generichash/blake2b/ref/blake2b-compress-ssse3.c
+        crypto_generichash/blake2b/ref/blake2b-compress-sse41.c
+        crypto_generichash/blake2b/ref/blake2b-compress-avx2.c
+        crypto_stream/chacha20/dolbeau/chacha20_dolbeau-ssse3.c
+        crypto_stream/chacha20/dolbeau/chacha20_dolbeau-avx2.c
+        crypto_pwhash/argon2/argon2-fill-block-ssse3.c
+        crypto_pwhash/argon2/argon2-fill-block-avx2.c
+        crypto_pwhash/argon2/argon2-fill-block-avx512f.c
+        crypto_stream/salsa20/xmm6int/salsa20_xmm6int-sse2.c
+        crypto_stream/salsa20/xmm6int/salsa20_xmm6int-avx2.c
+    )
+    list(TRANSFORM BALE_SODIUM_SIMD_COMMON PREPEND "${BALE_SODIUM_SOURCE_DIR}/")
+    target_sources(bale_sodium_static PRIVATE ${BALE_SODIUM_SIMD_COMMON})
+    if(CMAKE_C_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$" AND NOT MSVC)
+        target_compile_definitions(bale_sodium_static PRIVATE
+            HAVE_TI_MODE
+            HAVE_EMMINTRIN_H
+            HAVE_TMMINTRIN_H
+            HAVE_SMMINTRIN_H
+            HAVE_AVX2INTRIN_H
+            HAVE_AVX512FINTRIN_H
+        )
+        target_sources(bale_sodium_static PRIVATE
+            ${BALE_SODIUM_SOURCE_DIR}/crypto_onetimeauth/poly1305/sse2/poly1305_sse2.c
+        )
+        set_source_files_properties(
+            ${BALE_SODIUM_SOURCE_DIR}/crypto_stream/chacha20/dolbeau/chacha20_dolbeau-avx2.c
+            ${BALE_SODIUM_SOURCE_DIR}/crypto_generichash/blake2b/ref/blake2b-compress-avx2.c
+            ${BALE_SODIUM_SOURCE_DIR}/crypto_pwhash/argon2/argon2-fill-block-avx2.c
+            ${BALE_SODIUM_SOURCE_DIR}/crypto_stream/salsa20/xmm6int/salsa20_xmm6int-avx2.c
+            PROPERTIES COMPILE_OPTIONS "-mavx2"
+        )
+        set_source_files_properties(
+            ${BALE_SODIUM_SOURCE_DIR}/crypto_pwhash/argon2/argon2-fill-block-avx512f.c
+            PROPERTIES COMPILE_OPTIONS "-mavx512f"
+        )
+        set_source_files_properties(
+            ${BALE_SODIUM_SOURCE_DIR}/crypto_stream/chacha20/dolbeau/chacha20_dolbeau-ssse3.c
+            ${BALE_SODIUM_SOURCE_DIR}/crypto_generichash/blake2b/ref/blake2b-compress-ssse3.c
+            ${BALE_SODIUM_SOURCE_DIR}/crypto_pwhash/argon2/argon2-fill-block-ssse3.c
+            PROPERTIES COMPILE_OPTIONS "-mssse3"
+        )
+        set_source_files_properties(
+            ${BALE_SODIUM_SOURCE_DIR}/crypto_generichash/blake2b/ref/blake2b-compress-sse41.c
+            PROPERTIES COMPILE_OPTIONS "-msse4.1"
+        )
+    endif()
+    if(MSVC)
+        set_source_files_properties(
+            ${BALE_SODIUM_SOURCE_DIR}/crypto_stream/chacha20/dolbeau/chacha20_dolbeau-avx2.c
+            ${BALE_SODIUM_SOURCE_DIR}/crypto_generichash/blake2b/ref/blake2b-compress-avx2.c
+            ${BALE_SODIUM_SOURCE_DIR}/crypto_pwhash/argon2/argon2-fill-block-avx2.c
+            ${BALE_SODIUM_SOURCE_DIR}/crypto_stream/salsa20/xmm6int/salsa20_xmm6int-avx2.c
+            PROPERTIES COMPILE_OPTIONS "/arch:AVX2"
+        )
+        set_source_files_properties(
+            ${BALE_SODIUM_SOURCE_DIR}/crypto_pwhash/argon2/argon2-fill-block-avx512f.c
+            PROPERTIES COMPILE_OPTIONS "/arch:AVX512"
+        )
+    endif()
+endif()
+target_link_libraries(bale_sodium INTERFACE bale_sodium_static)
