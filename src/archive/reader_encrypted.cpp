@@ -29,6 +29,7 @@ collectKeys(File& file, std::uint64_t fileSize, ReaderUnlock& unlock, const Limi
     std::map<std::uint64_t, crypto::SecretBytes> keys;
     std::vector<std::byte> recordBuffer;
     std::uint64_t position = superblockSize;
+    std::uint64_t slotsSeen = 0;
     RecordLimits recordLimits{
         .maxPayloadLength = maxEncryptedPayloadBytes,
         .maxDecodedLength = maxEncryptedPayloadBytes,
@@ -85,6 +86,12 @@ collectKeys(File& file, std::uint64_t fileSize, ReaderUnlock& unlock, const Limi
         if (!slot) {
             return std::unexpected(slot.error());
         }
+        // NOTE: count every keyslot record so a hostile archive cannot force unbounded KDF
+        // work; decodeKeyslot already rejected over-cap params, so reaching unwrap is bounded.
+        ++slotsSeen;
+        if (slotsSeen > maxKeyslotsPerArchive) {
+            return fail(ErrorKind::LimitExceeded, "too many keyslots", position);
+        }
         if (keys.contains(slot->epoch)) {
             position += *size;
             continue;
@@ -93,6 +100,7 @@ collectKeys(File& file, std::uint64_t fileSize, ReaderUnlock& unlock, const Limi
         crypto::SecretBytes key;
         if (slot->kind == SlotKind::Password && unlock.hasPassword) {
             crypto::PasswordSlot pw;
+            pw.epoch = slot->epoch;
             pw.salt = slot->salt;
             pw.opslimit = slot->opslimit;
             pw.memlimitBytes = slot->memlimitBytes;

@@ -1,6 +1,7 @@
 #include "crypto/crypto.hpp"
 
 #include "base/checked.hpp"
+#include "base/endian.hpp"
 
 #include <sodium/core.h>
 #include <sodium/crypto_aead_xchacha20poly1305.h>
@@ -27,7 +28,18 @@ static_assert(publicKeySize == crypto_box_PUBLICKEYBYTES);
 static_assert(secretKeySize == crypto_box_SECRETKEYBYTES);
 static_assert(sealOverhead == crypto_box_SEALBYTES);
 
-constexpr std::string_view passwordSlotAad = "bale-crypto-v1/password-slot";
+constexpr std::string_view passwordSlotDomain = "bale-crypto-v1/password-slot";
+
+std::vector<std::byte> slotAad(std::uint64_t epoch) {
+    std::vector<std::byte> out(
+        reinterpret_cast<const std::byte*>(passwordSlotDomain.data()),
+        reinterpret_cast<const std::byte*>(passwordSlotDomain.data() + passwordSlotDomain.size())
+    );
+    std::array<std::byte, 8> epochLe{};
+    storeLe(epochLe.data(), epoch);
+    out.insert(out.end(), epochLe.begin(), epochLe.end());
+    return out;
+}
 
 std::once_flag sodiumInitFlag;
 int sodiumInitStatus = -1;
@@ -108,6 +120,16 @@ deriveKey(std::span<const std::byte> password, std::span<const std::byte> salt, 
     if (params.memlimitBytes < crypto_pwhash_argon2id_memlimit_min() ||
         params.memlimitBytes > crypto_pwhash_argon2id_memlimit_max()) {
         return fail(ErrorKind::Malformed, "argon2id memlimit out of range", params.memlimitBytes);
+    }
+
+    // NOTE: bale ceiling sits inside the libsodium range; over-cap params fail here even if a
+    // caller skips the slot-layer gates, so no path can reach the KDF allocation with them.
+    if (params.opslimit > maxSlotOpslimit) {
+        return fail(ErrorKind::LimitExceeded, "argon2id opslimit exceeds the bale ceiling");
+    }
+
+    if (params.memlimitBytes > maxSlotMemlimitBytes) {
+        return fail(ErrorKind::LimitExceeded, "argon2id memlimit exceeds the bale ceiling");
     }
 
     auto made = SecretBytes::make(keySize);
@@ -284,13 +306,19 @@ Result<std::vector<std::byte>> open(
 Result<PasswordSlot> wrapPasswordKey(
     std::span<const std::byte> key,
     std::span<const std::byte> password,
-    KdfParams params
+    KdfParams params,
+    std::uint64_t epoch
 ) {
     if (auto sized = requireSize(key, keySize, "data key must hold 32 bytes"); !sized) {
         return std::unexpected(sized.error());
     }
 
+    if (epoch == 0) {
+        return fail(ErrorKind::Malformed, "password slot epoch is zero");
+    }
+
     PasswordSlot slot;
+    slot.epoch = epoch;
     slot.opslimit = params.opslimit;
     slot.memlimitBytes = params.memlimitBytes;
 
@@ -305,10 +333,7 @@ Result<PasswordSlot> wrapPasswordKey(
         return std::unexpected(stretched.error());
     }
 
-    std::span<const std::byte> ad(
-        reinterpret_cast<const std::byte*>(passwordSlotAad.data()),
-        passwordSlotAad.size()
-    );
+    auto ad = slotAad(epoch);
     auto wrapped = seal(stretched->bytes(), slot.nonce, key, ad);
     if (!wrapped) {
         return std::unexpected(wrapped.error());
@@ -327,6 +352,12 @@ unwrapPasswordKey(const PasswordSlot& slot, std::span<const std::byte> password)
         );
     }
 
+    // NOTE: the epoch rides in the seal AAD, so a slot relabelled to another epoch cannot
+    // unwrap; the commit check in the reader stays as a second gate.
+    if (slot.epoch == 0) {
+        return fail(ErrorKind::Malformed, "password slot epoch is zero");
+    }
+
     KdfParams params{
         .opslimit = slot.opslimit,
         .memlimitBytes = slot.memlimitBytes,
@@ -336,10 +367,7 @@ unwrapPasswordKey(const PasswordSlot& slot, std::span<const std::byte> password)
         return std::unexpected(stretched.error());
     }
 
-    std::span<const std::byte> ad(
-        reinterpret_cast<const std::byte*>(passwordSlotAad.data()),
-        passwordSlotAad.size()
-    );
+    auto ad = slotAad(slot.epoch);
     auto key = open(stretched->bytes(), slot.nonce, slot.wrapped, ad);
     if (!key) {
         return std::unexpected(key.error());

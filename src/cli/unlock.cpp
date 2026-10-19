@@ -70,6 +70,8 @@ buildUnlock(const std::optional<std::string>& keyFile, bool promptIfNeeded) {
             }
             std::string_view hex(line.data() + start, line.size() - start);
             if (hex.size() != 64) {
+                // NOTE: wipe the line even on this early return; it holds key material.
+                sodium_memzero(line.data(), line.size());
                 return fail(ErrorKind::Malformed, "key file must hold 64 hex characters per line");
             }
             auto secretBytes = parseRecipientHex(hex);
@@ -83,6 +85,7 @@ buildUnlock(const std::optional<std::string>& keyFile, bool promptIfNeeded) {
             }
             crypto::SecretBytes secret(std::move(*made));
             std::ranges::copy(*secretBytes, secret.mut().begin());
+            sodium_memzero(secretBytes->data(), secretBytes->size());
             auto pub = crypto::publicKeyOf(secret.bytes());
             if (!pub) {
                 return std::unexpected(pub.error());

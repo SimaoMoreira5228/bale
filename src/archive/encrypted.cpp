@@ -207,6 +207,14 @@ Result<Keyslot> decodeKeyslot(std::span<const std::byte> payload, std::uint64_t 
             if (*value == 0) {
                 return fail(ErrorKind::Malformed, "keyslot opslimit is zero", field.offset);
             }
+            // NOTE: reject over-cap params at the TLV layer, before any KDF allocation.
+            if (*value > crypto::maxSlotOpslimit) {
+                return fail(
+                    ErrorKind::LimitExceeded,
+                    "keyslot opslimit exceeds the bale ceiling",
+                    field.offset
+                );
+            }
             slot.opslimit = *value;
             hasOps = true;
             break;
@@ -218,6 +226,14 @@ Result<Keyslot> decodeKeyslot(std::span<const std::byte> payload, std::uint64_t 
             }
             if (*value == 0) {
                 return fail(ErrorKind::Malformed, "keyslot memlimit is zero", field.offset);
+            }
+            // NOTE: reject over-cap params at the TLV layer, before any KDF allocation.
+            if (*value > crypto::maxSlotMemlimitBytes) {
+                return fail(
+                    ErrorKind::LimitExceeded,
+                    "keyslot memlimit exceeds the bale ceiling",
+                    field.offset
+                );
             }
             slot.memlimitBytes = static_cast<std::size_t>(*value);
             hasMem = true;

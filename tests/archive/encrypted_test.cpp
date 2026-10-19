@@ -6,9 +6,11 @@
 #include "format/envelope.hpp"
 
 #include "archive/archive_fixture.hpp"
+#include "archive/encrypted_fixture.hpp"
 
 #include <doctest/doctest.h>
 
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 
@@ -17,44 +19,9 @@ using namespace bale::archive;
 using bale::test::bytesOf;
 using bale::test::fixedOptions;
 using bale::test::fromHex;
-
-namespace {
-
-crypto::KdfParams testKdf() {
-    return {.opslimit = 1, .memlimitBytes = 8192};
-}
-
-WriterSecrets testWriterSecrets() {
-    WriterSecrets secrets;
-    secrets.hasPassword = true;
-    auto made = crypto::SecretBytes::make(7);
-    REQUIRE(made);
-    secrets.password = std::move(*made);
-    std::string_view pw = "test-pw";
-    std::ranges::copy(std::as_bytes(std::span(pw)), secrets.password.mut().begin());
-    secrets.kdf = testKdf();
-    return secrets;
-}
-
-ReaderUnlock testUnlock() {
-    ReaderUnlock unlock;
-    unlock.hasPassword = true;
-    auto made = crypto::SecretBytes::make(7);
-    REQUIRE(made);
-    unlock.password = std::move(*made);
-    std::string_view pw = "test-pw";
-    std::ranges::copy(std::as_bytes(std::span(pw)), unlock.password.mut().begin());
-    return unlock;
-}
-
-std::filesystem::path tempArchive(const std::string& name) {
-    auto path = std::filesystem::temp_directory_path() / name;
-    std::error_code ignored;
-    std::filesystem::remove(path, ignored);
-    return path;
-}
-
-}
+using bale::test::tempArchive;
+using bale::test::testUnlock;
+using bale::test::testWriterSecrets;
 
 TEST_CASE("AAD encodings are byte-exact and recorded") {
     std::array<std::byte, 16> archiveId{};

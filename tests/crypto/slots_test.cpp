@@ -39,7 +39,7 @@ TEST_CASE("password slots wrap and unwrap the data key") {
     auto dataKey = makeKey();
     REQUIRE(dataKey.has_value());
 
-    auto slot = wrapPasswordKey(dataKey->bytes(), testPassword(), testParams());
+    auto slot = wrapPasswordKey(dataKey->bytes(), testPassword(), testParams(), 1);
     REQUIRE(slot.has_value());
     CHECK(slot->wrapped.size() == keySize + tagSize);
 
@@ -48,11 +48,56 @@ TEST_CASE("password slots wrap and unwrap the data key") {
     CHECK(test::hexEncode(back->bytes()) == test::hexEncode(dataKey->bytes()));
 }
 
+TEST_CASE("password slots bind the epoch into the seal") {
+    auto dataKey = makeKey();
+    REQUIRE(dataKey.has_value());
+
+    auto slot = wrapPasswordKey(dataKey->bytes(), testPassword(), testParams(), 1);
+    REQUIRE(slot.has_value());
+    CHECK(slot->epoch == 1);
+
+    auto relabelled = *slot;
+    relabelled.epoch = 2;
+    auto refused = unwrapPasswordKey(relabelled, testPassword());
+    REQUIRE(!refused.has_value());
+    CHECK(refused.error().kind == ErrorKind::Integrity);
+
+    auto zeroed = *slot;
+    zeroed.epoch = 0;
+    CHECK(unwrapPasswordKey(zeroed, testPassword()).error().kind == ErrorKind::Malformed);
+}
+
+TEST_CASE("password slots reject over-cap KDF params before allocating") {
+    auto dataKey = makeKey();
+    REQUIRE(dataKey.has_value());
+
+    CHECK(
+        wrapPasswordKey(dataKey->bytes(), testPassword(), {.opslimit = 9, .memlimitBytes = 8192}, 1)
+            .error()
+            .kind == ErrorKind::LimitExceeded
+    );
+    CHECK(
+        wrapPasswordKey(
+            dataKey->bytes(),
+            testPassword(),
+            {.opslimit = 1, .memlimitBytes = (std::size_t{1} << 30) + 1},
+            1
+        )
+            .error()
+            .kind == ErrorKind::LimitExceeded
+    );
+    // NOTE: a zero epoch never seals: fail closed instead of emitting an unbound slot.
+    CHECK(
+        wrapPasswordKey(dataKey->bytes(), testPassword(), testParams(), 0).error().kind ==
+        ErrorKind::Malformed
+    );
+}
+
 TEST_CASE("password slots reject wrong passwords and damage") {
     auto dataKey = makeKey();
     REQUIRE(dataKey.has_value());
 
-    auto slot = wrapPasswordKey(dataKey->bytes(), testPassword(), testParams());
+    auto slot = wrapPasswordKey(dataKey->bytes(), testPassword(), testParams(), 1);
     REQUIRE(slot.has_value());
 
     auto wrong = testPassword();
@@ -77,7 +122,7 @@ TEST_CASE("password slots work at minimum memory") {
     REQUIRE(dataKey.has_value());
 
     KdfParams floor{.opslimit = 1, .memlimitBytes = 8192};
-    auto slot = wrapPasswordKey(dataKey->bytes(), testPassword(), floor);
+    auto slot = wrapPasswordKey(dataKey->bytes(), testPassword(), floor, 1);
     REQUIRE(slot.has_value());
 
     auto back = unwrapPasswordKey(*slot, testPassword());

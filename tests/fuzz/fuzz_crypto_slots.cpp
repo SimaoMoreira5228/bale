@@ -24,6 +24,7 @@ void checkPasswordSlot(std::span<const std::byte> input) {
     }
 
     bale::crypto::PasswordSlot slot;
+    slot.epoch = 1;
     slot.opslimit = fuzzParams().opslimit;
     slot.memlimitBytes = fuzzParams().memlimitBytes;
     std::ranges::copy(input.first(bale::crypto::saltSize), slot.salt.begin());
