@@ -52,7 +52,7 @@ Exit codes tell you what went wrong:
 
 ## Building
 
-You need CMake 3.25 or newer, a C++23 compiler (GCC 14+ or Clang 18+), and Ninja if you have it. zlib-ng, zstd, LZ4, BLAKE3, xz (liblzma) and bzip2 are fetched and pinned by hash on the first configure. Pass `-DBALE_USE_SYSTEM_CODECS=ON` to use the copies your system already has.
+You need CMake 3.25 or newer, a C++23 compiler (GCC 14+ or Clang 18+), and Ninja if you have it. zlib-ng, zstd, LZ4, BLAKE3, xz (liblzma), bzip2 and libsodium are fetched and pinned by hash on the first configure. Pass `-DBALE_USE_SYSTEM_CODECS=ON` to use the copies your system already has.
 
 ```sh
 ./dev build
@@ -103,4 +103,4 @@ tests          one doctest suite, organised the same way
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE). Bundled codecs keep their own licenses: zlib-ng under the zlib license, zstd and LZ4 under BSD, BLAKE3 under CC0 or Apache-2.0, liblzma under 0BSD, bzip2 under its BSD-style license.
+Apache-2.0. See [LICENSE](LICENSE). Bundled codecs keep their own licenses: zlib-ng under the zlib license, zstd and LZ4 under BSD, BLAKE3 under CC0 or Apache-2.0, liblzma under 0BSD, bzip2 under its BSD-style license, libsodium under the ISC license.
