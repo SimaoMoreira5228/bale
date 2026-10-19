@@ -44,12 +44,25 @@ void printChunking(const archive::WriterMetadata& writer) {
     if (writer.chunkPolicy == static_cast<std::uint64_t>(archive::ChunkPolicy::Fixed)) {
         policy = "fixed";
     }
+    if (writer.chunkPolicy == static_cast<std::uint64_t>(archive::ChunkPolicy::Cdc)) {
+        policy = "cdc";
+    }
 
+    if (policy == "cdc" && writer.chunkMin && writer.chunkTarget && writer.chunkMax) {
+        std::println(
+            "chunking: {}, min {} target {} max {} bytes",
+            policy,
+            *writer.chunkMin,
+            *writer.chunkTarget,
+            *writer.chunkMax
+        );
+        return;
+    }
     if (writer.chunkSize) {
         std::println("chunking: {}, {} bytes", policy, *writer.chunkSize);
-    } else {
-        std::println("chunking: {}", policy);
+        return;
     }
+    std::println("chunking: {}", policy);
 }
 
 void printWriter(const archive::WriterMetadata& writer) {

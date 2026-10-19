@@ -1,5 +1,6 @@
 #pragma once
 
+#include "archive/cdc.hpp"
 #include "base/error.hpp"
 #include "format/record.hpp"
 #include "format/tlv.hpp"
@@ -36,6 +37,7 @@ struct CompressionProfile {
 
 enum class ChunkPolicy : std::uint8_t {
     Fixed = 1,
+    Cdc = 2,
 };
 
 [[nodiscard]] CompressionProfile profileFor(Preset preset);
@@ -52,6 +54,10 @@ struct WriterMetadata {
     std::optional<std::uint64_t> chunkPolicy;
     std::optional<std::uint64_t> chunkSize;
     std::optional<std::uint64_t> workers;
+    std::optional<std::uint64_t> chunkMin;
+    std::optional<std::uint64_t> chunkTarget;
+    std::optional<std::uint64_t> chunkMax;
+    std::optional<std::uint64_t> chunkAlgorithm;
 
     [[nodiscard]] bool empty() const;
 };
@@ -60,6 +66,15 @@ struct WriterMetadata {
     std::string_view name,
     const CompressionProfile& compression,
     std::uint32_t chunkSize,
+    std::uint32_t workers
+);
+
+[[nodiscard]] WriterMetadata describeWriter(
+    std::string_view name,
+    const CompressionProfile& compression,
+    ChunkPolicy policy,
+    std::uint32_t chunkSize,
+    const CdcParams& cdc,
     std::uint32_t workers
 );
 

@@ -63,6 +63,8 @@ struct CreateOptions {
     OutputFormat format = OutputFormat::Bale;
     std::optional<int> level;
     std::uint32_t chunkSize = archive::defaultChunkSize;
+    archive::ChunkPolicy chunkPolicy = archive::ChunkPolicy::Fixed;
+    archive::CdcParams cdc = archive::defaultCdcParams;
     archive::CompressionProfile compression = archive::profileFor(archive::Preset::Balanced);
     bool durable = false;
     std::uint32_t workers = archive::defaultWorkers();

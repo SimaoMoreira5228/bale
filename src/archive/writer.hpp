@@ -1,5 +1,6 @@
 #pragma once
 
+#include "archive/cdc.hpp"
 #include "archive/chunk.hpp"
 #include "archive/index.hpp"
 #include "archive/manifest.hpp"
@@ -39,6 +40,8 @@ struct EntryAttributes {
 
 struct WriterOptions {
     std::uint32_t chunkSize = defaultChunkSize;
+    ChunkPolicy chunkPolicy = ChunkPolicy::Fixed;
+    CdcParams cdc = defaultCdcParams;
     CompressionProfile compression = profileFor(Preset::Balanced);
     std::optional<std::array<std::byte, 16>> archiveId;
     std::optional<std::int64_t> creationTimeNanoseconds;
@@ -126,6 +129,7 @@ class Writer {
         std::size_t position = 0;
         std::uint64_t length = 0;
         std::size_t filled = 0;
+        CdcSplitter cdc;
     };
 
     struct RecordSpan {
@@ -177,6 +181,9 @@ class Writer {
     [[nodiscard]] Result<RecordSpan> writeManifest(Blake3Digest& digest);
     [[nodiscard]] Result<RecordSpan> writeIndex(Blake3Digest& digest);
     [[nodiscard]] Result<void> addWalked(const WalkEntry& entry);
+    [[nodiscard]] Result<void>
+    addFileCdc(std::string_view path, const File& source, const EntryAttributes& attributes);
+    [[nodiscard]] Result<void> writeFileCdc(std::span<const std::byte> data);
 
     File file_;
     WriterOptions options_;

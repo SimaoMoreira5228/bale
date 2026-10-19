@@ -72,7 +72,12 @@ Writer::~Writer() {
 }
 
 Result<void> Writer::checkOptions(const WriterOptions& options) {
-    if (options.chunkSize < minChunkSize || options.chunkSize > maxChunkSize) {
+    if (options.chunkPolicy == ChunkPolicy::Cdc) {
+        auto valid = validateCdcParams(options.cdc);
+        if (!valid) {
+            return valid;
+        }
+    } else if (options.chunkSize < minChunkSize || options.chunkSize > maxChunkSize) {
         return fail(ErrorKind::LimitExceeded, "chunk size outside the supported range");
     }
     if (options.workers == 0 || options.workers > maxWorkers) {
@@ -82,8 +87,9 @@ Result<void> Writer::checkOptions(const WriterOptions& options) {
 }
 
 Result<void> Writer::startPipeline() {
-    auto pipeline =
-        ChunkPipeline::create(options_.compression, options_.chunkSize, options_.workers);
+    std::uint32_t buffer =
+        options_.chunkPolicy == ChunkPolicy::Cdc ? options_.cdc.max : options_.chunkSize;
+    auto pipeline = ChunkPipeline::create(options_.compression, buffer, options_.workers);
     if (!pipeline) {
         return std::unexpected(pipeline.error());
     }
@@ -451,9 +457,17 @@ Result<Writer::RecordSpan> Writer::writeManifest(Blake3Digest& digest) {
     }
     manifest.chunks = std::move(chunks_);
     manifest.comment = options_.comment;
-    manifest.writer = inheritedWriter_
-        ? *inheritedWriter_
-        : describeWriter(writerName, options_.compression, options_.chunkSize, options_.workers);
+    std::uint32_t chunkSize =
+        options_.chunkPolicy == ChunkPolicy::Cdc ? options_.cdc.target : options_.chunkSize;
+    manifest.writer = inheritedWriter_ ? *inheritedWriter_
+                                       : describeWriter(
+                                             writerName,
+                                             options_.compression,
+                                             options_.chunkPolicy,
+                                             chunkSize,
+                                             options_.cdc,
+                                             options_.workers
+                                         );
 
     auto encoded = encodeManifest(manifest, payload_);
     chunks_ = std::move(manifest.chunks);

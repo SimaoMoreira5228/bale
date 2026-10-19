@@ -3,6 +3,7 @@
 #include "base/endian.hpp"
 
 #include <algorithm>
+#include <array>
 #include <limits>
 
 namespace bale::archive {
@@ -170,6 +171,10 @@ Result<void> Writer::appendChunk(ChunkSlot& slot) {
 
 Result<void>
 Writer::addFile(std::string_view path, const File& source, const EntryAttributes& attributes) {
+    if (options_.chunkPolicy == ChunkPolicy::Cdc) {
+        return addFileCdc(path, source, attributes);
+    }
+
     auto attributesValid = checkAttributes(attributes);
     if (!attributesValid) {
         return attributesValid;
@@ -226,6 +231,19 @@ Result<void> Writer::addBytes(
     std::span<const std::byte> data,
     const EntryAttributes& attributes
 ) {
+    if (options_.chunkPolicy == ChunkPolicy::Cdc) {
+        auto begun = beginFile(path, attributes);
+        if (!begun) {
+            return begun;
+        }
+
+        auto written = writeFile(data);
+        if (!written) {
+            return written;
+        }
+        return endFile();
+    }
+
     auto attributesValid = checkAttributes(attributes);
     if (!attributesValid) {
         return attributesValid;
@@ -270,7 +288,10 @@ Result<void> Writer::beginFile(std::string_view path, const EntryAttributes& att
     }
     (*entry)->mtimeNanoseconds = attributes.mtimeNanoseconds;
     (*entry)->mode = attributes.mode;
-    openFile_ = OpenFile{.position = entries_.size() - 1};
+    openFile_ = OpenFile{
+        .position = entries_.size() - 1,
+        .cdc = CdcSplitter(options_.cdc),
+    };
     return {};
 }
 
@@ -281,6 +302,9 @@ Result<void> Writer::writeFile(std::span<const std::byte> data) {
     }
     if (!openFile_) {
         return fail(ErrorKind::Malformed, "no file entry is open");
+    }
+    if (options_.chunkPolicy == ChunkPolicy::Cdc) {
+        return writeFileCdc(data);
     }
 
     OpenFile& open = *openFile_;
@@ -384,6 +408,69 @@ Writer::addTree(const std::filesystem::path& root, const std::filesystem::path& 
 
     skipped_.insert(skipped_.end(), walker->skipped().begin(), walker->skipped().end());
     return result;
+}
+
+Result<void>
+Writer::addFileCdc(std::string_view path, const File& source, const EntryAttributes& attributes) {
+    auto begun = beginFile(path, attributes);
+    if (!begun) {
+        return begun;
+    }
+
+    std::array<std::byte, 65536> staging;
+    std::uint64_t offset = 0;
+    while (true) {
+        auto count = source.readAt(offset, staging);
+        if (!count) {
+            return failInOrder(count.error());
+        }
+        if (*count == 0) {
+            break;
+        }
+
+        auto written = writeFile(std::span(staging).first(*count));
+        if (!written) {
+            return written;
+        }
+        offset += *count;
+    }
+    return endFile();
+}
+
+Result<void> Writer::writeFileCdc(std::span<const std::byte> data) {
+    if (!openFile_) {
+        return fail(ErrorKind::Malformed, "no file entry is open");
+    }
+    OpenFile& open = *openFile_;
+
+    while (!data.empty()) {
+        auto slot = acquireSlot();
+        if (!slot) {
+            return std::unexpected(slot.error());
+        }
+
+        std::span<std::byte> buffer = (*slot)->input;
+        bool cut = false;
+        while (!data.empty() && !cut) {
+            buffer[open.filled] = data[0];
+            std::byte value = data[0];
+            data = data.subspan(1);
+            ++open.filled;
+            ++open.length;
+            cut = open.cdc.feed(value);
+        }
+
+        if (cut) {
+            std::size_t complete = open.filled;
+            open.cdc.nextChunk();
+            open.filled = 0;
+            auto submitted = submitChunk(complete);
+            if (!submitted) {
+                return submitted;
+            }
+        }
+    }
+    return {};
 }
 
 }
