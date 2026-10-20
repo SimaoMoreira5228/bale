@@ -1,7 +1,16 @@
-"""Second, independent encoder for BALE golden vectors (whitepaper section 17.8).
+"""Second, independent encoder for BALE golden vectors (whitepaper sections 5A.2-5A.5).
 
-Pure Python with its own BLAKE3 and CRC32C, written from the schema description rather than from
-the C++ sources, so a golden archive produced here checks the C++ writer instead of echoing it.
+Pure Python with its own BLAKE3 and CRC32C, written from the schema description rather
+than from the C++ sources, so a golden archive produced here checks the C++ writer
+instead of echoing it.
+
+Coverage: all record types (DATA, MANIFEST, INDEX, COMMIT, EXTENSION), all codecs
+(RAW, ZSTD, LZ4, LZMA2, BROTLI), record flags (provisional ENCRYPTED bit marked as
+such), superblock required/optional features, chunk policies (FIXED, CDC) with the
+pinned gear table, writer-metadata fields including the CDC triple, multi-generation
+appends, and the provisional encrypted envelope shape (structure only: this module
+has no XChaCha20-Poly1305 and never seals anything; sealed bytes are opaque
+placeholders, never valid ciphertext).
 """
 
 import struct
@@ -124,12 +133,25 @@ def derive_key(context, material):
     return blake3(material, key_words=struct.unpack("<8I", context_key), flags=DERIVE_KEY_MATERIAL)
 
 
+# NOTE: table-driven CRC32C (Castagnoli, reflected, init/xor 0xFFFFFFFF), verified
+# against the bitwise reference in tests/format/envelope_test.cpp.
+def _build_crc_table():
+    table = []
+    for value in range(256):
+        remainder = value
+        for _ in range(8):
+            remainder = (remainder >> 1) ^ (0x82F63B78 if remainder & 1 else 0)
+        table.append(remainder)
+    return table
+
+
+_CRC_TABLE = _build_crc_table()
+
+
 def crc32c(data):
     crc = 0xFFFFFFFF
     for byte in data:
-        crc ^= byte
-        for _ in range(8):
-            crc = (crc >> 1) ^ (0x82F63B78 if crc & 1 else 0)
+        crc = _CRC_TABLE[(crc ^ byte) & 0xFF] ^ (crc >> 8)
     return crc ^ 0xFFFFFFFF
 
 
@@ -169,35 +191,88 @@ def tlv_list(elements):
     return uleb128(len(elements)) + b"".join(uleb128(len(element)) + element for element in elements)
 
 
-def chunk_key(chunk):
+def chunk_key(chunk, algorithm=1):
     digest = derive_key(CONTEXTS["chunk"], chunk)
-    return unsigned(1, 1) + field(2, digest) + unsigned(3, len(chunk))
+    return unsigned(1, algorithm) + field(2, digest) + unsigned(3, len(chunk))
 
 
+def encrypted_extent(chunk, object_id, algorithm=1):
+    return chunk_key(chunk, algorithm) + field(10, object_id)
+
+
+# Record types.
 RECORD_DATA = 1
 RECORD_MANIFEST = 2
 RECORD_INDEX = 3
 RECORD_COMMIT = 4
+RECORD_EXTENSION = 5
+
+# Codec IDs: one exact stream per chunk (see record.hpp note).
 CODEC_RAW = 0
 CODEC_ZSTD = 1
+CODEC_LZ4 = 2
+CODEC_LZMA2 = 3
+CODEC_BROTLI = 4
+
+# Record flags: low byte required, high byte optional. Bit 0 is provisional.
+REQUIRED_FLAG_MASK = 0x00FF
+FLAG_ENCRYPTED = 0x0001  # provisional experimental value; format unfrozen
+
+# Superblock features. Bit 0 is provisional.
+FEATURE_ENCRYPTED = 0x00000001  # provisional experimental value; format unfrozen
+
+# Hash algorithms.
+HASH_BLAKE3 = 1
+HASH_ENCRYPTED_OBJECT = 2  # provisional experimental value; format unfrozen
+
+# Manifest entry kinds.
+ENTRY_REGULAR = 1
+ENTRY_DIRECTORY = 2
+ENTRY_SYMLINK = 3
+ENTRY_HARDLINK = 4
+
+# Chunk policies and CDC algorithm.
+POLICY_FIXED = 1
+POLICY_CDC = 2
+CDC_GEAR = 1
+CDC_MIN_DEFAULT = 256 * 1024
+CDC_TARGET_DEFAULT = 1024 * 1024
+CDC_MAX_DEFAULT = 4 * 1024 * 1024
+CDC_TABLE_SEED = 0x243F6A8885A308D3
+
+# Keyslot extension (all provisional experimental values; format unfrozen).
+KEYSLOT_KIND = 1
+KEYSLOT_VERSION = 1
+SLOT_PASSWORD = 0
+SLOT_RECIPIENT = 1
+
+# Commit fields beyond the plain shape.
+COMMIT_PREVIOUS_FOOTER_FIELD = 12
+COMMIT_EPOCH_FIELD = 13
+COMMIT_ENCRYPTED_FEATURE = 0x00000001  # provisional; later builds may not read it
+
+MIN_CHUNK_SIZE = 4 * 1024
+MAX_CHUNK_SIZE = 64 * 1024 * 1024
+
+PRESETS = {"fast": 1, "balanced": 2, "small": 3, "restore-fast": 4, "portable": 5}
 
 
-def record(record_type, payload, sequence, codec=CODEC_RAW, decoded_length=None):
+def record(record_type, payload, sequence, codec=CODEC_RAW, decoded_length=None, flags=0):
     if decoded_length is None:
         decoded_length = len(payload)
     prefix = bytearray(
         b"BLR1"
-        + struct.pack("<HHQQQI", record_type, 0, len(payload), decoded_length, sequence, codec)
+        + struct.pack("<HHQQQI", record_type, flags, len(payload), decoded_length, sequence, codec)
         + b"\0" * 12
     )
     struct.pack_into("<I", prefix, 36, crc32c(bytes(prefix)))
     return bytes(prefix) + payload + struct.pack("<I", crc32c(payload)) + b"END1"
 
 
-def superblock(archive_id, creation_time):
+def superblock(archive_id, creation_time, required_features=0, optional_features=0, minor=0):
     header = bytearray(
         b"BALE\r\n\x1a\n"
-        + struct.pack("<HHIII", 1, 0, 64, 0, 0)
+        + struct.pack("<HHIII", 1, minor, 64, required_features, optional_features)
         + archive_id
         + struct.pack("<q", creation_time)
         + b"\0" * 8
@@ -217,35 +292,226 @@ def footer(commit_offset, commit_length, generation, commit_digest):
     return bytes(body)
 
 
-ENTRY_REGULAR = 1
-ENTRY_DIRECTORY = 2
+def data_descriptor(key_tlv, chunk=b""):
+    descriptor = uleb128(len(key_tlv)) + key_tlv
+    return descriptor, descriptor + chunk
 
-PRESETS = {"fast": 1, "balanced": 2, "small": 3, "restore-fast": 4, "portable": 5}
 
-
-def writer_metadata(name, preset, codec, level, chunk_size):
+def writer_metadata(
+    name,
+    preset,
+    codec,
+    level,
+    chunk_size,
+    chunk_policy=POLICY_FIXED,
+    workers=1,
+    chunk_min=None,
+    chunk_target=None,
+    chunk_max=None,
+    chunk_algorithm=None,
+):
     body = field(1, name.encode(), critical=False)
     if preset is not None:
-        body += unsigned(2, PRESETS[preset], critical=False)
-    body += unsigned(3, codec, critical=False)
-    body += signed64(4, level)
-    body += unsigned(5, 1, critical=False)
-    body += unsigned(6, chunk_size, critical=False)
-    body += unsigned(8, 1, critical=False)
+        body += unsigned(2, PRESETS[preset] if isinstance(preset, str) else preset, critical=False)
+    if codec is not None:
+        body += unsigned(3, codec, critical=False)
+    if level is not None:
+        body += signed64(4, level)
+    body += unsigned(5, chunk_policy, critical=False)
+    if chunk_size is not None:
+        body += unsigned(6, chunk_size, critical=False)
+    # NOTE: field 7 is reserved and never emitted.
+    if workers is not None:
+        body += unsigned(8, workers, critical=False)
+    if chunk_min is not None:
+        body += unsigned(9, chunk_min, critical=False)
+    if chunk_target is not None:
+        body += unsigned(10, chunk_target, critical=False)
+    if chunk_max is not None:
+        body += unsigned(11, chunk_max, critical=False)
+    if chunk_algorithm is not None:
+        body += unsigned(12, chunk_algorithm, critical=False)
     return field(4, body, critical=False)
 
 
-def entry(path, kind, length=None, chunks=(), mtime=None, mode=None):
+def entry(
+    path,
+    kind,
+    length=None,
+    chunks=(),
+    mtime=None,
+    mode=None,
+    target=None,
+    encrypted_objects=(),
+):
     body = field(1, path.encode()) + unsigned(2, kind)
     if kind == ENTRY_REGULAR:
         body += unsigned(3, length)
         if chunks:
-            body += field(4, tlv_list([chunk_key(chunk) for chunk in chunks]))
+            if encrypted_objects:
+                elements = [
+                    encrypted_extent(chunk, object_id)
+                    for chunk, object_id in zip(chunks, encrypted_objects)
+                ]
+            else:
+                elements = [chunk_key(chunk) for chunk in chunks]
+            body += field(4, tlv_list(elements))
     if mtime is not None:
         body += signed64(5, mtime)
     if mode is not None:
         body += unsigned(6, mode, critical=False)
+    if kind == ENTRY_SYMLINK:
+        body += field(9, target.encode())
+    if kind == ENTRY_HARDLINK:
+        body += field(10, target.encode())
     return body
+
+
+def manifest_payload(version, entries, comment="", writer=b""):
+    payload = unsigned(1, version) + field(2, tlv_list(entries))
+    if comment:
+        payload += field(3, comment.encode(), critical=False)
+    payload += writer
+    return payload
+
+
+def index_payload(entries):
+    return unsigned(1, 1) + field(2, tlv_list(entries))
+
+
+def index_entry(key_tlv, record_offset, record_length, codec=CODEC_RAW):
+    return key_tlv + unsigned(4, record_offset) + unsigned(5, record_length) + unsigned(6, codec)
+
+
+def commit_payload(
+    generation,
+    previous,
+    required_features,
+    manifest_offset,
+    manifest_length,
+    manifest_digest,
+    index_offset,
+    index_length,
+    index_digest,
+    previous_footer_offset=None,
+    epoch=None,
+):
+    payload = (
+        unsigned(1, 1)
+        + unsigned(2, generation)
+        + field(3, previous)
+        + unsigned(4, required_features)
+        + unsigned(5, manifest_offset)
+        + unsigned(6, manifest_length)
+        + field(7, manifest_digest)
+        + unsigned(8, index_offset)
+        + unsigned(9, index_length)
+        + field(10, index_digest)
+    )
+    if previous_footer_offset is not None:
+        payload += unsigned(12, previous_footer_offset, critical=False)
+    if epoch is not None:
+        payload += unsigned(13, epoch)
+    return payload
+
+
+def keyslot_payload_password(epoch, salt, opslimit, memlimit, nonce, wrapped):
+    return (
+        unsigned(1, KEYSLOT_KIND)
+        + unsigned(2, KEYSLOT_VERSION)
+        + unsigned(3, epoch)
+        + unsigned(4, SLOT_PASSWORD)
+        + field(10, salt)
+        + unsigned(11, opslimit)
+        + unsigned(12, memlimit)
+        + field(13, nonce)
+        + field(14, wrapped)
+    )
+
+
+def keyslot_payload_recipient(epoch, public_key, sealed):
+    return (
+        unsigned(1, KEYSLOT_KIND)
+        + unsigned(2, KEYSLOT_VERSION)
+        + unsigned(3, epoch)
+        + unsigned(4, SLOT_RECIPIENT)
+        + field(20, public_key)
+        + field(21, sealed)
+    )
+
+
+def splitmix64_step(value):
+    merged = (value + 0x9E3779B97F4A7C15) & 0xFFFFFFFFFFFFFFFF
+    merged = ((merged ^ (merged >> 30)) * 0xBF58476D1CE4E5B9) & 0xFFFFFFFFFFFFFFFF
+    merged = ((merged ^ (merged >> 27)) * 0x94D049BB133111EB) & 0xFFFFFFFFFFFFFFFF
+    return (merged ^ (merged >> 31)) & 0xFFFFFFFFFFFFFFFF
+
+
+def gear_table():
+    table = []
+    state = CDC_TABLE_SEED
+    for _ in range(256):
+        state = splitmix64_step(state)
+        table.append(state)
+    return table
+
+
+GEAR = gear_table()
+
+
+def validate_cdc_params(chunk_min, chunk_target, chunk_max):
+    for value in (chunk_min, chunk_target, chunk_max):
+        if value < MIN_CHUNK_SIZE or value > MAX_CHUNK_SIZE:
+            raise ValueError("cdc chunk size outside the supported range")
+    if not (chunk_min <= chunk_target <= chunk_max):
+        raise ValueError("cdc chunk sizes out of order: min, target, max")
+
+
+class CdcSplitter:
+    """Content-defined chunk cutter. Mirrors the schema recurrence from scratch."""
+
+    def __init__(self, chunk_min, chunk_target, chunk_max):
+        # NOTE: no range check here; the writer validates params separately
+        # and the splitter itself accepts any triple, like the C++ cutter.
+        self.min = chunk_min
+        self.target = chunk_target
+        self.max = chunk_max
+        self.masked = chunk_target != 0 and (chunk_target & (chunk_target - 1)) == 0
+        self.mask = chunk_target - 1 if self.masked else 0
+        self.reset()
+
+    def reset(self):
+        self.digest = 0
+        self.length = 0
+
+    def next_chunk(self):
+        self.length = 0
+
+    def feed(self, byte):
+        self.digest = ((self.digest << 1) + GEAR[byte]) & 0xFFFFFFFFFFFFFFFF
+        self.length += 1
+        if self.length >= self.max:
+            return True
+        if self.length < self.min:
+            return False
+        if self.masked:
+            return (self.digest & self.mask) == 0
+        return self.digest % self.target == 0
+
+
+def cdc_chunks(data, chunk_min, chunk_target, chunk_max):
+    splitter = CdcSplitter(chunk_min, chunk_target, chunk_max)
+    chunks = []
+    current = bytearray()
+    for byte in data:
+        current.append(byte)
+        if splitter.feed(byte):
+            chunks.append(bytes(current))
+            current = bytearray()
+            splitter.next_chunk()
+    if current or not chunks:
+        chunks.append(bytes(current))
+    return chunks
 
 
 def golden_archive():
@@ -266,37 +532,37 @@ def golden_archive():
         entry("d/g", ENTRY_REGULAR, length=5, chunks=[chunk], mtime=file_time, mode=0o644),
         entry("e", ENTRY_REGULAR, length=0),
     ]
-    manifest_payload = (
+    manifest_payload_bytes = (
         unsigned(1, 1)
         + field(2, tlv_list(entries))
         + writer_metadata("bale", "balanced", CODEC_ZSTD, 3, 1 << 20)
     )
     manifest_offset = len(out)
-    manifest = record(RECORD_MANIFEST, manifest_payload, 1)
+    manifest = record(RECORD_MANIFEST, manifest_payload_bytes, 1)
     out += manifest
 
-    index_entry = descriptor + unsigned(4, data_offset) + unsigned(5, len(data)) + unsigned(6, CODEC_RAW)
-    index_payload = unsigned(1, 1) + field(2, tlv_list([index_entry]))
+    index_entry_bytes = chunk_key(chunk) + unsigned(4, data_offset) + unsigned(5, len(data)) + unsigned(6, CODEC_RAW)
+    index_payload_bytes = unsigned(1, 1) + field(2, tlv_list([index_entry_bytes]))
     index_offset = len(out)
-    index = record(RECORD_INDEX, index_payload, 2)
+    index = record(RECORD_INDEX, index_payload_bytes, 2)
     out += index
 
-    commit_payload = (
+    commit_payload_bytes = (
         unsigned(1, 1)
         + unsigned(2, 1)
         + field(3, b"\0" * 32)
         + unsigned(4, 0)
         + unsigned(5, manifest_offset)
         + unsigned(6, len(manifest))
-        + field(7, derive_key(CONTEXTS["manifest"], manifest_payload))
+        + field(7, derive_key(CONTEXTS["manifest"], manifest_payload_bytes))
         + unsigned(8, index_offset)
         + unsigned(9, len(index))
-        + field(10, derive_key(CONTEXTS["index"], index_payload))
+        + field(10, derive_key(CONTEXTS["index"], index_payload_bytes))
     )
     commit_offset = len(out)
-    commit = record(RECORD_COMMIT, commit_payload, 3)
+    commit = record(RECORD_COMMIT, commit_payload_bytes, 3)
     out += commit
-    out += footer(commit_offset, len(commit), 1, derive_key(CONTEXTS["commit"], commit_payload))
+    out += footer(commit_offset, len(commit), 1, derive_key(CONTEXTS["commit"], commit_payload_bytes))
     return bytes(out)
 
 
