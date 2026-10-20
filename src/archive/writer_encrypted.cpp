@@ -126,6 +126,9 @@ Writer::createEncrypted(File file, const WriterOptions& options, WriterSecrets&&
             std::chrono::duration_cast<std::chrono::nanoseconds>(now).count();
     }
     superblock.requiredFeatures = encryptedRequiredFeature;
+    if (options.parity.enabled) {
+        superblock.requiredFeatures |= parityRequiredFeature;
+    }
     if (auto written = writer.appendRaw(encodeSuperblock(superblock)); !written) {
         return std::unexpected(written.error());
     }
@@ -210,6 +213,13 @@ Result<Writer> Writer::appendEncrypted(
     if (reader->commit().generation == std::numeric_limits<std::uint64_t>::max()) {
         return fail(ErrorKind::LimitExceeded, "archive generation limit exceeded");
     }
+    if (options.parity.enabled &&
+        (reader->superblock().requiredFeatures & parityRequiredFeature) == 0) {
+        return fail(
+            ErrorKind::Malformed,
+            "archive superblock was created without parity; recreate with --parity to enable it"
+        );
+    }
 
     auto dataKey = crypto::makeKey();
     if (!dataKey) {
@@ -236,6 +246,7 @@ Result<Writer> Writer::appendEncrypted(
     }
     writer.position_ = position;
     writer.sequence_ = reader->sequenceCount();
+    writer.generationStart_ = position;
     writer.generation_ = reader->commit().generation + 1;
     writer.previousCommit_ = reader->commitDigest();
     writer.previousFooterOffset_ = reader->footerOffset();

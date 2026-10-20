@@ -16,6 +16,7 @@ bale update backup.bale ./project
 bale info backup.bale
 bale compact backup.bale compacted.bale
 bale test backup.bale
+bale repair backup.bale
 bale list archive.zip
 bale list --long backup.tar
 bale test archive.zip
@@ -48,6 +49,12 @@ Pass `--sign <seed-file>` to `create` or `update` (bale only) to sign the commit
 The trust model is deliberately minimal — no PKI, no key servers, no web of trust. You get the public key from the signer yourself, outside of bale, and a passing check means exactly one thing: whoever holds the matching secret signed this exact commit (generation, epoch and commit digest). It says nothing about who they are, whether the key is still good, or whether an older generation was signed by someone else. Without `--verify-key` signatures are ignored entirely: unsigned archives and archives signed by other keys open and verify exactly as before, and `compact` refuses a signed source unless you pass `--sign` to re-sign the compacted archive (rewriting the layout invalidates the old signatures, so silently dropping them would lie).
 
 Each signature covers exactly one commit generation and key epoch (epoch 0 for plain archives, the key epoch for encrypted ones). A signature from an older generation never verifies a newer commit, so rotating keys means signing the new generation with the new key; `info` shows every signer on the latest commit. Verification failure is an integrity error (exit 5), distinct from a structurally damaged archive (exit 4): a file that fails to open is corrupt, a file that opens but has no matching signature is simply not yours.
+
+## Experimental stripe parity
+
+Pass `--parity small`, `--parity capacity` or `--parity <k>+<m>` to `create` or `update` (bale only) to add Cauchy Reed-Solomon recovery for the new generation: `small` is 10+4 (~29% extra space), `capacity` is 17+3 (~15%). Parity is off unless asked for, and `--parity-shard-size <n>` (default 64K) controls the stripe width. Each generation gets its own stripe group, so appending never rewrites earlier parity, and `compact` regenerates parity from validated content on the fresh archive instead of copying it. Encrypted generations stripe ciphertext only (nonces and tags as stored), never plaintext or keys. `bale info` shows the layout; `bale repair <archive>` heals stripe damage in place and then checks like `test`, reusing the same exit codes. This is provisional: the record type, flag and footer bits are not frozen and a later build may not read these archives at all — older binaries refuse them outright through the required-feature bits.
+
+Parity converts checksum failures into erasures and recovers up to `m` dead shards per stripe, including lost index, commit and keyslot bytes, which are striped like everything else. It does not correct silent corruption: a flipped bit that still passes its CRC is outside the model, and more than `m` erasures in one stripe is a clean integrity refusal (exit 5), after which the reader falls back to the newest fully valid generation. Repaired bytes are decrypted, decompressed and hash-checked in memory before they touch the file, and a refusal leaves the archive untouched, so re-running repair after more damage is always safe.
 
 Names from the archive are escaped before they reach your terminal. A file called `\x1b[31m...` can't recolor your shell or hide behind a bidi override.
 

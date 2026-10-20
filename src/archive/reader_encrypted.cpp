@@ -25,131 +25,6 @@ void wipeBytes(std::vector<std::byte>& bytes) {
     }
 }
 
-Result<std::map<std::uint64_t, crypto::SecretBytes>>
-collectKeys(File& file, std::uint64_t fileSize, ReaderUnlock& unlock, const Limits& limits) {
-    std::map<std::uint64_t, crypto::SecretBytes> keys;
-    std::vector<std::byte> recordBuffer;
-    std::uint64_t position = superblockSize;
-    std::uint64_t slotsSeen = 0;
-    RecordLimits recordLimits{
-        .maxPayloadLength = maxEncryptedPayloadBytes,
-        .maxDecodedLength = maxEncryptedPayloadBytes,
-    };
-    std::array<std::byte, recordPrefixSize> prefix{};
-    std::array<std::byte, footerSize> footerBytes{};
-    (void)limits;
-    while (position < fileSize) {
-        if (fileSize - position >= footerSize) {
-            auto peek = file.readExactAt(position, std::span<std::byte>(footerBytes));
-            if (!peek) {
-                return std::unexpected(peek.error());
-            }
-            if (std::ranges::equal(std::span(footerBytes).first(footerMagic.size()), footerMagic)) {
-                auto footer = decodeFooter(footerBytes, position);
-                if (footer) {
-                    position += footerSize;
-                    continue;
-                }
-            }
-        }
-        if (fileSize - position < recordFramingSize) {
-            break;
-        }
-        auto read = file.readExactAt(position, std::span<std::byte>(prefix));
-        if (!read) {
-            return std::unexpected(read.error());
-        }
-        auto header = decodeRecordPrefix(prefix, recordLimits, position);
-        if (!header) {
-            break;
-        }
-        auto size = recordSize(header->payloadLength);
-        if (!size || !fitsWithin(position, *size, fileSize)) {
-            break;
-        }
-        if (header->type != RecordType::Extension || (header->flags & encryptedRecordFlag) == 0) {
-            position += *size;
-            continue;
-        }
-        if (header->payloadLength > 4096) {
-            return fail(ErrorKind::LimitExceeded, "keyslot payload too large", position);
-        }
-        recordBuffer.resize(static_cast<std::size_t>(*size));
-        auto full = file.readExactAt(position, recordBuffer);
-        if (!full) {
-            return std::unexpected(full.error());
-        }
-        auto record = decodeRecord(recordBuffer, recordLimits, position);
-        if (!record) {
-            return std::unexpected(record.error());
-        }
-        // NOTE: SIGNATURE records share the Extension type; they carry no key material and
-        // NOTE: are verified against the commit digest later, so the keyslot scan skips them.
-        if (auto kind = peekExtensionKind(record->payload, position + recordPrefixSize);
-            kind && *kind == signatureExtensionKind) {
-            position += *size;
-            continue;
-        }
-        auto slot = decodeKeyslot(record->payload, position + recordPrefixSize);
-        if (!slot) {
-            return std::unexpected(slot.error());
-        }
-        // NOTE: count every keyslot record so a hostile archive cannot force unbounded KDF
-        // work; decodeKeyslot already rejected over-cap params, so reaching unwrap is bounded.
-        ++slotsSeen;
-        if (slotsSeen > maxKeyslotsPerArchive) {
-            return fail(ErrorKind::LimitExceeded, "too many keyslots", position);
-        }
-        if (keys.contains(slot->epoch)) {
-            position += *size;
-            continue;
-        }
-        bool unlocked = false;
-        crypto::SecretBytes key;
-        if (slot->kind == SlotKind::Password && unlock.hasPassword) {
-            crypto::PasswordSlot pw;
-            pw.epoch = slot->epoch;
-            pw.salt = slot->salt;
-            pw.opslimit = slot->opslimit;
-            pw.memlimitBytes = slot->memlimitBytes;
-            pw.nonce = slot->nonce;
-            pw.wrapped = slot->wrapped;
-            auto back = crypto::unwrapPasswordKey(pw, unlock.password.bytes());
-            if (back) {
-                key = std::move(*back);
-                unlocked = true;
-            } else if (back.error().kind != ErrorKind::Integrity) {
-                return std::unexpected(back.error());
-            }
-        } else if (slot->kind == SlotKind::Recipient) {
-            for (const auto& recipient : unlock.recipients) {
-                if (recipient.publicKey != slot->recipientPublic) {
-                    continue;
-                }
-                crypto::RecipientSlot sealed;
-                sealed.sealed = slot->sealed;
-                auto back = crypto::unwrapRecipientKey(
-                    sealed,
-                    recipient.publicKey,
-                    recipient.secretKey.bytes()
-                );
-                if (back) {
-                    key = std::move(*back);
-                    unlocked = true;
-                    break;
-                } else if (back.error().kind != ErrorKind::Integrity) {
-                    return std::unexpected(back.error());
-                }
-            }
-        }
-        if (unlocked) {
-            keys.emplace(slot->epoch, std::move(key));
-        }
-        position += *size;
-    }
-    return keys;
-}
-
 Result<std::pair<Footer, std::uint64_t>>
 findLatestFooterOffset(File& file, std::uint64_t fileSize, const ReaderOptions& options) {
     std::uint64_t window = std::min(
@@ -232,7 +107,7 @@ Reader::openEncrypted(File file, const ReaderOptions& options, ReaderUnlock&& un
         return fail(ErrorKind::Malformed, "archive is not encrypted");
     }
 
-    auto keys = collectKeys(reader.file_, reader.fileSize_, unlock, options.limits);
+    auto keys = collectDataKeys(reader.file_, reader.fileSize_, unlock, options.limits);
     if (!keys) {
         return std::unexpected(keys.error());
     }
@@ -367,9 +242,13 @@ Reader::openEncrypted(File file, const ReaderOptions& options, ReaderUnlock&& un
             }
             // NOTE: a signed parent leaves SIGNATURE records between its commit and its
             // NOTE: footer; the gap must validate as a trailer exactly like the latest one.
-            if (auto trailer =
-                    reader
-                        .checkTrailerRecords(parentCommitEnd, current.previousFooterOffset, false);
+            if (auto trailer = reader.checkTrailerRecords(
+                    parentCommitEnd,
+                    current.previousFooterOffset,
+                    false,
+                    parentFooter->parity,
+                    parentFooter->generation
+                );
                 !trailer) {
                 return std::unexpected(trailer.error());
             }

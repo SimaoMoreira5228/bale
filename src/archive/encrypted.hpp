@@ -6,10 +6,13 @@
 #include "crypto/crypto.hpp"
 #include "crypto/secrets.hpp"
 #include "format/record.hpp"
+#include "io/file.hpp"
+#include "security/budget.hpp"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <span>
 #include <vector>
@@ -82,5 +85,10 @@ commitAad(std::span<const std::byte, 16> archiveId, std::uint64_t epoch);
 [[nodiscard]] Result<ObjectId> makeObjectId();
 
 [[nodiscard]] Result<std::array<std::byte, crypto::nonceSize>> makeRecordNonce();
+
+struct ReaderUnlock;
+
+[[nodiscard]] Result<std::map<std::uint64_t, crypto::SecretBytes>>
+collectDataKeys(File& file, std::uint64_t fileSize, ReaderUnlock& unlock, const Limits& limits);
 
 }

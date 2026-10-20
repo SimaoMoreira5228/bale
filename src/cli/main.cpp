@@ -47,6 +47,9 @@ commands:
       --codec <...> --level   zstd levels 1-22, lz4 levels 0-12, lzma2 levels 0-9,
                               brotli levels 0-11
       --threads <1-64>        compression worker threads (default: CPU count, at most 8)
+      --parity <spec>         emit stripe parity for the new generation: small (10+4),
+                              capacity (17+3) or explicit <k>+<m> (bale only, off by default)
+      --parity-shard-size <n> parity shard bytes, K or M suffix allowed (default 64K, needs --parity)
       --experimental-encryption  emit experimental encrypted records (bale only)
       --recipient <hex>       recipient X25519 public key, 64 hex chars (repeatable)
       --key-file <path>       recipient secret keys for update/unlock (one hex key per line)
@@ -61,6 +64,7 @@ commands:
       write the current snapshot to a new archive and keep the source
   list <archive> [--long] [--key-file <path>] [--verify-key <hex>]   list entries, --long adds type, size and modification time
   test <archive> [--key-file <path>] [--verify-key <hex>]            check archive structure and entry checksums
+  repair <archive> [--key-file <path>] [--verify-key <hex>]          repair stripe damage with parity, then check like test
   info <archive> [--key-file <path>] [--verify-key <hex>]            show the format and, for .bale, the recorded compression profile
   extract <archive> [options]
       -o, --output <dir>      extract into dir (default: current directory)
@@ -214,7 +218,8 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
         std::string_view argument = arguments[index];
         if (argument == "--chunk-size" || argument == "--threads" || argument == "--preset" ||
             argument == "--codec" || argument == "--chunking" || argument == "--chunk-min" ||
-            argument == "--chunk-target" || argument == "--chunk-max") {
+            argument == "--chunk-target" || argument == "--chunk-max" || argument == "--parity" ||
+            argument == "--parity-shard-size") {
             nativeOption = argument;
         }
         if (argument == "--format") {
@@ -346,6 +351,30 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
             options.experimentalEncryption = true;
             continue;
         }
+        if (argument == "--parity") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--parity needs small, capacity or <k>+<m>");
+            }
+            ++index;
+            auto parsed = bale::archive::parseParitySpec(arguments[index]);
+            if (!parsed) {
+                return usageError("--parity must be small, capacity or <k>+<m>");
+            }
+            options.parity = *parsed;
+            continue;
+        }
+        if (argument == "--parity-shard-size") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--parity-shard-size needs a size");
+            }
+            ++index;
+            auto size = parseSize(arguments[index]);
+            if (!size) {
+                return usageError("invalid --parity-shard-size");
+            }
+            options.parityShardSize = size;
+            continue;
+        }
         if (argument == "--recipient") {
             if (index + 1 == arguments.size()) {
                 return usageError("--recipient needs a 64-hex-character key");
@@ -404,7 +433,7 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
         if (!nativeOption.empty()) {
             return usageError(
                 "--chunk-size, --chunking, --chunk-min, --chunk-target, --chunk-max, "
-                "--threads, --preset and --codec apply only to bale"
+                "--threads, --preset, --codec, --parity and --parity-shard-size apply only to bale"
             );
         }
         if (explicitLevel) {
@@ -435,6 +464,18 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
 
     if (!options.experimentalEncryption && !options.recipients.empty()) {
         return usageError("--recipient requires --experimental-encryption");
+    }
+    if (options.parityShardSize && !options.parity) {
+        return usageError("--parity-shard-size needs --parity");
+    }
+    if (options.parity) {
+        bale::archive::ParityConfig config = *options.parity;
+        if (options.parityShardSize) {
+            config.shardBytes = *options.parityShardSize;
+        }
+        if (auto valid = bale::archive::validateParityConfig(config); !valid) {
+            return usageError(valid.error().what);
+        }
     }
     if (options.experimentalEncryption && options.format != bale::cli::OutputFormat::Bale) {
         return usageError("--experimental-encryption applies only to bale");
@@ -602,6 +643,45 @@ int runTest(std::span<const std::string_view> arguments) {
         return usageError("test takes exactly one archive");
     }
     return exitWith(bale::cli::testArchive(archive, keyFile, verifyKeys));
+}
+
+int runRepair(std::span<const std::string_view> arguments) {
+    std::optional<std::string> keyFile;
+    bale::cli::VerifyKeys verifyKeys;
+    std::string_view archive;
+    for (std::size_t index = 0; index < arguments.size(); ++index) {
+        std::string_view argument = arguments[index];
+        if (argument == "--key-file") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--key-file needs a path");
+            }
+            keyFile = std::string(arguments[++index]);
+            continue;
+        }
+        if (argument == "--verify-key") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--verify-key needs a key");
+            }
+            ++index;
+            auto parsed = bale::cli::parseVerifyKey(arguments[index]);
+            if (!parsed) {
+                return usageError("invalid --verify-key");
+            }
+            verifyKeys.push_back(*parsed);
+            continue;
+        }
+        if (argument.starts_with('-')) {
+            return usageError("repair takes an archive and --key-file");
+        }
+        if (!archive.empty()) {
+            return usageError("repair takes exactly one archive");
+        }
+        archive = argument;
+    }
+    if (archive.empty()) {
+        return usageError("repair takes exactly one archive");
+    }
+    return exitWith(bale::cli::repairArchive(archive, keyFile, verifyKeys));
 }
 
 int runExtract(std::span<const std::string_view> arguments) {
@@ -797,6 +877,9 @@ int run(std::span<const std::string_view> argv) {
     }
     if (command == "test") {
         return runTest(rest);
+    }
+    if (command == "repair") {
+        return runRepair(rest);
     }
     if (command == "extract") {
         return runExtract(rest);

@@ -13,6 +13,7 @@ class File {
   public:
     [[nodiscard]] static Result<File> openRead(const std::filesystem::path& path);
     [[nodiscard]] static Result<File> openAppend(const std::filesystem::path& path);
+    [[nodiscard]] static Result<File> openReadWrite(const std::filesystem::path& path);
 
     [[nodiscard]] static Result<File> openRegularNoFollow(const std::filesystem::path& path);
 

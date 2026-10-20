@@ -89,6 +89,32 @@ Result<File> File::openRead(const std::filesystem::path& path) {
     return File(handle);
 }
 
+Result<File> File::openReadWrite(const std::filesystem::path& path) {
+    HANDLE handle = CreateFileW(
+        path.c_str(),
+        GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+        nullptr
+    );
+    if (handle == INVALID_HANDLE_VALUE) {
+        return systemFailure("cannot open file for repair");
+    }
+    File file(handle);
+
+    BY_HANDLE_FILE_INFORMATION information{};
+    if (!GetFileInformationByHandle(handle, &information)) {
+        return systemFailure("cannot query file information");
+    }
+    constexpr DWORD notRegular = FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT;
+    if ((information.dwFileAttributes & notRegular) != 0 || GetFileType(handle) != FILE_TYPE_DISK) {
+        return fail(ErrorKind::Unsupported, "not a regular file");
+    }
+    return file;
+}
+
 Result<File> File::openAppend(const std::filesystem::path& path) {
     HANDLE handle = CreateFileW(
         path.c_str(),
@@ -202,6 +228,13 @@ Result<std::size_t> File::readAt(std::uint64_t offset, std::span<std::byte> out)
 }
 
 Result<void> File::append(std::span<const std::byte> data) {
+    // NOTE: positional reads leave the file pointer alone on Windows but move
+    // NOTE: it on Wine, so an append that trusts the pointer can land mid-file
+    // NOTE: after interleaved reads (parity emission hit this). Seek explicitly.
+    LARGE_INTEGER end{};
+    if (!SetFilePointerEx(handle_, end, nullptr, FILE_END)) {
+        return systemFailure("cannot seek to the end of the file");
+    }
     while (!data.empty()) {
         auto request = static_cast<DWORD>(std::min<std::size_t>(data.size(), MAXDWORD));
         DWORD count = 0;
@@ -273,6 +306,27 @@ Result<File> File::openRead(const std::filesystem::path& path) {
         return systemFailure("cannot open file for reading");
     }
     return File(fd);
+}
+
+Result<File> File::openReadWrite(const std::filesystem::path& path) {
+    int fd = -1;
+    do {
+        fd = ::open(path.c_str(), O_RDWR | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    } while (fd < 0 && errno == EINTR);
+
+    if (fd < 0) {
+        return systemFailure("cannot open file for repair");
+    }
+    File file(fd);
+
+    struct stat status{};
+    if (::fstat(fd, &status) != 0) {
+        return systemFailure("cannot query file status");
+    }
+    if (!S_ISREG(status.st_mode)) {
+        return fail(ErrorKind::Unsupported, "not a regular file");
+    }
+    return file;
 }
 
 Result<File> File::openAppend(const std::filesystem::path& path) {

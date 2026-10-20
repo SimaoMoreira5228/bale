@@ -86,6 +86,12 @@ Result<WriteSummary> Writer::compact(
     options.durable = durable;
     options.compression.codec = CodecId::Raw;
     options.workers = 1;
+    if (source.footer_.parity.present) {
+        options.parity.enabled = true;
+        options.parity.dataShards = source.footer_.parity.dataShards;
+        options.parity.parityShards = source.footer_.parity.parityShards;
+        options.parity.shardBytes = source.footer_.parity.shardBytes;
+    }
     auto created = create(std::move(file), options);
     if (!created) {
         return std::unexpected(created.error());

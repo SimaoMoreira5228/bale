@@ -13,7 +13,9 @@ namespace bale::archive {
 inline constexpr std::uint64_t commitSchemaVersion = 1;
 // NOTE: provisional experimental ENCRYPTED value; later builds may not read archives using it.
 inline constexpr std::uint64_t encryptedCommitFeature = 0x00000001;
-inline constexpr std::uint64_t knownCommitFeatures = encryptedCommitFeature;
+// NOTE: provisional experimental PARITY value; later builds may not read archives using it.
+inline constexpr std::uint64_t parityCommitFeature = 0x00000002;
+inline constexpr std::uint64_t knownCommitFeatures = encryptedCommitFeature | parityCommitFeature;
 
 struct RecordReference {
     std::uint64_t offset = 0;

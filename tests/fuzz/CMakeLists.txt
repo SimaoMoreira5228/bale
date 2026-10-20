@@ -15,6 +15,8 @@ set(bale_fuzz_targets
     fuzz_keyslot
     fuzz_native_archive
     fuzz_native_records
+    fuzz_parity_record
+    fuzz_parity_repair
     fuzz_sevenzip
     fuzz_signature
     fuzz_tar

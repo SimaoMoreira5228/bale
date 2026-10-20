@@ -26,6 +26,7 @@ add_executable(bale_tests
     checksum/blake3_test.cpp
     checksum/crc_test.cpp
     cli/single_file_test.cpp
+    cli/repair_cli_test.cpp
     cli/terminal_text_test.cpp
     codecs/brotli_test.cpp
     codecs/decoders_test.cpp
@@ -62,6 +63,10 @@ add_executable(bale_tests
     io/byte_reader_test.cpp
     io/file_test.cpp
     parity/reed_solomon_test.cpp
+    parity/parity_adversarial_test.cpp
+    parity/parity_repair_test.cpp
+    parity/parity_roundtrip_test.cpp
+    parity/parity_wire_test.cpp
     reference/reference_test.cpp
     security/archive_path_test.cpp
     security/budget_test.cpp

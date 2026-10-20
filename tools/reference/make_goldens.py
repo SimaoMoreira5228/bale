@@ -480,7 +480,9 @@ def build_corrupts(plain):
     fixtures["corrupt-commit-digest.bale"] = bytes(damaged_commit)
 
     flagged = bytearray(plain)
-    flagged[data_offset + 6] = 0x02
+    # NOTE: 0x0002 is the provisional parity record flag, so the unknown-flag
+    # NOTE: fixture uses the next unknown required bit instead.
+    flagged[data_offset + 6] = 0x04
     fix_prefix_crc(flagged, data_offset)
     fixtures["corrupt-unknown-flag.bale"] = bytes(flagged)
 
@@ -496,7 +498,9 @@ def build_corrupts(plain):
 
     index_offset, _, _, _, _ = spans[2]
     bad_type = bytearray(plain)
-    bad_type[index_offset + 4] = 0x06
+    # NOTE: 6 is the provisional parity record type, so the bad-type fixture
+    # NOTE: uses the next unknown type instead.
+    bad_type[index_offset + 4] = 0x07
     fix_prefix_crc(bad_type, index_offset)
     fixtures["corrupt-bad-record-type.bale"] = bytes(bad_type)
 

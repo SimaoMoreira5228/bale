@@ -85,6 +85,10 @@ class Reader {
         return epoch_;
     }
 
+    [[nodiscard]] const ParityDescriptor& parity() const {
+        return footer_.parity;
+    }
+
     [[nodiscard]] std::uint64_t ignoredTrailingBytes() const {
         return fileSize_ - footerOffset_ - footerSize;
     }
@@ -168,8 +172,22 @@ class Reader {
     [[nodiscard]] Result<void> loadMetadata();
     [[nodiscard]] Result<void> loadMetadataEncrypted();
     [[nodiscard]] Result<void> loadSignatures();
-    [[nodiscard]] Result<void>
-    checkTrailerRecords(std::uint64_t commitEnd, std::uint64_t footerOffset, bool store);
+    [[nodiscard]] Result<void> checkTrailerRecords(
+        std::uint64_t commitEnd,
+        std::uint64_t footerOffset,
+        bool store,
+        const ParityDescriptor& expectedParity,
+        std::uint64_t generation
+    );
+    [[nodiscard]] Result<std::uint64_t> checkParityTrailerRecord(
+        std::uint64_t position,
+        std::uint64_t footerOffset,
+        std::uint64_t generation,
+        std::uint16_t wantFlags,
+        const ParityDescriptor& expectedParity,
+        const RecordLimits& limits,
+        std::vector<std::byte>& scratch
+    );
     [[nodiscard]] Result<void> checkLocations();
     [[nodiscard]] Result<void> checkLocationsEncrypted();
     [[nodiscard]] Result<VerifyReport> walkRecords();
