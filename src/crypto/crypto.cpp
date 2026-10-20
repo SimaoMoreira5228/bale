@@ -9,6 +9,7 @@
 #include <sodium/crypto_pwhash.h>
 #include <sodium/crypto_pwhash_argon2id.h>
 #include <sodium/crypto_scalarmult.h>
+#include <sodium/crypto_sign_ed25519.h>
 #include <sodium/randombytes.h>
 #include <sodium/utils.h>
 
@@ -26,6 +27,10 @@ static_assert(tagSize == crypto_aead_xchacha20poly1305_ietf_ABYTES);
 static_assert(saltSize == crypto_pwhash_SALTBYTES);
 static_assert(publicKeySize == crypto_box_PUBLICKEYBYTES);
 static_assert(secretKeySize == crypto_box_SECRETKEYBYTES);
+static_assert(signSeedSize == crypto_sign_ed25519_SEEDBYTES);
+static_assert(signPublicKeySize == crypto_sign_ed25519_PUBLICKEYBYTES);
+static_assert(signSecretKeySize == crypto_sign_ed25519_SECRETKEYBYTES);
+static_assert(signSignatureSize == crypto_sign_ed25519_BYTES);
 static_assert(sealOverhead == crypto_box_SEALBYTES);
 
 constexpr std::string_view passwordSlotDomain = "bale-crypto-v1/password-slot";
@@ -458,6 +463,108 @@ Result<SecretBytes> unwrapRecipientKey(
         return fail(ErrorKind::Integrity, "sealed box authentication failed", 0);
     }
     return key;
+}
+
+Result<SignKeyPair> makeSignKeyPair() {
+    if (auto init = ensureInit(); !init) {
+        return std::unexpected(init.error());
+    }
+
+    auto made = SecretBytes::make(signSecretKeySize);
+    if (!made) {
+        return std::unexpected(made.error());
+    }
+    SecretBytes secret(std::move(*made));
+    SignKeyPair pair;
+    crypto_sign_ed25519_keypair(
+        reinterpret_cast<unsigned char*>(pair.publicKey.data()),
+        bytesOrDummy(secret.mut())
+    );
+    pair.secretKey = std::move(secret);
+    return pair;
+}
+
+Result<std::array<std::byte, signPublicKeySize>> signPublicKeyOf(std::span<const std::byte> seed) {
+    if (auto init = ensureInit(); !init) {
+        return std::unexpected(init.error());
+    }
+    if (auto sized = requireSize(seed, signSeedSize, "signing seed must hold 32 bytes"); !sized) {
+        return std::unexpected(sized.error());
+    }
+    auto made = SecretBytes::make(signSecretKeySize);
+    if (!made) {
+        return std::unexpected(made.error());
+    }
+    SecretBytes expanded(std::move(*made));
+    std::array<std::byte, signPublicKeySize> publicKey{};
+    crypto_sign_ed25519_seed_keypair(
+        reinterpret_cast<unsigned char*>(publicKey.data()),
+        bytesOrDummy(expanded.mut()),
+        bytesOrDummy(seed)
+    );
+    return publicKey;
+}
+
+Result<std::array<std::byte, signSignatureSize>>
+signDetached(std::span<const std::byte> message, std::span<const std::byte> seed) {
+    if (auto init = ensureInit(); !init) {
+        return std::unexpected(init.error());
+    }
+    if (auto sized = requireSize(seed, signSeedSize, "signing seed must hold 32 bytes"); !sized) {
+        return std::unexpected(sized.error());
+    }
+    auto made = SecretBytes::make(signSecretKeySize);
+    if (!made) {
+        return std::unexpected(made.error());
+    }
+    SecretBytes expanded(std::move(*made));
+    std::array<unsigned char, crypto_sign_ed25519_PUBLICKEYBYTES> publicKey{};
+    crypto_sign_ed25519_seed_keypair(
+        publicKey.data(),
+        bytesOrDummy(expanded.mut()),
+        bytesOrDummy(seed)
+    );
+    std::array<std::byte, signSignatureSize> signature{};
+    unsigned long long signatureSize = 0;
+    crypto_sign_ed25519_detached(
+        reinterpret_cast<unsigned char*>(signature.data()),
+        &signatureSize,
+        bytesOrDummy(message),
+        static_cast<unsigned long long>(message.size()),
+        bytesOrDummy(expanded.mut())
+    );
+    if (signatureSize != signSignatureSize) {
+        return fail(ErrorKind::Io, "ed25519 signing failed", 0);
+    }
+    return signature;
+}
+
+Result<void> verifyDetached(
+    std::span<const std::byte> signature,
+    std::span<const std::byte> message,
+    std::span<const std::byte> publicKey
+) {
+    if (auto init = ensureInit(); !init) {
+        return std::unexpected(init.error());
+    }
+    if (auto sized = requireSize(signature, signSignatureSize, "signature must hold 64 bytes");
+        !sized) {
+        return std::unexpected(sized.error());
+    }
+    if (auto sized = requireSize(publicKey, signPublicKeySize, "signing key must hold 32 bytes");
+        !sized) {
+        return std::unexpected(sized.error());
+    }
+    int valid = crypto_sign_ed25519_verify_detached(
+        bytesOrDummy(signature),
+        bytesOrDummy(message),
+        static_cast<unsigned long long>(message.size()),
+        bytesOrDummy(publicKey)
+    );
+    if (valid != 0) {
+        return fail(ErrorKind::Integrity, "ed25519 signature verification failed", 0);
+    }
+    return {};
 }
 
 }

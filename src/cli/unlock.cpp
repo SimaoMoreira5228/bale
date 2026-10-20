@@ -1,5 +1,6 @@
 #include "cli/unlock.hpp"
 
+#include "archive/signatures.hpp"
 #include "cli/filesystem_path.hpp"
 #include "cli/prompt.hpp"
 
@@ -113,6 +114,75 @@ buildUnlock(const std::optional<std::string>& keyFile, bool promptIfNeeded) {
         unlock.password = std::move(*password);
     }
     return unlock;
+}
+
+Result<std::array<std::byte, 32>> parseVerifyKey(std::string_view text) {
+    auto parsed = parseRecipientHex(text);
+    if (!parsed) {
+        return fail(ErrorKind::Malformed, "verify key must be 64 hex characters");
+    }
+    return parsed;
+}
+
+Result<std::vector<crypto::SecretBytes>> loadSignSeeds(const std::string& path) {
+    std::vector<crypto::SecretBytes> seeds;
+    std::ifstream input(path);
+    if (!input) {
+        return fail(ErrorKind::Io, "cannot open signing key file");
+    }
+    std::string line;
+    while (std::getline(input, line)) {
+        while (!line.empty() &&
+               (line.back() == '\n' || line.back() == '\r' || line.back() == ' ' ||
+                line.back() == '\t')) {
+            line.pop_back();
+        }
+        std::size_t start = 0;
+        while (start < line.size() && (line[start] == ' ' || line[start] == '\t')) {
+            ++start;
+        }
+        if (start >= line.size() || line[start] == '#') {
+            sodium_memzero(line.data(), line.size());
+            line.clear();
+            continue;
+        }
+        std::string_view hex(line.data() + start, line.size() - start);
+        if (hex.size() != crypto::signSeedSize * 2) {
+            // NOTE: wipe the line even on this early return; it may hold key material.
+            sodium_memzero(line.data(), line.size());
+            return fail(
+                ErrorKind::Malformed,
+                "signing key file must hold 64 hex characters per line"
+            );
+        }
+        auto parsed = parseRecipientHex(hex);
+        if (!parsed) {
+            sodium_memzero(line.data(), line.size());
+            return fail(ErrorKind::Malformed, "signing key is not hex");
+        }
+        sodium_memzero(line.data(), line.size());
+        line.clear();
+        auto made = crypto::SecretBytes::make(crypto::signSeedSize);
+        if (!made) {
+            sodium_memzero(parsed->data(), parsed->size());
+            return std::unexpected(made.error());
+        }
+        crypto::SecretBytes seed(std::move(*made));
+        std::ranges::copy(*parsed, seed.mut().begin());
+        sodium_memzero(parsed->data(), parsed->size());
+        // NOTE: fail fast on a bad seed before the caller truncates or creates anything.
+        if (auto key = crypto::signPublicKeyOf(seed.bytes()); !key) {
+            return std::unexpected(key.error());
+        }
+        seeds.push_back(std::move(seed));
+        if (seeds.size() > archive::maxSignaturesPerCommit) {
+            return fail(ErrorKind::LimitExceeded, "too many signing keys");
+        }
+    }
+    if (seeds.empty()) {
+        return fail(ErrorKind::Malformed, "signing key file holds no keys");
+    }
+    return seeds;
 }
 
 }

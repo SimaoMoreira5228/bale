@@ -1,6 +1,7 @@
 #include "archive/writer.hpp"
 
 #include "archive/reader.hpp"
+#include "archive/signatures.hpp"
 #include "base/checked.hpp"
 
 #include <algorithm>
@@ -14,12 +15,30 @@ constexpr std::uint64_t maxDataPayload = 1 + maxDataDescriptorSize + maxChunkSiz
 }
 
 Result<WriteSummary> Writer::compact(File file, Reader& source, bool durable) {
+    return compact(std::move(file), source, durable, {});
+}
+
+Result<WriteSummary> Writer::compact(
+    File file,
+    Reader& source,
+    bool durable,
+    std::vector<crypto::SecretBytes> signSeeds
+) {
     if (source.encrypted_) {
         return fail(ErrorKind::PasswordRequired, "archive is encrypted");
     }
     auto verified = source.verify(VerifyMode::Structure);
     if (!verified) {
         return std::unexpected(verified.error());
+    }
+    // NOTE: compaction rewrites every offset, so the old commit digest dies with the old
+    // NOTE: layout and carried signatures would verify nothing. Refuse rather than emit a
+    // NOTE: silently unsigned copy; the caller re-signs explicitly with signSeeds.
+    if (source.hasSignatures() && signSeeds.empty()) {
+        return fail(
+            ErrorKind::Malformed,
+            "source is signed; pass signing keys to re-sign the compacted archive"
+        );
     }
 
     std::vector<bool> reachable(source.index_.size());
@@ -72,6 +91,11 @@ Result<WriteSummary> Writer::compact(File file, Reader& source, bool durable) {
         return std::unexpected(created.error());
     }
     Writer writer = std::move(*created);
+    for (auto& seed : signSeeds) {
+        if (auto added = writer.addSignSeed(std::move(seed)); !added) {
+            return std::unexpected(added.error());
+        }
+    }
     writer.inheritedWriter_ = source.manifest_.writer;
     writer.names_.reserve(nameBytes);
     writer.entries_.reserve(source.manifest_.entries.size());

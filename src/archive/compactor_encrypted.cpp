@@ -1,5 +1,6 @@
 #include "archive/encrypted.hpp"
 #include "archive/reader.hpp"
+#include "archive/signatures.hpp"
 #include "archive/writer.hpp"
 
 #include <algorithm>
@@ -7,12 +8,29 @@
 namespace bale::archive {
 
 Result<WriteSummary> Writer::compactEncrypted(File file, Reader& source, bool durable) {
+    return compactEncrypted(std::move(file), source, durable, {});
+}
+
+Result<WriteSummary> Writer::compactEncrypted(
+    File file,
+    Reader& source,
+    bool durable,
+    std::vector<crypto::SecretBytes> signSeeds
+) {
     if (!source.encrypted_) {
         return fail(ErrorKind::Malformed, "source is not encrypted");
     }
     auto verified = source.verify(VerifyMode::Structure);
     if (!verified) {
         return std::unexpected(verified.error());
+    }
+    // NOTE: same refuse-or-carry rule as the plain compactor: signatures bind the old commit
+    // NOTE: digest, so a signed source needs explicit re-signing keys.
+    if (source.hasSignatures() && signSeeds.empty()) {
+        return fail(
+            ErrorKind::Malformed,
+            "source is signed; pass signing keys to re-sign the compacted archive"
+        );
     }
 
     std::vector<bool> reachable(source.index_.size(), false);
@@ -76,6 +94,11 @@ Result<WriteSummary> Writer::compactEncrypted(File file, Reader& source, bool du
     writer.epoch_ = source.epoch_;
     writer.dataKey_ = std::move(cloned);
     writer.archiveId_ = source.superblock_.archiveId;
+    for (auto& seed : signSeeds) {
+        if (auto added = writer.addSignSeed(std::move(seed)); !added) {
+            return std::unexpected(added.error());
+        }
+    }
     if (auto started = writer.startPipeline(); !started) {
         return std::unexpected(started.error());
     }
@@ -136,6 +159,17 @@ Result<WriteSummary> Writer::compactEncrypted(File file, Reader& source, bool du
             }
             if (record->header.type == RecordType::Extension &&
                 (record->header.flags & encryptedRecordFlag) != 0) {
+                // NOTE: SIGNATURE records bind the old commit digest, so they are never carried;
+                // NOTE: only KEYSLOT records survive compaction. The refuse-or-carry check above
+                // NOTE: guarantees a signed source is re-signed instead of silently dropped.
+                auto kind = peekExtensionKind(record->payload, position + recordPrefixSize);
+                if (!kind) {
+                    return std::unexpected(kind.error());
+                }
+                if (*kind != keyslotExtensionKind) {
+                    position += *size;
+                    continue;
+                }
                 auto copied = writer.writeRecord(
                     RecordType::Extension,
                     record->payload,

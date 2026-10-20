@@ -39,6 +39,10 @@ void reportError(std::string_view context, const Error& error);
 
 ExitCode reportFailure(std::string_view context, const Error& error);
 
+using VerifyKeys = std::vector<std::array<std::byte, 32>>;
+
+[[nodiscard]] Result<void> requireSignatures(const archive::Reader& reader, const VerifyKeys& keys);
+
 struct OpenedArchive {
     File file;
     ArchiveFormat format;
@@ -54,12 +58,16 @@ singleFileName(std::string_view archive, const CompressedStream& stream, std::st
 struct ListOptions {
     bool detailed = false;
     std::optional<std::string> keyFile;
+    VerifyKeys verifyKeys;
 };
 
 [[nodiscard]] ExitCode listArchive(std::string_view argument, const ListOptions& options);
 
-[[nodiscard]] ExitCode
-testArchive(std::string_view argument, const std::optional<std::string>& keyFile = std::nullopt);
+[[nodiscard]] ExitCode testArchive(
+    std::string_view argument,
+    const std::optional<std::string>& keyFile = std::nullopt,
+    const VerifyKeys& verifyKeys = {}
+);
 
 struct CreateOptions {
     OutputFormat format = OutputFormat::Bale;
@@ -73,6 +81,7 @@ struct CreateOptions {
     bool experimentalEncryption = false;
     std::vector<std::array<std::byte, 32>> recipients;
     std::optional<std::string> keyFile;
+    std::optional<std::string> signKeyFile;
 };
 
 [[nodiscard]] ExitCode createArchive(
@@ -92,7 +101,9 @@ struct CreateOptions {
     std::string_view outputPath,
     bool durable,
     bool experimentalEncryption = false,
-    const std::optional<std::string>& keyFile = std::nullopt
+    const std::optional<std::string>& keyFile = std::nullopt,
+    const std::optional<std::string>& signKeyFile = std::nullopt,
+    const VerifyKeys& verifyKeys = {}
 );
 
 struct ConvertOptions {
@@ -105,7 +116,8 @@ convertArchive(std::string_view input, std::string_view output, const ConvertOpt
 
 [[nodiscard]] ExitCode describeArchive(
     std::string_view argument,
-    const std::optional<std::string>& keyFile = std::nullopt
+    const std::optional<std::string>& keyFile = std::nullopt,
+    const VerifyKeys& verifyKeys = {}
 );
 
 [[nodiscard]] ExitCode createArchiveFromPath(std::string_view input);
@@ -114,16 +126,19 @@ convertArchive(std::string_view input, std::string_view output, const ConvertOpt
     std::string_view argument,
     std::string_view destination,
     const ExtractPolicy& policy,
-    const std::optional<std::string>& keyFile = std::nullopt
+    const std::optional<std::string>& keyFile = std::nullopt,
+    const VerifyKeys& verifyKeys = {}
 );
 
 [[nodiscard]] ExitCode extractArchiveHere(
     std::string_view argument,
-    const std::optional<std::string>& keyFile = std::nullopt
+    const std::optional<std::string>& keyFile = std::nullopt,
+    const VerifyKeys& verifyKeys = {}
 );
 [[nodiscard]] ExitCode extractArchiveToFolder(
     std::string_view argument,
-    const std::optional<std::string>& keyFile = std::nullopt
+    const std::optional<std::string>& keyFile = std::nullopt,
+    const VerifyKeys& verifyKeys = {}
 );
 
 }

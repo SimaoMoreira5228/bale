@@ -18,6 +18,10 @@ inline constexpr std::size_t saltSize = 16;
 inline constexpr std::size_t publicKeySize = 32;
 inline constexpr std::size_t secretKeySize = 32;
 inline constexpr std::size_t sealOverhead = 48;
+inline constexpr std::size_t signSeedSize = 32;
+inline constexpr std::size_t signPublicKeySize = 32;
+inline constexpr std::size_t signSecretKeySize = 64;
+inline constexpr std::size_t signSignatureSize = 64;
 
 struct KdfParams {
     std::uint64_t opslimit = 0;
@@ -99,5 +103,24 @@ wrapRecipientKey(std::span<const std::byte> key, std::span<const std::byte> publ
 
 [[nodiscard]] Result<std::array<std::byte, publicKeySize>>
 publicKeyOf(std::span<const std::byte> secretKey);
+
+struct SignKeyPair {
+    std::array<std::byte, signPublicKeySize> publicKey{};
+    SecretBytes secretKey;
+};
+
+[[nodiscard]] Result<SignKeyPair> makeSignKeyPair();
+
+[[nodiscard]] Result<std::array<std::byte, signPublicKeySize>>
+signPublicKeyOf(std::span<const std::byte> seed);
+
+[[nodiscard]] Result<std::array<std::byte, signSignatureSize>>
+signDetached(std::span<const std::byte> message, std::span<const std::byte> seed);
+
+[[nodiscard]] Result<void> verifyDetached(
+    std::span<const std::byte> signature,
+    std::span<const std::byte> message,
+    std::span<const std::byte> publicKey
+);
 
 }

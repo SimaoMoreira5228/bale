@@ -12,6 +12,8 @@ add_library(bale_archive STATIC
     reader.cpp
     reader_commit.cpp
     reader_encrypted.cpp
+    reader_signatures.cpp
+    signatures.cpp
     writer.cpp
     writer_chunks.cpp
     writer_encrypted.cpp

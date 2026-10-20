@@ -580,6 +580,126 @@ def test_created_formats(work):
     check("partial output removed", not missing.exists())
 
 
+def test_signatures(work, source):
+    seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    pub = "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+    other_pub = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+    other_seed = "ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00"
+    keys = work / "sign.keys"
+    keys.write_text(seed + "\n", encoding="utf-8")
+
+    archive = work / "signed.bale"
+    expect_exit(
+        "signed create",
+        run("create", archive, source, "--sign", keys, cwd=work),
+        EXIT_OK,
+    )
+    expect_exit("signed test", run("test", archive, "--verify-key", pub, cwd=work), EXIT_OK)
+    expect_exit(
+        "signed test wrong key",
+        run("test", archive, "--verify-key", other_pub, cwd=work),
+        EXIT_INTEGRITY,
+    )
+    expect_exit("signed list", run("list", archive, "--verify-key", pub, cwd=work), EXIT_OK)
+    info = run("info", archive, "--verify-key", pub, cwd=work)
+    expect_exit("signed info", info, EXIT_OK)
+    check("signed info signer", pub in info.stdout, info.stdout)
+    expect_exit(
+        "signed extract",
+        run("extract", archive, "-o", work / "signed.out", "--verify-key", pub, cwd=work),
+        EXIT_OK,
+    )
+    expect_exit(
+        "signed extract wrong key",
+        run("extract", archive, "-o", work / "signed.bad", "--verify-key", other_pub, cwd=work),
+        EXIT_INTEGRITY,
+    )
+    check(
+        "unsigned archive ignores signatures",
+        run("test", work / "native.bale", cwd=work).returncode == EXIT_OK,
+        "plain test regressed",
+    )
+    expect_exit(
+        "unsigned archive with verify key",
+        run("test", work / "native.bale", "--verify-key", pub, cwd=work),
+        EXIT_INTEGRITY,
+    )
+    zipped = work / "plain.zip"
+    expect_exit(
+        "zip create",
+        run("create", zipped, source, "--format", "zip", cwd=work),
+        EXIT_OK,
+    )
+    expect_exit(
+        "zip verify key rejected",
+        run("test", zipped, "--verify-key", pub, cwd=work),
+        EXIT_INVALID,
+    )
+
+    # NOTE: adoption path: an unsigned archive gains signatures on update; only the latest
+    # NOTE: commit verifies, history stays readable.
+    adopted = work / "adopted.bale"
+    expect_exit("adopted create", run("create", adopted, source, cwd=work), EXIT_OK)
+    keys.write_text(seed + "\n", encoding="utf-8")
+    expect_exit(
+        "adopted update",
+        run("update", adopted, source, "--sign", keys, cwd=work),
+        EXIT_OK,
+    )
+    expect_exit("adopted test", run("test", adopted, "--verify-key", pub, cwd=work), EXIT_OK)
+
+    # NOTE: rotation: the second generation is signed by a new key, so the old key stops
+    # NOTE: verifying and the new key starts.
+    keys.write_text(other_seed + "\n", encoding="utf-8")
+    expect_exit(
+        "signed update",
+        run("update", archive, source, "--sign", keys, cwd=work),
+        EXIT_OK,
+    )
+    expect_exit(
+        "rotated old key",
+        run("test", archive, "--verify-key", pub, cwd=work),
+        EXIT_INTEGRITY,
+    )
+    rotated_info = run("info", archive, cwd=work)
+    expect_exit("rotated info", rotated_info, EXIT_OK)
+    new_pub = ""
+    for line in rotated_info.stdout.splitlines():
+        if line.startswith("signer: "):
+            new_pub = line.split()[1]
+    check("rotated info shows new signer", len(new_pub) == 64 and new_pub != pub, rotated_info.stdout)
+    if new_pub:
+        expect_exit(
+            "rotated new key",
+            run("test", archive, "--verify-key", new_pub, cwd=work),
+            EXIT_OK,
+        )
+
+    # NOTE: compact drops the old commit digest, so it refuses a signed source instead of
+    # NOTE: emitting silently unsigned output; --sign re-signs the compacted archive.
+    compacted = work / "signed-compact.bale"
+    expect_exit(
+        "compact signed refused",
+        run("compact", archive, compacted, cwd=work),
+        EXIT_INVALID,
+    )
+    expect_exit(
+        "compact signed resigned",
+        run("compact", archive, compacted, "--sign", keys, cwd=work),
+        EXIT_OK,
+    )
+    expect_exit(
+        "compacted verify",
+        run("test", compacted, "--verify-key", new_pub or other_pub, cwd=work),
+        EXIT_OK,
+    )
+    expect_exit(
+        "sign missing key file",
+        run("create", work / "missing.bale", source, "--sign", work / "nope.keys", cwd=work),
+        EXIT_IO,
+    )
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="bale-cli-") as directory:
         work = Path(directory)
@@ -589,6 +709,7 @@ def main():
         checks = [
             lambda: test_round_trips(work, source),
             lambda: test_native(work, source),
+            lambda: test_signatures(work, source),
             lambda: test_native_unicode_paths(work),
             lambda: test_reference_archive(work),
             lambda: test_single_gzip(work),

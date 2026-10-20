@@ -12,6 +12,7 @@ set(bale_fuzz_targets
     fuzz_native_archive
     fuzz_native_records
     fuzz_sevenzip
+    fuzz_signature
     fuzz_tar
     fuzz_terminal_text
     fuzz_tlv

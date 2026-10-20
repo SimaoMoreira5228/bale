@@ -94,7 +94,8 @@ void printWriter(const archive::WriterMetadata& writer) {
 ExitCode describeNative(
     std::string_view argument,
     File file,
-    const std::optional<std::string>& keyFile = std::nullopt
+    const std::optional<std::string>& keyFile,
+    const VerifyKeys& verifyKeys
 ) {
     auto reader = archive::Reader::open(std::move(file));
     std::optional<archive::Reader> encrypted;
@@ -121,6 +122,10 @@ ExitCode describeNative(
     }
     const archive::Reader& active = encrypted ? *encrypted : *reader;
 
+    if (auto signed_ = requireSignatures(active, verifyKeys); !signed_) {
+        return reportFailure(argument, signed_.error());
+    }
+
     std::uint64_t storedBytes = 0;
     for (const archive::IndexEntry& entry : active.index()) {
         storedBytes += entry.recordLength;
@@ -133,20 +138,56 @@ ExitCode describeNative(
     if (active.encrypted()) {
         std::println("encryption: experimental XChaCha20-Poly1305, epoch {}", active.epoch());
     }
+    if (active.hasSignatures()) {
+        std::println(
+            "signatures: {} covering generation {}",
+            active.signatures().size(),
+            active.commit().generation
+        );
+        for (const auto& signature : active.signatures()) {
+            std::string hex;
+            hex.reserve(signature.signer.size() * 2);
+            constexpr std::string_view digits = "0123456789abcdef";
+            for (std::byte value : signature.signer) {
+                auto byte = static_cast<unsigned>(value);
+                hex.push_back(digits[byte >> 4]);
+                hex.push_back(digits[byte & 0xF]);
+            }
+            std::println("signer: {} epoch {}", hex, signature.epoch);
+        }
+    } else {
+        std::println("signatures: none");
+    }
+    if (!verifyKeys.empty()) {
+        std::println("signature: ok, signed by the verification key");
+    }
     printWriter(active.manifest().writer);
     return ExitCode::Ok;
 }
 
 }
 
-ExitCode describeArchive(std::string_view argument, const std::optional<std::string>& keyFile) {
+ExitCode describeArchive(
+    std::string_view argument,
+    const std::optional<std::string>& keyFile,
+    const VerifyKeys& verifyKeys
+) {
     auto archive = openArchive(argument);
     if (!archive) {
         return reportFailure(argument, archive.error());
     }
+    if (archive->format.container != Container::Bale && !verifyKeys.empty()) {
+        return reportFailure(
+            argument,
+            Error{
+                .kind = ErrorKind::Malformed,
+                .what = "--verify-key applies only to bale archives"
+            }
+        );
+    }
 
     if (archive->format.container == Container::Bale) {
-        return describeNative(argument, std::move(archive->file), keyFile);
+        return describeNative(argument, std::move(archive->file), keyFile, verifyKeys);
     }
     std::println("format: {}", name(archive->format));
     return ExitCode::Ok;

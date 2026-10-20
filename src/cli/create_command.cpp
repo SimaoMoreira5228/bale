@@ -72,6 +72,14 @@ ExitCode writeArchive(
     std::string_view directory,
     const CreateOptions& options
 ) {
+    std::vector<crypto::SecretBytes> signSeeds;
+    if (options.signKeyFile) {
+        auto seeds = loadSignSeeds(*options.signKeyFile);
+        if (!seeds) {
+            return reportFailure(archivePath, seeds.error());
+        }
+        signSeeds = std::move(*seeds);
+    }
     if (options.experimentalEncryption) {
         if (options.format != OutputFormat::Bale) {
             return reportFailure(
@@ -102,6 +110,11 @@ ExitCode writeArchive(
             archive::Writer::createEncrypted(std::move(file), writerOptions, std::move(secrets));
         if (!writer) {
             return reportFailure(archivePath, writer.error());
+        }
+        for (auto& seed : signSeeds) {
+            if (auto added = writer->addSignSeed(std::move(seed)); !added) {
+                return reportFailure(archivePath, added.error());
+            }
         }
         auto added = writer->addTree(pathFromUtf8(directory), pathFromUtf8(archivePath));
         reportSkipped(writer->skipped());
@@ -137,6 +150,11 @@ ExitCode writeArchive(
     auto output = ArchiveOutput::create(std::move(file), outputOptions);
     if (!output) {
         return reportFailure(archivePath, output.error());
+    }
+    for (auto& seed : signSeeds) {
+        if (auto added = output->addSignSeed(std::move(seed)); !added) {
+            return reportFailure(archivePath, added.error());
+        }
     }
 
     WalkOptions walkOptions;
@@ -208,6 +226,15 @@ ExitCode updateArchive(
     std::string_view directory,
     const CreateOptions& options
 ) {
+    std::vector<crypto::SecretBytes> signSeeds;
+    if (options.signKeyFile) {
+        auto seeds = loadSignSeeds(*options.signKeyFile);
+        if (!seeds) {
+            return reportFailure(archivePath, seeds.error());
+        }
+        signSeeds = std::move(*seeds);
+    }
+
     auto file = File::openAppend(pathFromUtf8(archivePath));
     if (!file) {
         return reportFailure(archivePath, file.error());
@@ -246,6 +273,11 @@ ExitCode updateArchive(
         if (!writer) {
             return reportFailure(archivePath, writer.error());
         }
+        for (auto& seed : signSeeds) {
+            if (auto added = writer->addSignSeed(std::move(seed)); !added) {
+                return reportFailure(archivePath, added.error());
+            }
+        }
         auto added = writer->addTree(pathFromUtf8(directory), pathFromUtf8(archivePath));
         reportSkipped(writer->skipped());
         if (!added) {
@@ -279,6 +311,11 @@ ExitCode updateArchive(
     auto writer = archive::Writer::append(std::move(*file), writerOptions);
     if (!writer) {
         return reportFailure(archivePath, writer.error());
+    }
+    for (auto& seed : signSeeds) {
+        if (auto added = writer->addSignSeed(std::move(seed)); !added) {
+            return reportFailure(archivePath, added.error());
+        }
     }
 
     auto added = writer->addTree(pathFromUtf8(directory), pathFromUtf8(archivePath));

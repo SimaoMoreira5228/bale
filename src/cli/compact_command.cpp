@@ -17,7 +17,9 @@ ExitCode compactArchive(
     std::string_view outputPath,
     bool durable,
     bool experimentalEncryption,
-    const std::optional<std::string>& keyFile
+    const std::optional<std::string>& keyFile,
+    const std::optional<std::string>& signKeyFile,
+    const VerifyKeys& verifyKeys
 ) {
     auto input = File::openRead(pathFromUtf8(archivePath));
     if (!input) {
@@ -53,6 +55,18 @@ ExitCode compactArchive(
         return reportFailure(archivePath, reader.error());
     }
     archive::Reader& active = encrypted ? *encrypted : *reader;
+    if (auto signed_ = requireSignatures(active, verifyKeys); !signed_) {
+        return reportFailure(archivePath, signed_.error());
+    }
+
+    std::vector<crypto::SecretBytes> signSeeds;
+    if (signKeyFile) {
+        auto seeds = loadSignSeeds(*signKeyFile);
+        if (!seeds) {
+            return reportFailure(archivePath, seeds.error());
+        }
+        signSeeds = std::move(*seeds);
+    }
 
     std::filesystem::path output = pathFromUtf8(outputPath);
     auto file = File::createNew(output);
@@ -63,9 +77,14 @@ ExitCode compactArchive(
     Result<archive::WriteSummary> summary =
         fail(ErrorKind::Malformed, "unreachable compact result");
     if (encrypted) {
-        summary = archive::Writer::compactEncrypted(std::move(*file), active, durable);
+        summary = archive::Writer::compactEncrypted(
+            std::move(*file),
+            active,
+            durable,
+            std::move(signSeeds)
+        );
     } else {
-        summary = archive::Writer::compact(std::move(*file), active, durable);
+        summary = archive::Writer::compact(std::move(*file), active, durable, std::move(signSeeds));
     }
     if (!summary) {
         std::error_code ignored;

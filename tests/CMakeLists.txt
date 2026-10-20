@@ -19,6 +19,7 @@ add_executable(bale_tests
     archive/lzma2_chunk_test.cpp
     archive/pipeline_test.cpp
     archive/schema_test.cpp
+    archive/signature_test.cpp
     archive/snapshot_test.cpp
     base/checked_test.cpp
     checksum/blake3_test.cpp
