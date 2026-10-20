@@ -323,17 +323,7 @@ Result<void> Writer::closeEntry() {
     return emit(std::span(zeroBlock).first(padding));
 }
 
-Result<void> Writer::add(const WriteEntry& entry) {
-    auto usable = check();
-    if (!usable) {
-        return usable;
-    }
-
-    auto closed = closeEntry();
-    if (!closed) {
-        return closed;
-    }
-
+Result<void> Writer::emitNow(const WriteEntry& entry) {
     auto encoded = encodeHeaders(entry, buffers_);
     if (!encoded) {
         return encoded;
@@ -345,7 +335,120 @@ Result<void> Writer::add(const WriteEntry& entry) {
     }
     dataLeft_ = entry.size;
     ++entries_;
+    lastPath_.assign(entry.path);
+    lastRegular_ = entry.kind == EntryKind::Regular;
     return {};
+}
+
+Result<void> Writer::emitLink(const WriteEntry& entry) {
+    auto encoded = encodeHeaders(entry, buffers_);
+    if (!encoded) {
+        return encoded;
+    }
+
+    auto written = emit(buffers_.blocks);
+    if (!written) {
+        return written;
+    }
+    // NOTE: hardlinks carry no data, so emitting one always leaves no open data entry.
+    dataLeft_ = 0;
+    ++entries_;
+    available_.insert(std::string(entry.path));
+    lastPath_.assign(entry.path);
+    lastRegular_ = false;
+    return {};
+}
+
+Result<void> Writer::commitLast() {
+    if (lastRegular_) {
+        lastRegular_ = false;
+        available_.insert(lastPath_);
+    }
+    return {};
+}
+
+bool Writer::targetAvailable(std::string_view target) const {
+    return available_.find(target) != available_.end();
+}
+
+Result<void> Writer::flushReady() {
+    bool progress = true;
+    while (progress && !pending_.empty()) {
+        progress = false;
+        for (auto it = pending_.begin(); it != pending_.end();) {
+            if (!targetAvailable(it->linkTarget)) {
+                ++it;
+                continue;
+            }
+            WriteEntry entry{
+                .path = it->path,
+                .linkTarget = it->linkTarget,
+                .uname = it->uname,
+                .gname = it->gname,
+                .uid = it->uid,
+                .gid = it->gid,
+                .mtimeSeconds = it->mtimeSeconds,
+                .mtimeNanoseconds = it->mtimeNanoseconds,
+                .mode = it->mode,
+                .kind = EntryKind::HardLink,
+            };
+            auto emitted = emitLink(entry);
+            if (!emitted) {
+                return emitted;
+            }
+            it = pending_.erase(it);
+            progress = true;
+        }
+    }
+    return {};
+}
+
+Result<void> Writer::add(const WriteEntry& entry) {
+    auto usable = check();
+    if (!usable) {
+        return usable;
+    }
+
+    auto closed = closeEntry();
+    if (!closed) {
+        return closed;
+    }
+    auto committed = commitLast();
+    if (!committed) {
+        return committed;
+    }
+    auto flushed = flushReady();
+    if (!flushed) {
+        return flushed;
+    }
+
+    if (entry.kind == EntryKind::HardLink) {
+        if (targetAvailable(entry.linkTarget)) {
+            return emitLink(entry);
+        }
+        auto encoded = encodeHeaders(entry, buffers_);
+        if (!encoded) {
+            return encoded;
+        }
+        // NOTE: hold links whose target has not been written yet; finish emits
+        // NOTE: them in dependency order so extraction never sees a dangling link.
+        pending_.push_back(
+            StoredLink{
+                .path = std::string(entry.path),
+                .linkTarget = std::string(entry.linkTarget),
+                .uname = std::string(entry.uname),
+                .gname = std::string(entry.gname),
+                .uid = entry.uid,
+                .gid = entry.gid,
+                .mtimeSeconds = entry.mtimeSeconds,
+                .mtimeNanoseconds = entry.mtimeNanoseconds,
+                .mode = entry.mode,
+            }
+        );
+        return {};
+    }
+
+    return emitNow(entry);
 }
 
 Result<void> Writer::write(std::span<const std::byte> data) {
@@ -372,6 +475,24 @@ Result<std::uint64_t> Writer::finish(bool durable) {
     auto closed = closeEntry();
     if (!closed) {
         return std::unexpected(closed.error());
+    }
+
+    auto committed = commitLast();
+    if (!committed) {
+        return std::unexpected(committed.error());
+    }
+    auto flushed = flushReady();
+    if (!flushed) {
+        return std::unexpected(flushed.error());
+    }
+    if (!pending_.empty()) {
+        return std::unexpected(poison(
+                                   Error{
+                                       .kind = ErrorKind::Malformed,
+                                       .what = "hard link target is not a regular entry"
+                                   }
+        )
+                                   .error());
     }
 
     for (int count = 0; count < 2; ++count) {

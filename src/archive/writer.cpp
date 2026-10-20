@@ -408,6 +408,62 @@ Result<void> Writer::resolveHardLinks() {
         return static_cast<std::size_t>(found - entries_.begin());
     };
 
+    constexpr std::size_t unknown = std::numeric_limits<std::size_t>::max();
+    std::vector<std::size_t> direct(entries_.size(), unknown);
+    for (std::size_t index = 0; index < entries_.size(); ++index) {
+        if (entries_[index].kind != EntryKind::HardLink) {
+            continue;
+        }
+        direct[index] = find(nameAt(entries_[index].targetOffset, entries_[index].targetSize));
+    }
+
+    auto failLink = [this]() -> Result<void> {
+        return poison(
+            Error{.kind = ErrorKind::Malformed, .what = "hard link target is not a regular entry"}
+        );
+    };
+
+    std::vector<std::size_t> rootOf(entries_.size(), unknown);
+    std::vector<std::uint8_t> state(entries_.size(), 0);
+    std::vector<std::size_t> stack;
+    for (std::size_t index = 0; index < entries_.size(); ++index) {
+        if (entries_[index].kind != EntryKind::HardLink) {
+            continue;
+        }
+        // NOTE: follow hardlink chains to the ultimate regular target so a link
+        // NOTE: may be added before its target; cycles and dangling targets fail.
+        std::size_t cursor = index;
+        stack.clear();
+        std::size_t root = unknown;
+        while (true) {
+            if (entries_[cursor].kind == EntryKind::Regular) {
+                root = cursor;
+                break;
+            }
+            if (entries_[cursor].kind != EntryKind::HardLink) {
+                return failLink();
+            }
+            if (rootOf[cursor] != unknown) {
+                root = rootOf[cursor];
+                break;
+            }
+            if (state[cursor] != 0) {
+                return failLink();
+            }
+            state[cursor] = 1;
+            stack.push_back(cursor);
+            std::size_t target = direct[cursor];
+            if (target >= entries_.size()) {
+                return failLink();
+            }
+            cursor = target;
+        }
+        for (std::size_t member : stack) {
+            rootOf[member] = root;
+            state[member] = 2;
+        }
+    }
+
     std::vector<std::size_t> groupRoot(entries_.size());
     std::vector<std::size_t> groupFirst(entries_.size());
     for (std::size_t index = 0; index < entries_.size(); ++index) {
@@ -416,19 +472,10 @@ Result<void> Writer::resolveHardLinks() {
     }
 
     for (std::size_t index = 0; index < entries_.size(); ++index) {
-        const PendingEntry& entry = entries_[index];
-        if (entry.kind != EntryKind::HardLink) {
+        if (entries_[index].kind != EntryKind::HardLink) {
             continue;
         }
-        std::size_t target = find(nameAt(entry.targetOffset, entry.targetSize));
-        if (target == entries_.size() || entries_[target].kind != EntryKind::Regular) {
-            return poison(
-                Error{
-                    .kind = ErrorKind::Malformed,
-                    .what = "hard link target is not a regular entry"
-                }
-            );
-        }
+        std::size_t target = rootOf[index];
         groupRoot[index] = target;
         groupFirst[target] = std::min(groupFirst[target], index);
     }
