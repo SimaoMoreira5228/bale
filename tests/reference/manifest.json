@@ -1,0 +1,109 @@
+{
+  "generator": "tools/reference/make_goldens.py",
+  "archive_id": "101112131415161718191a1b1c1d1e1f",
+  "creation_time_ns": 1700000000000000000,
+  "files": [
+    {
+      "path": "plain.bale",
+      "sha256": "f78dae1b61c809d95faedbabc2f3d4dcb2ac45ad34d6d7a9e95243122909425b",
+      "bytes": 825,
+      "note": "gen1, fixed 1MiB, balanced/zstd:3, dedup hello"
+    },
+    {
+      "path": "cdc.bale",
+      "sha256": "bd2ec2439fb9955c0baac4b37aff490f5bb1433ba744deb373173d9e6d432c46",
+      "bytes": 95706,
+      "note": "gen1, cdc 4K/8K/64K gear, raw, dedup copy"
+    },
+    {
+      "path": "codecs.bale",
+      "sha256": "4d999c077a5749f18550e09ffaac0b1279ae6bf1e874c40183bd07e1c9f649d6",
+      "bytes": 5821,
+      "note": "gen1, raw+zstd+lz4+lzma2+brotli frames"
+    },
+    {
+      "path": "snapshot2.bale",
+      "sha256": "e906131179a13f7c68546656aed48a8c485d64552f1dd82714c72cf99b9e0a8a",
+      "bytes": 1259,
+      "note": "gen1 old + gen2 new sharing one chunk"
+    },
+    {
+      "path": "meta.bale",
+      "sha256": "16f895df596b3b056448bd2fd364c1ace0926cfe05c12460d464bc3f57694746",
+      "bytes": 1038,
+      "note": "gen1, small/zstd:19 64K, links, comment"
+    },
+    {
+      "path": "encrypted-structure.bale",
+      "sha256": "741278b76659098bf81dbc9c2ba6f2235346694b7681b7eb72e9911a92564520",
+      "bytes": 919,
+      "note": "envelope-only encrypted shape, placeholder seal bytes"
+    },
+    {
+      "path": "corrupt-bad-magic.bale",
+      "sha256": "32b7561f45c19da47830cbd4eb9770bce593bdc4d93380ccedeff35ebf15e696",
+      "bytes": 825,
+      "note": "corrupt fixture derived from plain.bale"
+    },
+    {
+      "path": "corrupt-small-file.bale",
+      "sha256": "1983ca515ff83ec195328fb923eea829fb09be5732b7a7c1fcee9b4eba48f3be",
+      "bytes": 10,
+      "note": "corrupt fixture derived from plain.bale"
+    },
+    {
+      "path": "corrupt-truncated.bale",
+      "sha256": "1c080d848c6ed552b498c9f28a307982429f9ef4e669a9d21a53ed63f857539f",
+      "bytes": 400,
+      "note": "corrupt fixture derived from plain.bale"
+    },
+    {
+      "path": "corrupt-payload-crc.bale",
+      "sha256": "fa3a7c88bd615268e507757b39642c2da73458a20a9d8f97493a70a887723f88",
+      "bytes": 825,
+      "note": "corrupt fixture derived from plain.bale"
+    },
+    {
+      "path": "corrupt-payload-crc-fixed.bale",
+      "sha256": "9c3fea7aa12037635cb3347df567d42e793b9090fda9d3c84006d2f282acd057",
+      "bytes": 825,
+      "note": "corrupt fixture derived from plain.bale"
+    },
+    {
+      "path": "corrupt-manifest-digest.bale",
+      "sha256": "05150e36dee5c9905b821fd35494f72365578cd9fe54a3f75e590b5bb63dbabd",
+      "bytes": 825,
+      "note": "corrupt fixture derived from plain.bale"
+    },
+    {
+      "path": "corrupt-commit-digest.bale",
+      "sha256": "94fd54e8bb7547b6d39bada964a38756a6bfc00d4ff6376f3ef10334befed38a",
+      "bytes": 825,
+      "note": "corrupt fixture derived from plain.bale"
+    },
+    {
+      "path": "corrupt-unknown-flag.bale",
+      "sha256": "eeae6e7e20b98e571492c97d7ab1deb1a02de4dd53ac6adb7b3371d4918d0d4a",
+      "bytes": 825,
+      "note": "corrupt fixture derived from plain.bale"
+    },
+    {
+      "path": "corrupt-unknown-feature.bale",
+      "sha256": "c5c0ab6a21fb9d53d4dbda601eb6efcc323ffbc4d0b057525e0f8c78f5f0f858",
+      "bytes": 825,
+      "note": "corrupt fixture derived from plain.bale"
+    },
+    {
+      "path": "corrupt-encrypted-in-plain.bale",
+      "sha256": "035488c138befd861bc7b3a2d08cd3d548794ce6c79decc2f21f3603d14e8cff",
+      "bytes": 825,
+      "note": "corrupt fixture derived from plain.bale"
+    },
+    {
+      "path": "corrupt-bad-record-type.bale",
+      "sha256": "a8403ca97804d5502b9a9114303ce23e13b816e80cc843b6d79e7e42f226e9fe",
+      "bytes": 825,
+      "note": "corrupt fixture derived from plain.bale"
+    }
+  ]
+}

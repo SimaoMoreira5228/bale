@@ -51,6 +51,7 @@ add_executable(bale_tests
     formats/zstd/stream_test.cpp
     io/byte_reader_test.cpp
     io/file_test.cpp
+    reference/reference_test.cpp
     security/archive_path_test.cpp
     security/budget_test.cpp
     security/case_fold_test.cpp
@@ -84,6 +85,9 @@ target_link_libraries(bale_tests PRIVATE
     doctest::doctest_with_main
 )
 doctest_discover_tests(bale_tests)
+target_compile_definitions(
+    bale_tests PRIVATE REFERENCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/reference"
+)
 
 find_package(Python3 3.10 COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND AND NOT CMAKE_CROSSCOMPILING)
@@ -91,5 +95,10 @@ if(Python3_Interpreter_FOUND AND NOT CMAKE_CROSSCOMPILING)
         NAME interoperability.cli
         COMMAND Python3::Interpreter -I ${CMAKE_CURRENT_SOURCE_DIR}/interoperability/cli_test.py
             $<TARGET_FILE:bale>
+    )
+    add_test(
+        NAME reference.differential
+        COMMAND Python3::Interpreter -I ${CMAKE_CURRENT_SOURCE_DIR}/reference/differential_test.py
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/reference
     )
 endif()
