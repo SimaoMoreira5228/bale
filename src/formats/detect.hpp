@@ -20,6 +20,7 @@ enum class Container : std::uint8_t {
     Cab,
     Iso,
     Wim,
+    Rpm,
     SingleFile,
 };
 

@@ -58,7 +58,7 @@ commands:
   update <archive.bale> <dir> [options]
       append a new snapshot of the directory, reusing unchanged chunks; takes create's options
   convert <input> <output> [--format <name>] [--level <n>] [--image <n>]
-      rewrite a bale, zip, tar, 7z, ar, cpio, cab, iso or wim archive entry by entry in another format
+      rewrite a bale, zip, tar, 7z, ar, cpio, cab, iso, wim or rpm archive entry by entry in another format
   compact <archive.bale> <output.bale> [--sync] [--experimental-encryption] [--key-file <path>]
       [--sign <path>] [--verify-key <hex>]
       write the current snapshot to a new archive and keep the source
@@ -859,6 +859,11 @@ int runFormats() {
     printFormat("tar.bz2", false, "tar inside bzip2, recognized by content; read as one stream");
     printFormat("ar", false, "read-only; System V, GNU and BSD members, skips symbol tables");
     printFormat("cpio", false, "read-only; SVR4 newc and crc headers, no odc or binary headers");
+    printFormat(
+        "rpm",
+        false,
+        "read-only; v3/v4 lead, gzip/xz/zstd/bzip2 cpio payloads; signatures listed, never verified"
+    );
     printFormat("cab", false, "read-only; stored, MSZIP and LZX folders; no multi-cabinet sets");
     printFormat(
         "wim",

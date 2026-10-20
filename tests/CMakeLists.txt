@@ -26,6 +26,7 @@ add_executable(bale_tests
     checksum/blake3_test.cpp
     checksum/crc_test.cpp
     cli/single_file_test.cpp
+    cli/rpm_cli_test.cpp
     cli/repair_cli_test.cpp
     cli/terminal_text_test.cpp
     cli/wim_cli_test.cpp
@@ -55,6 +56,7 @@ add_executable(bale_tests
     formats/iso/reader_test.cpp
     formats/iso/refuse_test.cpp
     formats/tar/compressed_reader_test.cpp
+    formats/rpm/reader_test.cpp
     formats/tar/hardlink_order_test.cpp
     formats/tar/header_test.cpp
     formats/tar/reader_test.cpp
@@ -97,6 +99,7 @@ target_link_libraries(bale_tests PRIVATE
     bale_formats_ar
     bale_formats_cab
     bale_formats_cpio
+    bale_formats_rpm
     bale_formats_wim
     bale_brotli
     bale_bz2
