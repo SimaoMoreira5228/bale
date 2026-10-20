@@ -28,6 +28,7 @@ add_executable(bale_tests
     cli/single_file_test.cpp
     cli/repair_cli_test.cpp
     cli/terminal_text_test.cpp
+    cli/wim_cli_test.cpp
     codecs/brotli_test.cpp
     codecs/decoders_test.cpp
     codecs/lzma2_test.cpp
@@ -43,6 +44,8 @@ add_executable(bale_tests
     formats/xz/stream_test.cpp
     fswalk/tree_walker_test.cpp
     formats/detect_test.cpp
+    formats/wim/reader_test.cpp
+    formats/wim/refuse_test.cpp
     formats/ar/reader_test.cpp
     formats/cab/decoder_test.cpp
     formats/cab/reader_test.cpp
@@ -94,6 +97,7 @@ target_link_libraries(bale_tests PRIVATE
     bale_formats_ar
     bale_formats_cab
     bale_formats_cpio
+    bale_formats_wim
     bale_brotli
     bale_bz2
     bale_lz4
