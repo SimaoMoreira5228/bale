@@ -61,6 +61,7 @@ add_executable(bale_tests
     formats/zstd/stream_test.cpp
     io/byte_reader_test.cpp
     io/file_test.cpp
+    parity/reed_solomon_test.cpp
     reference/reference_test.cpp
     security/archive_path_test.cpp
     security/budget_test.cpp
@@ -92,6 +93,7 @@ target_link_libraries(bale_tests PRIVATE
     bale_bz2
     bale_lz4
     bale_lzma
+    bale_parity
     bale_sodium
     bale_warnings
     bale_zlib_ng
