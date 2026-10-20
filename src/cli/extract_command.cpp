@@ -4,6 +4,7 @@
 #include "cli/terminal_text.hpp"
 #include "cli/unlock.hpp"
 #include "formats/ar/reader.hpp"
+#include "formats/cab/reader.hpp"
 #include "formats/compressed/stream.hpp"
 #include "formats/cpio/reader.hpp"
 #include "formats/sevenzip/reader.hpp"
@@ -505,7 +506,6 @@ extractCpioEntry(Session& session, cpio::Reader& reader, const cpio::Entry& entr
         .reason = "unknown cpio entry type",
     };
 }
-
 ExitCode extractCpio(std::string_view argument, File file, Session& session) {
     auto reader = cpio::Reader::open(std::move(file));
     if (!reader) {
@@ -531,6 +531,41 @@ ExitCode extractCpio(std::string_view argument, File file, Session& session) {
     for (const auto* entry : deferred) {
         auto result = extractCpioEntry(session, *reader, *entry);
         session.record(entry->name, result);
+        if (!result && result.error().kind == ErrorKind::LimitExceeded) {
+            return session.finish();
+        }
+    }
+    return session.finish();
+}
+
+[[nodiscard]] Result<EntryResult>
+extractCabEntry(Session& session, cab::Reader& reader, const cab::Entry& entry) {
+    auto path = session.path(entry.name);
+    if (!path) {
+        return std::unexpected(path.error());
+    }
+
+    EntryMetadata metadata{
+        .mode = entry.mode,
+        .mtimeNanoseconds = mtimeNanoseconds(entry.mtimeSeconds, 0),
+    };
+    if (path->directory || entry.directory) {
+        return session.extractor().createDirectory(*path, metadata);
+    }
+    return writeFile(session, *path, metadata, [&](auto&& sink) {
+        return reader.streamEntry(entry, session.scratch(), sink);
+    });
+}
+
+ExitCode extractCab(std::string_view argument, File file, Session& session) {
+    auto reader = cab::Reader::open(std::move(file));
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    for (const auto& entry : reader->entries()) {
+        auto result = extractCabEntry(session, *reader, entry);
+        session.record(entry.name, result);
         if (!result && result.error().kind == ErrorKind::LimitExceeded) {
             return session.finish();
         }
@@ -664,6 +699,11 @@ ExitCode extractArchive(
         pathPolicy.backslash = Backslash::Separator;
         Session session(std::move(*extractor), destination, policy, pathPolicy);
         return extractSevenZip(argument, std::move(archive->file), session);
+    }
+    if (archive->format.container == Container::Cab) {
+        pathPolicy.backslash = Backslash::Separator;
+        Session session(std::move(*extractor), destination, policy, pathPolicy);
+        return extractCab(argument, std::move(archive->file), session);
     }
 
     Session session(std::move(*extractor), destination, policy, pathPolicy);

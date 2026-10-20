@@ -4,6 +4,7 @@
 #include "cli/filesystem_path.hpp"
 #include "cli/terminal_text.hpp"
 #include "formats/ar/reader.hpp"
+#include "formats/cab/reader.hpp"
 #include "formats/cpio/reader.hpp"
 #include "formats/sevenzip/reader.hpp"
 #include "formats/tar/reader.hpp"
@@ -71,7 +72,8 @@ std::int64_t dosToUnix(std::uint16_t date, std::uint16_t time) {
 
 class Conversion {
   public:
-    explicit Conversion(ArchiveOutput& output) : output_(output), scratch_(convertChunkSize) {
+    explicit Conversion(ArchiveOutput& output, PathPolicy policy = convertPathPolicy) :
+        output_(output), pathPolicy_(policy), scratch_(convertChunkSize) {
     }
 
     [[nodiscard]] ArchiveOutput& output() {
@@ -122,7 +124,7 @@ class Conversion {
   private:
     [[nodiscard]] std::optional<ArchivePath> normalize(std::string_view raw, std::string& out) {
         auto normalized =
-            normalizeArchivePath(std::as_bytes(std::span(raw)), convertPathPolicy, limits_, out);
+            normalizeArchivePath(std::as_bytes(std::span(raw)), pathPolicy_, limits_, out);
         if (!normalized) {
             skip(raw, normalized.error().what);
             return std::nullopt;
@@ -131,6 +133,7 @@ class Conversion {
     }
 
     ArchiveOutput& output_;
+    PathPolicy pathPolicy_;
     Limits limits_;
     std::vector<std::byte> scratch_;
     std::string path_;
@@ -444,6 +447,39 @@ Result<void> convertCpio(Conversion& conversion, File file) {
     return {};
 }
 
+Result<void> convertCabEntry(Conversion& conversion, cab::Reader& reader, const cab::Entry& entry) {
+    auto path = conversion.path(entry.name);
+    if (!path) {
+        return {};
+    }
+
+    archive::EntryAttributes attributes{
+        .mtimeNanoseconds = joinTime(entry.mtimeSeconds, 0),
+        .mode = maskedMode(entry.mode),
+    };
+    if (path->directory || entry.directory) {
+        return conversion.output().addDirectory(path->path, attributes);
+    }
+    return conversion.copyFile(*path, entry.size, attributes, [&](auto&& sink) {
+        return reader.streamEntry(entry, conversion.scratch(), sink);
+    });
+}
+
+Result<void> convertCab(Conversion& conversion, File file) {
+    auto reader = cab::Reader::open(std::move(file));
+    if (!reader) {
+        return std::unexpected(reader.error());
+    }
+
+    for (const auto& entry : reader->entries()) {
+        auto converted = convertCabEntry(conversion, *reader, entry);
+        if (!converted) {
+            return converted;
+        }
+    }
+    return {};
+}
+
 Result<void> convertBaleEntry(
     Conversion& conversion,
     archive::Reader& reader,
@@ -507,7 +543,11 @@ Result<OutputSummary> convert(OpenedArchive archive, File file, const ConvertOpt
         return std::unexpected(output.error());
     }
 
-    Conversion conversion(*output);
+    PathPolicy policy = convertPathPolicy;
+    if (archive.format.container == Container::Cab) {
+        policy.backslash = Backslash::Separator;
+    }
+    Conversion conversion(*output, policy);
     Result<void> converted;
     switch (archive.format.container) {
     case Container::Bale:
@@ -527,6 +567,9 @@ Result<OutputSummary> convert(OpenedArchive archive, File file, const ConvertOpt
         break;
     case Container::Cpio:
         converted = convertCpio(conversion, std::move(archive.file));
+        break;
+    case Container::Cab:
+        converted = convertCab(conversion, std::move(archive.file));
         break;
     case Container::SingleFile:
     case Container::Unknown:

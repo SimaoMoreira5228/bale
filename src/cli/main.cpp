@@ -55,7 +55,7 @@ commands:
   update <archive.bale> <dir> [options]
       append a new snapshot of the directory, reusing unchanged chunks; takes create's options
   convert <input> <output> [--format <name>] [--level <n>]
-      rewrite a bale, zip, tar, 7z, ar or cpio archive entry by entry in another format
+      rewrite a bale, zip, tar, 7z, ar, cpio or cab archive entry by entry in another format
   compact <archive.bale> <output.bale> [--sync] [--experimental-encryption] [--key-file <path>]
       [--sign <path>] [--verify-key <hex>]
       write the current snapshot to a new archive and keep the source
@@ -721,6 +721,7 @@ int runFormats() {
     printFormat("tar.bz2", false, "tar inside bzip2, recognized by content; read as one stream");
     printFormat("ar", false, "read-only; System V, GNU and BSD members, skips symbol tables");
     printFormat("cpio", false, "read-only; SVR4 newc and crc headers, no odc or binary headers");
+    printFormat("cab", false, "read-only; stored, MSZIP and LZX folders; no multi-cabinet sets");
     printFormat("gzip", false, "one compressed file, multi-member; named by FNAME or archive name");
     printFormat("zstd", false, "one compressed file, multi-frame, window up to 128 MiB");
     printFormat("xz", false, "one compressed file, multi-stream; memory capped at 256 MiB");

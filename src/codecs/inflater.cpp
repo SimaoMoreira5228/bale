@@ -107,4 +107,20 @@ Result<void> Inflater::reset() {
     return {};
 }
 
+Result<void> Inflater::setDictionary(std::span<const std::byte> history) {
+    if (history.empty()) {
+        return {};
+    }
+    auto bytes = std::min(history.size(), maxStepBytes);
+    int status = zng_inflateSetDictionary(
+        &state_->stream,
+        reinterpret_cast<const std::uint8_t*>(history.data()),
+        static_cast<std::uint32_t>(bytes)
+    );
+    if (status != Z_OK) {
+        return fail(ErrorKind::Malformed, "deflate dictionary rejected");
+    }
+    return {};
+}
+
 }
