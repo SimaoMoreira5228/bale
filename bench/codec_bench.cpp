@@ -1,4 +1,5 @@
 #include "archive/chunk.hpp"
+#include "codecs/brotli.hpp"
 #include "codecs/decoders.hpp"
 #include "codecs/encoders.hpp"
 #include "codecs/lz4_frame.hpp"
@@ -44,6 +45,7 @@ enum class CodecKind : std::uint8_t {
     Deflate,
     Lz4,
     Lzma2,
+    Brotli,
 };
 
 struct CodecSpec {
@@ -106,7 +108,12 @@ struct Lzma2Codec {
     XzDecoder decoder;
 };
 
-using Codec = std::variant<RawCodec, ZstdCodec, DeflateCodec, Lz4Codec, Lzma2Codec>;
+struct BrotliCodec {
+    BrotliEncoder encoder;
+    BrotliDecoder decoder;
+};
+
+using Codec = std::variant<RawCodec, ZstdCodec, DeflateCodec, Lz4Codec, Lzma2Codec, BrotliCodec>;
 
 std::optional<Codec> createCodec(const CodecSpec& spec) {
     if (spec.kind == CodecKind::Zstd) {
@@ -153,6 +160,17 @@ std::optional<Codec> createCodec(const CodecSpec& spec) {
             .decoder = std::move(*decoder),
         }};
     }
+    if (spec.kind == CodecKind::Brotli) {
+        auto encoder = BrotliEncoder::create(spec.level);
+        auto decoder = BrotliDecoder::create();
+        if (!encoder || !decoder) {
+            return std::nullopt;
+        }
+        return Codec{BrotliCodec{
+            .encoder = std::move(*encoder),
+            .decoder = std::move(*decoder),
+        }};
+    }
     return Codec{RawCodec{}};
 }
 
@@ -169,6 +187,9 @@ std::size_t boundOf(const Codec& codec, std::size_t size) {
     if (std::holds_alternative<Lzma2Codec>(codec)) {
         return Lzma2Encoder::compressBound(size);
     }
+    if (std::holds_alternative<BrotliCodec>(codec)) {
+        return BrotliEncoder::compressBound(size);
+    }
     return size;
 }
 
@@ -183,6 +204,8 @@ encodeChunk(Codec& codec, std::span<const std::byte> input, std::span<std::byte>
         size = lz4->encoder.compress(input, output);
     } else if (auto* lzma2 = std::get_if<Lzma2Codec>(&codec)) {
         size = lzma2->encoder.compress(input, output);
+    } else if (auto* brotli = std::get_if<BrotliCodec>(&codec)) {
+        size = brotli->encoder.compress(input, output);
     } else {
         std::memcpy(output.data(), input.data(), input.size());
     }
@@ -246,6 +269,29 @@ bool decodeChunk(Codec& codec, std::span<const std::byte> input, std::span<std::
         }
         return consumed == input.size() && produced == output.size();
     }
+    if (auto* brotli = std::get_if<BrotliCodec>(&codec)) {
+        if (!brotli->decoder.reset()) {
+            return false;
+        }
+        std::size_t consumed = 0;
+        std::size_t produced = 0;
+        while (true) {
+            auto step =
+                brotli->decoder.decompress(input.subspan(consumed), output.subspan(produced), true);
+            if (!step) {
+                return false;
+            }
+            consumed += step->consumed;
+            produced += step->produced;
+            if (step->finished) {
+                break;
+            }
+            if (step->consumed == 0 && step->produced == 0) {
+                return false;
+            }
+        }
+        return consumed == input.size() && produced == output.size();
+    }
     std::memcpy(output.data(), input.data(), input.size());
     return input.size() == output.size();
 }
@@ -289,6 +335,10 @@ std::optional<CodecSpec> parseCodec(std::string_view text) {
     }
     if (name == "lzma2") {
         spec.kind = CodecKind::Lzma2;
+        return spec;
+    }
+    if (name == "brotli") {
+        spec.kind = CodecKind::Brotli;
         return spec;
     }
     return std::nullopt;
@@ -350,6 +400,9 @@ std::optional<Options> parseOptions(std::span<char*> arguments) {
             std::string_view{"lzma2:0"},
             std::string_view{"lzma2:6"},
             std::string_view{"lzma2:9"},
+            std::string_view{"brotli:1"},
+            std::string_view{"brotli:6"},
+            std::string_view{"brotli:11"},
             std::string_view{"deflate:1"},
             std::string_view{"deflate:6"},
             std::string_view{"deflate:9"},
@@ -613,7 +666,7 @@ int run(std::span<char*> arguments) {
         std::println(
             stderr,
             "usage: bale_bench_codecs <corpus> [--chunk-size N] [--runs N] "
-            "[--codec raw|zstd:L|lz4:L|lzma2:L|deflate:L]..."
+            "[--codec raw|zstd:L|lz4:L|lzma2:L|brotli:L|deflate:L]..."
         );
         return 2;
     }

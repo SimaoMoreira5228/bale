@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 
 MEBIBYTE = 1 << 20
-DEFAULT_CODECS = ["raw", "lz4:0", "lz4:9", "zstd:1", "zstd:3", "zstd:9", "zstd:19", "zstd:22", "lzma2:0", "lzma2:6", "lzma2:9", "deflate:1", "deflate:6", "deflate:9"]
+DEFAULT_CODECS = ["raw", "lz4:0", "lz4:9", "zstd:1", "zstd:3", "zstd:9", "zstd:19", "zstd:22", "lzma2:0", "lzma2:6", "lzma2:9", "brotli:1", "brotli:6", "brotli:11", "deflate:1", "deflate:6", "deflate:9"]
 PRESETS = ["fast", "balanced", "small", "restore-fast", "portable"]
 
 
@@ -182,7 +182,7 @@ def parse_profile(text):
     if text in PRESETS or text == "raw":
         return text
     codec, _, level = text.partition(":")
-    if codec in ("zstd", "lz4", "lzma2") and level.lstrip("-").isdigit():
+    if codec in ("zstd", "lz4", "lzma2", "brotli") and level.lstrip("-").isdigit():
         return text
     raise argparse.ArgumentTypeError(f"{text} is neither a preset nor a codec:level spec")
 

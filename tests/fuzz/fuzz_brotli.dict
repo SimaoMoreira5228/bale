@@ -1,0 +1,4 @@
+brotli_empty="\x3b"
+brotli_window="\x11"
+brotli_stream="\x1b"
+brotli_empty_fill="Z"

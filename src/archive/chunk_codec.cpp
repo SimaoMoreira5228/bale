@@ -1,5 +1,6 @@
 #include "archive/chunk_codec.hpp"
 
+#include "codecs/brotli.hpp"
 #include "codecs/lzma2.hpp"
 
 #include <array>
@@ -41,6 +42,15 @@ ChunkEncoder::create(const CompressionProfile& profile, std::uint32_t chunkSize)
         chunkEncoder.buffer_.resize(Lzma2Encoder::compressBound(chunkSize));
         return chunkEncoder;
     }
+    case CodecId::Brotli: {
+        auto encoder = BrotliEncoder::create(profile.level);
+        if (!encoder) {
+            return std::unexpected(encoder.error());
+        }
+        chunkEncoder.encoder_.emplace<BrotliEncoder>(std::move(*encoder));
+        chunkEncoder.buffer_.resize(BrotliEncoder::compressBound(chunkSize));
+        return chunkEncoder;
+    }
     }
     return fail(ErrorKind::Unsupported, "writer codec not supported");
 }
@@ -53,6 +63,8 @@ Result<EncodedChunk> ChunkEncoder::encode(std::span<const std::byte> chunk) {
         compressed = lz4->compress(chunk, buffer_);
     } else if (auto* lzma2 = std::get_if<Lzma2Encoder>(&encoder_)) {
         compressed = lzma2->compress(chunk, buffer_);
+    } else if (auto* brotli = std::get_if<BrotliEncoder>(&encoder_)) {
+        compressed = brotli->compress(chunk, buffer_);
     }
     if (!compressed) {
         return std::unexpected(compressed.error());
@@ -80,6 +92,9 @@ Result<void> ChunkDecoder::decode(
     }
     if (codec == CodecId::Lzma2) {
         return decodeLzma2(encoded, output);
+    }
+    if (codec == CodecId::Brotli) {
+        return decodeBrotli(encoded, output);
     }
     if (codec != CodecId::Lz4) {
         return fail(ErrorKind::Unsupported, "chunk codec not supported");
@@ -187,6 +202,57 @@ ChunkDecoder::decodeLzma2(std::span<const std::byte> encoded, std::span<std::byt
         return fail(
             ErrorKind::Malformed,
             "lzma2 chunk size or stream boundary is invalid",
+            consumed
+        );
+    }
+    return {};
+}
+
+Result<void>
+ChunkDecoder::decodeBrotli(std::span<const std::byte> encoded, std::span<std::byte> output) {
+    if (!brotli_) {
+        auto decoder = BrotliDecoder::create();
+        if (!decoder) {
+            return std::unexpected(decoder.error());
+        }
+        brotli_.emplace(std::move(*decoder));
+    }
+    auto reset = brotli_->reset();
+    if (!reset) {
+        return reset;
+    }
+
+    std::size_t consumed = 0;
+    std::size_t produced = 0;
+    bool finished = false;
+    while (!finished) {
+        std::array<std::byte, 1> probe{};
+        bool full = produced == output.size();
+        std::span<std::byte> target = full ? std::span<std::byte>(probe) : output.subspan(produced);
+        auto step = brotli_->decompress(encoded.subspan(consumed), target, true);
+        if (!step) {
+            auto error = step.error();
+            error.offset = consumed;
+            return std::unexpected(error);
+        }
+        if (full && step->produced != 0) {
+            return fail(ErrorKind::Malformed, "brotli chunk exceeds its declared size", consumed);
+        }
+        if (step->consumed == 0 && step->produced == 0 && !step->finished) {
+            return fail(ErrorKind::Malformed, "brotli decoder made no progress", consumed);
+        }
+
+        consumed += step->consumed;
+        if (!full) {
+            produced += step->produced;
+        }
+        finished = step->finished;
+    }
+
+    if (consumed != encoded.size() || produced != output.size()) {
+        return fail(
+            ErrorKind::Malformed,
+            "brotli chunk size or stream boundary is invalid",
             consumed
         );
     }

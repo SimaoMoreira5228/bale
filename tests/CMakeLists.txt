@@ -11,6 +11,7 @@ include(${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake)
 
 add_executable(bale_tests
     archive/archive_test.cpp
+    archive/brotli_chunk_test.cpp
     archive/cdc_test.cpp
     archive/compression_test.cpp
     archive/encrypted_test.cpp
@@ -24,6 +25,7 @@ add_executable(bale_tests
     checksum/crc_test.cpp
     cli/single_file_test.cpp
     cli/terminal_text_test.cpp
+    codecs/brotli_test.cpp
     codecs/decoders_test.cpp
     codecs/lzma2_test.cpp
     codecs/lz4_frame_test.cpp
@@ -71,6 +73,7 @@ target_link_libraries(bale_tests PRIVATE
     bale_fswalk
     bale_io
     bale_security
+    bale_brotli
     bale_bz2
     bale_lz4
     bale_lzma

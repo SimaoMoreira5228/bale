@@ -1,5 +1,6 @@
 set(bale_fuzz_targets
     fuzz_archive_path
+    fuzz_brotli
     fuzz_bzip2
     fuzz_codecs
     fuzz_crypto_aead

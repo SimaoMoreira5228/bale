@@ -31,6 +31,12 @@ struct PresetPolicy {
 // rejected for `small`: at most 1.8% smaller archives on mixed data, worse on code and small
 // files, for 2-3x slower end-to-end runs, ~9x slower single-file extraction and higher create
 // RSS. lzma2 stays an explicit --codec, not a preset.
+// NOTE: brotli was measured the same way in bench/results/2026-10-19-xeon-e5-2690v3-brotli and
+// rejected too, despite a real size win (quality 11: 9% smaller on source, 7% on structured,
+// tie on prose; quality 6: 6% smaller on small files and faster to create than zstd:19).
+// Quality 11 saves the same 0.2 of 14.5 MiB on mixed data for 8-9x slower create and
+// 2.2-2.4x slower single-file extraction, and quality 6 loses prose by 15%, so `small`
+// stays zstd:19 and brotli stays an explicit --codec, not a preset.
 constexpr std::array presetPolicies{
     PresetPolicy{
         .preset = Preset::Fast,
