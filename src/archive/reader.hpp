@@ -5,6 +5,7 @@
 #include "archive/commit.hpp"
 #include "archive/index.hpp"
 #include "archive/manifest.hpp"
+#include "archive/signatures.hpp"
 #include "archive/writer.hpp"
 #include "base/error.hpp"
 #include "crypto/secrets.hpp"
@@ -88,6 +89,17 @@ class Reader {
         return fileSize_ - footerOffset_ - footerSize;
     }
 
+    [[nodiscard]] std::span<const Signature> signatures() const {
+        return signatures_;
+    }
+
+    [[nodiscard]] bool hasSignatures() const {
+        return !signatures_.empty();
+    }
+
+    [[nodiscard]] Result<void>
+    verifySignatures(std::span<const std::array<std::byte, signerIdSize>> keys) const;
+
     [[nodiscard]] Result<std::span<const std::byte>> loadChunk(const ChunkKey& key);
 
     [[nodiscard]] Result<std::span<const std::byte>>
@@ -155,6 +167,9 @@ class Reader {
     );
     [[nodiscard]] Result<void> loadMetadata();
     [[nodiscard]] Result<void> loadMetadataEncrypted();
+    [[nodiscard]] Result<void> loadSignatures();
+    [[nodiscard]] Result<void>
+    checkTrailerRecords(std::uint64_t commitEnd, std::uint64_t footerOffset, bool store);
     [[nodiscard]] Result<void> checkLocations();
     [[nodiscard]] Result<void> checkLocationsEncrypted();
     [[nodiscard]] Result<VerifyReport> walkRecords();
@@ -182,6 +197,7 @@ class Reader {
     bool encrypted_ = false;
     std::uint64_t epoch_ = 0;
     crypto::SecretBytes dataKey_;
+    std::vector<Signature> signatures_;
 };
 
 }

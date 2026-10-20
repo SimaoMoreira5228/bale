@@ -209,6 +209,13 @@ Result<ArchiveOutput> ArchiveOutput::create(File file, const OutputOptions& opti
     return fail(ErrorKind::Unsupported, "unknown output format");
 }
 
+Result<void> ArchiveOutput::addSignSeed(crypto::SecretBytes seed) {
+    if (auto* native = std::get_if<archive::Writer>(&sink_)) {
+        return native->addSignSeed(std::move(seed));
+    }
+    return fail(ErrorKind::Malformed, "signing applies only to bale archives");
+}
+
 Result<void>
 ArchiveOutput::addDirectory(std::string_view path, const archive::EntryAttributes& attributes) {
     if (auto* native = std::get_if<archive::Writer>(&sink_)) {

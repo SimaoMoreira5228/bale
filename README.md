@@ -41,6 +41,14 @@ Without the password nothing leaks beyond the format magic and a flag that says 
 
 Two known properties are pinned by tests so nobody "fixes" them into something worse. Truncating an archive back to a complete older generation opens cleanly as that generation with no warning; rollback detection is impossible in any append-only archive (plaintext behaves the same) and generations stay fully readable on purpose. And a wrong password (exit 6, password required) is deliberately distinct from a damaged archive (exit 5, integrity): merging them would only tell the user to retry a password when the file is actually corrupt.
 
+## Experimental commit signatures
+
+Pass `--sign <seed-file>` to `create` or `update` (bale only) to sign the commit with Ed25519. The seed file holds one 64-hex-character seed per line (comments with `#` and blank lines are allowed, like `--key-file`); every seed produces one signature record on the commit. Pass `--verify-key <hex>` to `test`, `list`, `info`, `extract` or `compact` to require a signature from that 32-byte public key over the archive's latest commit. This is provisional: the wire values are not frozen and a later build may not read these archives at all.
+
+The trust model is deliberately minimal — no PKI, no key servers, no web of trust. You get the public key from the signer yourself, outside of bale, and a passing check means exactly one thing: whoever holds the matching secret signed this exact commit (generation, epoch and commit digest). It says nothing about who they are, whether the key is still good, or whether an older generation was signed by someone else. Without `--verify-key` signatures are ignored entirely: unsigned archives and archives signed by other keys open and verify exactly as before, and `compact` refuses a signed source unless you pass `--sign` to re-sign the compacted archive (rewriting the layout invalidates the old signatures, so silently dropping them would lie).
+
+Each signature covers exactly one commit generation and key epoch (epoch 0 for plain archives, the key epoch for encrypted ones). A signature from an older generation never verifies a newer commit, so rotating keys means signing the new generation with the new key; `info` shows every signer on the latest commit. Verification failure is an integrity error (exit 5), distinct from a structurally damaged archive (exit 4): a file that fails to open is corrupt, a file that opens but has no matching signature is simply not yours.
+
 Names from the archive are escaped before they reach your terminal. A file called `\x1b[31m...` can't recolor your shell or hide behind a bidi override.
 
 Exit codes tell you what went wrong:

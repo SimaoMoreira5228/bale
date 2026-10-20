@@ -91,6 +91,8 @@ class ArchiveOutput {
 
     [[nodiscard]] Result<OutputSummary> finish();
 
+    [[nodiscard]] Result<void> addSignSeed(crypto::SecretBytes seed);
+
   private:
     using Sink = std::variant<archive::Writer, tar::Writer, zip::Writer>;
 

@@ -99,7 +99,7 @@ Result<void> Reader::tryFooter(std::span<const std::byte> bytes, std::uint64_t o
     if (!footer) {
         return std::unexpected(footer.error());
     }
-    if (footer->commitOffset + footer->commitLength != offset) {
+    if (footer->commitOffset + footer->commitLength > offset) {
         return fail(ErrorKind::Malformed, "footer does not directly follow its commit", offset);
     }
 
@@ -164,14 +164,27 @@ Result<void> Reader::tryFooter(std::span<const std::byte> bytes, std::uint64_t o
             return std::unexpected(decodedFooter.error());
         }
         if (decodedFooter->generation + 1 != parentCommit.generation ||
-            decodedFooter->commitDigest != parentCommit.previous ||
-            decodedFooter->commitOffset + decodedFooter->commitLength !=
-                parentCommit.previousFooterOffset) {
+            decodedFooter->commitDigest != parentCommit.previous) {
             return fail(
                 ErrorKind::Integrity,
                 "previous footer does not match commit chain",
                 offset
             );
+        }
+        std::uint64_t parentCommitEnd = decodedFooter->commitOffset + decodedFooter->commitLength;
+        if (parentCommitEnd > parentCommit.previousFooterOffset) {
+            return fail(
+                ErrorKind::Malformed,
+                "parent commit record does not precede its footer",
+                offset
+            );
+        }
+        // NOTE: a signed parent leaves SIGNATURE records between its commit and its
+        // NOTE: footer; the gap must validate as a trailer exactly like the latest one.
+        if (auto trailer =
+                checkTrailerRecords(parentCommitEnd, parentCommit.previousFooterOffset, false);
+            !trailer) {
+            return std::unexpected(trailer.error());
         }
 
         auto parentRecord = readRecord(
@@ -285,6 +298,9 @@ Result<void> Reader::tryFooter(std::span<const std::byte> bytes, std::uint64_t o
     auto metadata = loadMetadata();
     if (!metadata) {
         return metadata;
+    }
+    if (auto signatures = loadSignatures(); !signatures) {
+        return signatures;
     }
     return checkLocations();
 }

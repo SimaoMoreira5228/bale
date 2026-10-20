@@ -449,7 +449,8 @@ ExitCode extractBale(
     std::string_view argument,
     File file,
     Session& session,
-    const std::optional<std::string>& keyFile = std::nullopt
+    const std::optional<std::string>& keyFile,
+    const VerifyKeys& verifyKeys
 ) {
     auto reader = archive::Reader::open(std::move(file));
     std::optional<archive::Reader> encrypted;
@@ -476,6 +477,11 @@ ExitCode extractBale(
     }
     archive::Reader& active = encrypted ? *encrypted : *reader;
 
+    if (auto signed_ = requireSignatures(active, verifyKeys); !signed_) {
+        session.fail(argument, signed_.error());
+        return session.finish();
+    }
+
     for (const auto& entry : active.manifest().entries) {
         auto result = extractBaleEntry(session, active, entry);
         session.record(entry.path, result);
@@ -492,11 +498,21 @@ ExitCode extractArchive(
     std::string_view argument,
     std::string_view destination,
     const ExtractPolicy& policy,
-    const std::optional<std::string>& keyFile
+    const std::optional<std::string>& keyFile,
+    const VerifyKeys& verifyKeys
 ) {
     auto archive = openArchive(argument);
     if (!archive) {
         return reportFailure(argument, archive.error());
+    }
+    if (archive->format.container != Container::Bale && !verifyKeys.empty()) {
+        return reportFailure(
+            argument,
+            Error{
+                .kind = ErrorKind::Malformed,
+                .what = "--verify-key applies only to bale archives"
+            }
+        );
     }
 
     std::error_code ignored;
@@ -510,7 +526,7 @@ ExitCode extractArchive(
     PathPolicy pathPolicy;
     if (archive->format.container == Container::Bale) {
         Session session(std::move(*extractor), destination, policy, pathPolicy);
-        return extractBale(argument, std::move(archive->file), session, keyFile);
+        return extractBale(argument, std::move(archive->file), session, keyFile, verifyKeys);
     }
     if (archive->format.container == Container::Zip) {
         pathPolicy.backslash = Backslash::Separator;
@@ -536,7 +552,11 @@ ExitCode extractArchive(
     );
 }
 
-ExitCode extractArchiveHere(std::string_view argument, const std::optional<std::string>& keyFile) {
+ExitCode extractArchiveHere(
+    std::string_view argument,
+    const std::optional<std::string>& keyFile,
+    const VerifyKeys& verifyKeys
+) {
     auto archive = pathFromUtf8(argument);
     auto destination = archive.parent_path();
     if (destination.empty()) {
@@ -548,11 +568,14 @@ ExitCode extractArchiveHere(std::string_view argument, const std::optional<std::
             return reportFailure(argument, failure);
         }
     }
-    return extractArchive(argument, pathToUtf8(destination), {}, keyFile);
+    return extractArchive(argument, pathToUtf8(destination), {}, keyFile, verifyKeys);
 }
 
-ExitCode
-extractArchiveToFolder(std::string_view argument, const std::optional<std::string>& keyFile) {
+ExitCode extractArchiveToFolder(
+    std::string_view argument,
+    const std::optional<std::string>& keyFile,
+    const VerifyKeys& verifyKeys
+) {
     auto archive = pathFromUtf8(argument);
     auto destination = archive.parent_path() / archive.stem();
     if (destination.empty()) {
@@ -561,7 +584,7 @@ extractArchiveToFolder(std::string_view argument, const std::optional<std::strin
             Error{.kind = ErrorKind::Malformed, .what = "archive has no output folder name"}
         );
     }
-    return extractArchive(argument, pathToUtf8(destination), {}, keyFile);
+    return extractArchive(argument, pathToUtf8(destination), {}, keyFile, verifyKeys);
 }
 
 }

@@ -1,5 +1,6 @@
 #include "archive/encrypted.hpp"
 #include "archive/reader.hpp"
+#include "archive/signatures.hpp"
 #include "base/checked.hpp"
 #include "base/endian.hpp"
 
@@ -81,6 +82,13 @@ collectKeys(File& file, std::uint64_t fileSize, ReaderUnlock& unlock, const Limi
         auto record = decodeRecord(recordBuffer, recordLimits, position);
         if (!record) {
             return std::unexpected(record.error());
+        }
+        // NOTE: SIGNATURE records share the Extension type; they carry no key material and
+        // NOTE: are verified against the commit digest later, so the keyslot scan skips them.
+        if (auto kind = peekExtensionKind(record->payload, position + recordPrefixSize);
+            kind && *kind == signatureExtensionKind) {
+            position += *size;
+            continue;
         }
         auto slot = decodeKeyslot(record->payload, position + recordPrefixSize);
         if (!slot) {
@@ -349,6 +357,22 @@ Reader::openEncrypted(File file, const ReaderOptions& options, ReaderUnlock&& un
                     current.previousFooterOffset
                 );
             }
+            std::uint64_t parentCommitEnd = parentFooter->commitOffset + parentFooter->commitLength;
+            if (parentCommitEnd > current.previousFooterOffset) {
+                return fail(
+                    ErrorKind::Malformed,
+                    "parent commit record does not precede its footer",
+                    current.previousFooterOffset
+                );
+            }
+            // NOTE: a signed parent leaves SIGNATURE records between its commit and its
+            // NOTE: footer; the gap must validate as a trailer exactly like the latest one.
+            if (auto trailer =
+                    reader
+                        .checkTrailerRecords(parentCommitEnd, current.previousFooterOffset, false);
+                !trailer) {
+                return std::unexpected(trailer.error());
+            }
             std::vector<std::byte> parentBuffer(
                 static_cast<std::size_t>(parentFooter->commitLength)
             );
@@ -425,6 +449,9 @@ Reader::openEncrypted(File file, const ReaderOptions& options, ReaderUnlock&& un
     }
     if (auto locations = reader.checkLocationsEncrypted(); !locations) {
         return std::unexpected(locations.error());
+    }
+    if (auto signatures = reader.loadSignatures(); !signatures) {
+        return std::unexpected(signatures.error());
     }
     if (auto report = reader.walkRecords(); !report) {
         return std::unexpected(report.error());

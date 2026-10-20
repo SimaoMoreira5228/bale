@@ -4,6 +4,7 @@
 #include "archive/commit.hpp"
 #include "archive/encrypted.hpp"
 #include "archive/reader.hpp"
+#include "archive/signatures.hpp"
 #include "base/checked.hpp"
 #include "base/endian.hpp"
 #include "checksum/crc.hpp"
@@ -124,6 +125,7 @@ Result<Writer> Writer::create(File file, const WriterOptions& options) {
     superblock.archiveId = options.archiveId ? *options.archiveId : randomArchiveId();
     superblock.creationTimeNs = options.creationTimeNanoseconds ? *options.creationTimeNanoseconds
                                                                 : currentTimeNanoseconds();
+    writer.archiveId_ = superblock.archiveId;
     auto encoded = encodeSuperblock(superblock);
     auto written = writer.appendRaw(encoded);
     if (!written) {
@@ -180,6 +182,7 @@ Result<Writer> Writer::append(File file, const WriterOptions& options) {
     writer.generation_ = reader->commit().generation + 1;
     writer.previousCommit_ = reader->commitDigest();
     writer.previousFooterOffset_ = reader->footerOffset();
+    writer.archiveId_ = reader->superblock().archiveId;
     writer.index_.assign(reader->index().begin(), reader->index().end());
     for (std::uint32_t index = 0; index < writer.index_.size(); ++index) {
         writer.table_.insert(writer.index_, index);
@@ -561,6 +564,58 @@ Result<Writer::RecordSpan> Writer::writeIndex(Blake3Digest& digest) {
     return writeRecord(RecordType::Index, payload_, {}, CodecId::Raw, 0, encryptedRecordFlag);
 }
 
+Result<void> Writer::addSignSeed(crypto::SecretBytes seed) {
+    auto usable = check();
+    if (!usable) {
+        return usable;
+    }
+    if (seed.size() != crypto::signSeedSize) {
+        return fail(ErrorKind::Malformed, "signing seed must hold 32 bytes", seed.size());
+    }
+    if (signSeeds_.size() >= maxSignaturesPerCommit) {
+        return fail(ErrorKind::LimitExceeded, "too many signing keys", signSeeds_.size());
+    }
+    signSeeds_.push_back(std::move(seed));
+    return {};
+}
+
+Result<void> Writer::writeSignatures(
+    const Blake3Digest& commitDigest,
+    std::uint64_t generation,
+    std::uint64_t epoch
+) {
+    if (signSeeds_.size() > maxSignaturesPerCommit) {
+        return fail(ErrorKind::LimitExceeded, "too many signing keys", signSeeds_.size());
+    }
+    std::span<const std::byte, 16> id(archiveId_.data(), 16);
+    std::span<const std::byte, 32> digest(commitDigest.data(), 32);
+    for (const auto& seed : signSeeds_) {
+        if (seed.size() != crypto::signSeedSize) {
+            return fail(ErrorKind::Malformed, "signing seed must hold 32 bytes", seed.size());
+        }
+        auto made = makeSignature(seed.bytes(), id, generation, epoch, digest);
+        if (!made) {
+            return std::unexpected(made.error());
+        }
+        std::vector<std::byte> payload;
+        if (auto encoded = encodeSignature(*made, payload); !encoded) {
+            return encoded;
+        }
+        auto record = writeRecord(
+            RecordType::Extension,
+            payload,
+            {},
+            CodecId::Raw,
+            0,
+            encrypted_ ? encryptedRecordFlag : 0
+        );
+        if (!record) {
+            return std::unexpected(record.error());
+        }
+    }
+    return {};
+}
+
 Result<WriteSummary> Writer::finish() {
     auto usable = check();
     if (!usable) {
@@ -614,6 +669,10 @@ Result<WriteSummary> Writer::finish() {
         auto record = writeRecord(RecordType::Commit, payload_, {});
         if (!record) {
             return std::unexpected(record.error());
+        }
+        if (auto signed_ = writeSignatures(commitDigest, commit.generation, commit.epoch);
+            !signed_) {
+            return std::unexpected(poison(signed_.error()).error());
         }
         auto flushed = flushOutput();
         if (!flushed) {
@@ -676,6 +735,9 @@ Result<WriteSummary> Writer::finish() {
         writeRecord(RecordType::Commit, payload_, {}, CodecId::Raw, 0, encryptedRecordFlag);
     if (!commitRecord) {
         return std::unexpected(commitRecord.error());
+    }
+    if (auto signed_ = writeSignatures(commitDigest, commit.generation, commit.epoch); !signed_) {
+        return std::unexpected(poison(signed_.error()).error());
     }
     auto flushed = flushOutput();
     if (!flushed) {

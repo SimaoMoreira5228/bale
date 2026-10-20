@@ -24,6 +24,14 @@
 
 namespace bale::cli {
 
+Result<void> requireSignatures(const archive::Reader& reader, const VerifyKeys& keys) {
+    if (keys.empty()) {
+        return {};
+    }
+    std::vector<std::array<std::byte, archive::signerIdSize>> keyViews(keys.begin(), keys.end());
+    return reader.verifySignatures(keyViews);
+}
+
 namespace {
 
 constexpr std::int64_t earliestPrintableTime = -62135596800;
@@ -298,6 +306,13 @@ ExitCode listBale(std::string_view argument, File file, const ListOptions& optio
     }
     const archive::Reader& active = encrypted ? *encrypted : *reader;
 
+    if (auto signed_ = requireSignatures(active, options.verifyKeys); !signed_) {
+        return reportFailure(argument, signed_.error());
+    }
+    if (!options.verifyKeys.empty()) {
+        std::println("signature: ok, signed by the verification key");
+    }
+
     std::string escapedPath;
     std::string escapedTarget;
     for (const auto& entry : active.manifest().entries) {
@@ -321,7 +336,8 @@ ExitCode listBale(std::string_view argument, File file, const ListOptions& optio
 ExitCode testBale(
     std::string_view argument,
     File file,
-    const std::optional<std::string>& keyFile = std::nullopt
+    const std::optional<std::string>& keyFile,
+    const VerifyKeys& verifyKeys
 ) {
     auto reader = archive::Reader::open(std::move(file));
     std::optional<archive::Reader> encrypted;
@@ -349,6 +365,10 @@ ExitCode testBale(
     archive::Reader* activePtr = encrypted ? &*encrypted : &*reader;
     archive::Reader& active = *activePtr;
 
+    if (auto signed_ = requireSignatures(active, verifyKeys); !signed_) {
+        return reportFailure(argument, signed_.error());
+    }
+
     auto report = active.verify(archive::VerifyMode::Content);
     if (!report) {
         return reportFailure(argument, report.error());
@@ -360,6 +380,9 @@ ExitCode testBale(
         report->chunksVerified,
         report->bytesVerified
     );
+    if (!verifyKeys.empty()) {
+        std::println("signature: ok, signed by the verification key");
+    }
     if (report->unindexedDataRecords != 0) {
         std::println("note: {} unreferenced data records", report->unindexedDataRecords);
     }
@@ -644,6 +667,15 @@ ExitCode listArchive(std::string_view argument, const ListOptions& options) {
     if (!archive) {
         return reportFailure(argument, archive.error());
     }
+    if (archive->format.container != Container::Bale && !options.verifyKeys.empty()) {
+        return reportFailure(
+            argument,
+            Error{
+                .kind = ErrorKind::Malformed,
+                .what = "--verify-key applies only to bale archives"
+            }
+        );
+    }
 
     switch (archive->format.container) {
     case Container::Bale:
@@ -665,15 +697,28 @@ ExitCode listArchive(std::string_view argument, const ListOptions& options) {
     }
 }
 
-ExitCode testArchive(std::string_view argument, const std::optional<std::string>& keyFile) {
+ExitCode testArchive(
+    std::string_view argument,
+    const std::optional<std::string>& keyFile,
+    const VerifyKeys& verifyKeys
+) {
     auto archive = openArchive(argument);
     if (!archive) {
         return reportFailure(argument, archive.error());
     }
+    if (archive->format.container != Container::Bale && !verifyKeys.empty()) {
+        return reportFailure(
+            argument,
+            Error{
+                .kind = ErrorKind::Malformed,
+                .what = "--verify-key applies only to bale archives"
+            }
+        );
+    }
 
     switch (archive->format.container) {
     case Container::Bale:
-        return testBale(argument, std::move(archive->file), keyFile);
+        return testBale(argument, std::move(archive->file), keyFile, verifyKeys);
     case Container::Zip:
         return testZip(argument, std::move(archive->file));
     case Container::SevenZip:

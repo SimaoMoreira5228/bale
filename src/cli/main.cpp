@@ -50,15 +50,18 @@ commands:
       --experimental-encryption  emit experimental encrypted records (bale only)
       --recipient <hex>       recipient X25519 public key, 64 hex chars (repeatable)
       --key-file <path>       recipient secret keys for update/unlock (one hex key per line)
+      --sign <path>           sign the commit with Ed25519 seeds (one 64-hex-char seed per line)
+      --verify-key <hex>      require a commit signature from this Ed25519 public key (repeatable)
   update <archive.bale> <dir> [options]
       append a new snapshot of the directory, reusing unchanged chunks; takes create's options
   convert <input> <output> [--format <name>] [--level <n>]
       rewrite a bale, zip, tar or 7z archive entry by entry in another format
   compact <archive.bale> <output.bale> [--sync] [--experimental-encryption] [--key-file <path>]
+      [--sign <path>] [--verify-key <hex>]
       write the current snapshot to a new archive and keep the source
-  list <archive> [--long] [--key-file <path>]   list entries, --long adds type, size and modification time
-  test <archive> [--key-file <path>]            check archive structure and entry checksums
-  info <archive> [--key-file <path>]            show the format and, for .bale, the recorded compression profile
+  list <archive> [--long] [--key-file <path>] [--verify-key <hex>]   list entries, --long adds type, size and modification time
+  test <archive> [--key-file <path>] [--verify-key <hex>]            check archive structure and entry checksums
+  info <archive> [--key-file <path>] [--verify-key <hex>]            show the format and, for .bale, the recorded compression profile
   extract <archive> [options]
       -o, --output <dir>      extract into dir (default: current directory)
       --replace               replace existing regular files
@@ -66,11 +69,16 @@ commands:
       --allow-symlinks        create symlinks whose target stays inside the output
       --sync                  flush every file to disk before moving it into place
       --key-file <path>       recipient secret keys for encrypted archives
+      --verify-key <hex>      require a commit signature from this Ed25519 public key (repeatable)
   context add <path>         create <path>.bale from a file or directory
   context extract-here <archive.bale>
   context extract-folder <archive.bale>
   formats                   show which formats bale can read and create
   help                      show this message
+
+signatures: no PKI, no key servers, no web of trust. A signer holds an Ed25519 secret key
+and a verifier holds the matching public key obtained out of band. --verify-key checks
+only that the archive's latest commit was signed by that key, nothing more.
 )";
 
 int exitWith(ExitCode code) {
@@ -97,6 +105,18 @@ int runList(std::span<const std::string_view> arguments) {
                 return usageError("--key-file needs a path");
             }
             options.keyFile = std::string(arguments[++index]);
+            continue;
+        }
+        if (argument == "--verify-key") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--verify-key needs a key");
+            }
+            ++index;
+            auto parsed = bale::cli::parseVerifyKey(arguments[index]);
+            if (!parsed) {
+                return usageError("invalid --verify-key");
+            }
+            options.verifyKeys.push_back(*parsed);
             continue;
         }
         if (argument.starts_with('-')) {
@@ -346,6 +366,14 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
             options.keyFile = std::string(arguments[index]);
             continue;
         }
+        if (argument == "--sign") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--sign needs a path");
+            }
+            ++index;
+            options.signKeyFile = std::string(arguments[index]);
+            continue;
+        }
         if (argument.starts_with('-')) {
             return usageError(update ? "unknown option for update" : "unknown option for create");
         }
@@ -411,6 +439,9 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
     if (options.experimentalEncryption && options.format != bale::cli::OutputFormat::Bale) {
         return usageError("--experimental-encryption applies only to bale");
     }
+    if (options.signKeyFile && options.format != bale::cli::OutputFormat::Bale) {
+        return usageError("--sign applies only to bale");
+    }
 
     if (update) {
         return exitWith(bale::cli::updateArchive(positional[0], positional[1], options));
@@ -473,6 +504,8 @@ int runCompact(std::span<const std::string_view> arguments) {
     bool durable = false;
     bool experimental = false;
     std::optional<std::string> keyFile;
+    std::optional<std::string> signKeyFile;
+    bale::cli::VerifyKeys verifyKeys;
     std::vector<std::string_view> positional;
     for (std::size_t index = 0; index < arguments.size(); ++index) {
         std::string_view argument = arguments[index];
@@ -491,6 +524,25 @@ int runCompact(std::span<const std::string_view> arguments) {
             keyFile = std::string(arguments[++index]);
             continue;
         }
+        if (argument == "--sign") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--sign needs a path");
+            }
+            signKeyFile = std::string(arguments[++index]);
+            continue;
+        }
+        if (argument == "--verify-key") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--verify-key needs a key");
+            }
+            ++index;
+            auto parsed = bale::cli::parseVerifyKey(arguments[index]);
+            if (!parsed) {
+                return usageError("invalid --verify-key");
+            }
+            verifyKeys.push_back(*parsed);
+            continue;
+        }
         if (argument.starts_with('-')) {
             return usageError("unknown option for compact");
         }
@@ -501,12 +553,21 @@ int runCompact(std::span<const std::string_view> arguments) {
         return usageError("compact takes a source archive and a new output path");
     }
     return exitWith(
-        bale::cli::compactArchive(positional[0], positional[1], durable, experimental, keyFile)
+        bale::cli::compactArchive(
+            positional[0],
+            positional[1],
+            durable,
+            experimental,
+            keyFile,
+            signKeyFile,
+            verifyKeys
+        )
     );
 }
 
 int runTest(std::span<const std::string_view> arguments) {
     std::optional<std::string> keyFile;
+    bale::cli::VerifyKeys verifyKeys;
     std::string_view archive;
     for (std::size_t index = 0; index < arguments.size(); ++index) {
         std::string_view argument = arguments[index];
@@ -515,6 +576,18 @@ int runTest(std::span<const std::string_view> arguments) {
                 return usageError("--key-file needs a path");
             }
             keyFile = std::string(arguments[++index]);
+            continue;
+        }
+        if (argument == "--verify-key") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--verify-key needs a key");
+            }
+            ++index;
+            auto parsed = bale::cli::parseVerifyKey(arguments[index]);
+            if (!parsed) {
+                return usageError("invalid --verify-key");
+            }
+            verifyKeys.push_back(*parsed);
             continue;
         }
         if (argument.starts_with('-')) {
@@ -528,7 +601,7 @@ int runTest(std::span<const std::string_view> arguments) {
     if (archive.empty()) {
         return usageError("test takes exactly one archive");
     }
-    return exitWith(bale::cli::testArchive(archive, keyFile));
+    return exitWith(bale::cli::testArchive(archive, keyFile, verifyKeys));
 }
 
 int runExtract(std::span<const std::string_view> arguments) {
@@ -536,6 +609,7 @@ int runExtract(std::span<const std::string_view> arguments) {
     std::string_view archive;
     std::string_view output = ".";
     std::optional<std::string> keyFile;
+    bale::cli::VerifyKeys verifyKeys;
     for (std::size_t index = 0; index < arguments.size(); ++index) {
         std::string_view argument = arguments[index];
         if (argument == "-o" || argument == "--output") {
@@ -551,6 +625,18 @@ int runExtract(std::span<const std::string_view> arguments) {
                 return usageError("--key-file needs a path");
             }
             keyFile = std::string(arguments[++index]);
+            continue;
+        }
+        if (argument == "--verify-key") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--verify-key needs a key");
+            }
+            ++index;
+            auto parsed = bale::cli::parseVerifyKey(arguments[index]);
+            if (!parsed) {
+                return usageError("invalid --verify-key");
+            }
+            verifyKeys.push_back(*parsed);
             continue;
         }
         if (argument == "--replace") {
@@ -581,7 +667,7 @@ int runExtract(std::span<const std::string_view> arguments) {
     if (archive.empty()) {
         return usageError("extract needs an archive");
     }
-    return exitWith(bale::cli::extractArchive(archive, output, policy, keyFile));
+    return exitWith(bale::cli::extractArchive(archive, output, policy, keyFile, verifyKeys));
 }
 
 int runContext(std::span<const std::string_view> arguments) {
@@ -669,6 +755,7 @@ int run(std::span<const std::string_view> argv) {
     }
     if (command == "info") {
         std::optional<std::string> keyFile;
+        bale::cli::VerifyKeys verifyKeys;
         std::string_view archive;
         for (std::size_t index = 0; index < rest.size(); ++index) {
             if (rest[index] == "--key-file") {
@@ -676,6 +763,18 @@ int run(std::span<const std::string_view> argv) {
                     return usageError("--key-file needs a path");
                 }
                 keyFile = std::string(rest[++index]);
+                continue;
+            }
+            if (rest[index] == "--verify-key") {
+                if (index + 1 == rest.size()) {
+                    return usageError("--verify-key needs a key");
+                }
+                ++index;
+                auto parsed = bale::cli::parseVerifyKey(rest[index]);
+                if (!parsed) {
+                    return usageError("invalid --verify-key");
+                }
+                verifyKeys.push_back(*parsed);
                 continue;
             }
             if (rest[index].starts_with('-') || !archive.empty()) {
@@ -686,7 +785,7 @@ int run(std::span<const std::string_view> argv) {
         if (archive.empty()) {
             return usageError("info takes exactly one archive");
         }
-        return exitWith(bale::cli::describeArchive(archive, keyFile));
+        return exitWith(bale::cli::describeArchive(archive, keyFile, verifyKeys));
     }
     if (command == "test") {
         return runTest(rest);

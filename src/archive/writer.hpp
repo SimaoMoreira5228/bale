@@ -94,7 +94,15 @@ class Writer {
     [[nodiscard]] static Result<WriteSummary>
     compact(File file, Reader& source, bool durable = false);
     [[nodiscard]] static Result<WriteSummary>
+    compact(File file, Reader& source, bool durable, std::vector<crypto::SecretBytes> signSeeds);
+    [[nodiscard]] static Result<WriteSummary>
     compactEncrypted(File file, Reader& source, bool durable = false);
+    [[nodiscard]] static Result<WriteSummary> compactEncrypted(
+        File file,
+        Reader& source,
+        bool durable,
+        std::vector<crypto::SecretBytes> signSeeds
+    );
 
     Writer(Writer&& other) noexcept;
     Writer& operator=(Writer&& other) noexcept;
@@ -135,6 +143,12 @@ class Writer {
     }
 
     [[nodiscard]] Result<WriteSummary> finish();
+
+    [[nodiscard]] Result<void> addSignSeed(crypto::SecretBytes seed);
+
+    [[nodiscard]] std::uint64_t signatureCount() const {
+        return signSeeds_.size();
+    }
 
   private:
     struct PendingEntry {
@@ -217,6 +231,11 @@ class Writer {
     [[nodiscard]] Result<void>
     addFileCdc(std::string_view path, const File& source, const EntryAttributes& attributes);
     [[nodiscard]] Result<void> writeFileCdc(std::span<const std::byte> data);
+    [[nodiscard]] Result<void> writeSignatures(
+        const Blake3Digest& commitDigest,
+        std::uint64_t generation,
+        std::uint64_t epoch
+    );
 
     File file_;
     WriterOptions options_;
@@ -250,6 +269,7 @@ class Writer {
     bool hasPassword_ = false;
     crypto::SecretBytes password_;
     std::array<std::byte, 16> archiveId_{};
+    std::vector<crypto::SecretBytes> signSeeds_;
 };
 
 }
