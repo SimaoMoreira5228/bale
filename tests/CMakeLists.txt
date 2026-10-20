@@ -41,6 +41,8 @@ add_executable(bale_tests
     formats/xz/stream_test.cpp
     fswalk/tree_walker_test.cpp
     formats/detect_test.cpp
+    formats/ar/reader_test.cpp
+    formats/cpio/reader_test.cpp
     formats/gzip/stream_test.cpp
     formats/tar/compressed_reader_test.cpp
     formats/tar/header_test.cpp
@@ -75,6 +77,8 @@ target_link_libraries(bale_tests PRIVATE
     bale_fswalk
     bale_io
     bale_security
+    bale_formats_ar
+    bale_formats_cpio
     bale_brotli
     bale_bz2
     bale_lz4
@@ -88,6 +92,9 @@ target_link_libraries(bale_tests PRIVATE
 doctest_discover_tests(bale_tests)
 target_compile_definitions(
     bale_tests PRIVATE REFERENCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/reference"
+)
+target_compile_definitions(
+    bale_tests PRIVATE FORMAT_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/formats"
 )
 
 find_package(Python3 3.10 COMPONENTS Interpreter)
