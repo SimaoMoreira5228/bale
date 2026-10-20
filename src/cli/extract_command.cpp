@@ -7,6 +7,7 @@
 #include "formats/cab/reader.hpp"
 #include "formats/compressed/stream.hpp"
 #include "formats/cpio/reader.hpp"
+#include "formats/iso/reader.hpp"
 #include "formats/sevenzip/reader.hpp"
 #include "formats/tar/reader.hpp"
 #include "formats/zip/reader.hpp"
@@ -539,6 +540,62 @@ ExitCode extractCpio(std::string_view argument, File file, Session& session) {
 }
 
 [[nodiscard]] Result<EntryResult>
+extractIsoEntry(Session& session, iso::Reader& reader, const iso::Entry& entry) {
+    auto path = session.path(entry.name);
+    if (!path) {
+        return std::unexpected(path.error());
+    }
+
+    EntryMetadata metadata{
+        .mode = entry.mode,
+        .mtimeNanoseconds = mtimeNanoseconds(entry.mtimeSeconds, 0),
+    };
+    switch (entry.kind) {
+    case iso::EntryKind::Directory:
+        return session.extractor().createDirectory(*path, metadata);
+    case iso::EntryKind::Regular:
+        return writeFile(session, *path, metadata, [&](auto&& sink) {
+            return reader.streamEntry(entry, session.scratch(), sink);
+        });
+    case iso::EntryKind::Symlink:
+        return session.extractor().createSymlink(*path, entry.linkTarget, metadata);
+    case iso::EntryKind::CharDevice:
+        return session.extractor().skipOrRefuseSpecialFile(*path, SpecialFileKind::CharacterDevice);
+    case iso::EntryKind::BlockDevice:
+        return session.extractor().skipOrRefuseSpecialFile(*path, SpecialFileKind::BlockDevice);
+    case iso::EntryKind::Fifo:
+        return session.extractor().skipOrRefuseSpecialFile(*path, SpecialFileKind::Fifo);
+    case iso::EntryKind::Socket:
+        return session.extractor().skipOrRefuseSpecialFile(*path, SpecialFileKind::Socket);
+    case iso::EntryKind::Other:
+        return EntryResult{
+            .outcome = EntryOutcome::Skipped,
+            .reason = "unknown iso entry type",
+        };
+    }
+    return EntryResult{
+        .outcome = EntryOutcome::Skipped,
+        .reason = "unknown iso entry type",
+    };
+}
+
+ExitCode extractIso(std::string_view argument, File file, Session& session) {
+    auto reader = iso::Reader::open(std::move(file));
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    for (const auto& entry : reader->entries()) {
+        auto result = extractIsoEntry(session, *reader, entry);
+        session.record(entry.name, result);
+        if (!result && result.error().kind == ErrorKind::LimitExceeded) {
+            return session.finish();
+        }
+    }
+    return session.finish();
+}
+
+[[nodiscard]] Result<EntryResult>
 extractCabEntry(Session& session, cab::Reader& reader, const cab::Entry& entry) {
     auto path = session.path(entry.name);
     if (!path) {
@@ -718,6 +775,9 @@ ExitCode extractArchive(
     }
     if (archive->format.container == Container::Cpio) {
         return extractCpio(argument, std::move(archive->file), session);
+    }
+    if (archive->format.container == Container::Iso) {
+        return extractIso(argument, std::move(archive->file), session);
     }
     return reportFailure(
         argument,

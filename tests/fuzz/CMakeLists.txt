@@ -11,6 +11,7 @@ set(bale_fuzz_targets
     fuzz_detect
     fuzz_encrypted_record
     fuzz_gzip
+    fuzz_iso
     fuzz_keyslot
     fuzz_native_archive
     fuzz_native_records
@@ -41,6 +42,7 @@ foreach(target IN LISTS bale_fuzz_targets)
         bale_formats_compressed
         bale_formats_cpio
         bale_formats_gzip
+        bale_formats_iso
         bale_formats_sevenzip
         bale_formats_tar
         bale_formats_xz

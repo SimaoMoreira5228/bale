@@ -18,6 +18,7 @@ enum class Container : std::uint8_t {
     Ar,
     Cpio,
     Cab,
+    Iso,
     SingleFile,
 };
 
