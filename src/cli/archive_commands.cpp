@@ -5,6 +5,7 @@
 #include "cli/terminal_text.hpp"
 #include "cli/unlock.hpp"
 #include "formats/ar/reader.hpp"
+#include "formats/cab/reader.hpp"
 #include "formats/compressed/stream.hpp"
 #include "formats/cpio/reader.hpp"
 #include "formats/detect.hpp"
@@ -323,6 +324,25 @@ ExitCode listCpio(std::string_view argument, File file, const ListOptions& optio
     return ExitCode::Ok;
 }
 
+ExitCode listCab(std::string_view argument, File file, const ListOptions& options) {
+    auto reader = cab::Reader::open(std::move(file));
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    std::string escaped;
+    for (const auto& entry : reader->entries()) {
+        auto name = escapeForTerminal(entry.name, escaped);
+        if (!options.detailed) {
+            std::println("{}", name);
+            continue;
+        }
+
+        printRow(entry.directory ? 'd' : '-', entry.size, civilFromUnix(entry.mtimeSeconds), name);
+    }
+    return ExitCode::Ok;
+}
+
 [[nodiscard]] char baleKind(archive::EntryKind kind) {
     switch (kind) {
     case archive::EntryKind::Regular:
@@ -632,6 +652,45 @@ ExitCode testCpio(std::string_view argument, File file) {
     return result;
 }
 
+ExitCode testCab(std::string_view argument, File file) {
+    auto reader = cab::Reader::open(std::move(file));
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    std::vector<std::byte> scratch(testChunkSize);
+    auto discard = [](std::span<const std::byte>) -> Result<void> {
+        return {};
+    };
+
+    std::uint64_t failures = 0;
+    ExitCode result = ExitCode::Ok;
+    std::string escaped;
+    for (const auto& entry : reader->entries()) {
+        if (entry.directory) {
+            continue;
+        }
+
+        auto checked = reader->streamEntry(entry, scratch, discard);
+        if (checked) {
+            continue;
+        }
+
+        ++failures;
+        if (result == ExitCode::Ok) {
+            result = exitCodeFor(checked.error().kind);
+        }
+        reportError(escapeForTerminal(entry.name, escaped), checked.error());
+    }
+
+    if (failures == 0) {
+        std::println("ok: {} entries", reader->entryCount());
+    } else {
+        std::println("{} of {} entries failed", failures, reader->entryCount());
+    }
+    return result;
+}
+
 ExitCode testTar(std::string_view argument, OpenedArchive archive) {
     auto source = openTarSource(std::move(archive.file), archive.format.compression);
     if (!source) {
@@ -837,6 +896,8 @@ ExitCode listArchive(std::string_view argument, const ListOptions& options) {
         return listAr(argument, std::move(archive->file), options);
     case Container::Cpio:
         return listCpio(argument, std::move(archive->file), options);
+    case Container::Cab:
+        return listCab(argument, std::move(archive->file), options);
     case Container::Unknown:
     default:
         return reportFailure(
@@ -880,6 +941,8 @@ ExitCode testArchive(
         return testAr(argument, std::move(archive->file));
     case Container::Cpio:
         return testCpio(argument, std::move(archive->file));
+    case Container::Cab:
+        return testCab(argument, std::move(archive->file));
     case Container::Unknown:
     default:
         return reportFailure(

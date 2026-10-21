@@ -3,6 +3,7 @@
 #include "format/envelope.hpp"
 #include "formats/ar/header.hpp"
 #include "formats/bzip2/stream.hpp"
+#include "formats/cab/header.hpp"
 #include "formats/cpio/header.hpp"
 #include "formats/gzip/header.hpp"
 #include "formats/sevenzip/reader.hpp"
@@ -100,6 +101,8 @@ std::string_view name(ArchiveFormat format) {
         return "ar";
     case Container::Cpio:
         return "cpio";
+    case Container::Cab:
+        return "cab";
     case Container::SingleFile:
         switch (format.compression) {
         case Compression::None:
@@ -146,6 +149,9 @@ Result<ArchiveFormat> detectFormat(const File& file) {
     }
     if (cpio::looksLikeCpio(headBytes)) {
         return ArchiveFormat{.container = Container::Cpio};
+    }
+    if (cab::looksLikeCab(headBytes)) {
+        return ArchiveFormat{.container = Container::Cab};
     }
     if (headSize == tar::blockSize && tar::looksLikeTar(tar::Block(head))) {
         return ArchiveFormat{.container = Container::Tar};

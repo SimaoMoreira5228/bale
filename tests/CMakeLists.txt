@@ -43,6 +43,9 @@ add_executable(bale_tests
     fswalk/tree_walker_test.cpp
     formats/detect_test.cpp
     formats/ar/reader_test.cpp
+    formats/cab/decoder_test.cpp
+    formats/cab/reader_test.cpp
+    formats/cab/tree_test.cpp
     formats/cpio/reader_test.cpp
     formats/gzip/stream_test.cpp
     formats/tar/compressed_reader_test.cpp
@@ -80,6 +83,7 @@ target_link_libraries(bale_tests PRIVATE
     bale_io
     bale_security
     bale_formats_ar
+    bale_formats_cab
     bale_formats_cpio
     bale_brotli
     bale_bz2

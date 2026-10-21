@@ -28,6 +28,8 @@ class Inflater {
 
     [[nodiscard]] Result<void> reset();
 
+    [[nodiscard]] Result<void> setDictionary(std::span<const std::byte> history);
+
   private:
     struct State;
 
