@@ -3,7 +3,9 @@
 #include "cli/filesystem_path.hpp"
 #include "cli/terminal_text.hpp"
 #include "cli/unlock.hpp"
+#include "formats/ar/reader.hpp"
 #include "formats/compressed/stream.hpp"
+#include "formats/cpio/reader.hpp"
 #include "formats/sevenzip/reader.hpp"
 #include "formats/tar/reader.hpp"
 #include "formats/zip/reader.hpp"
@@ -412,6 +414,131 @@ ExitCode extractSevenZip(std::string_view argument, File file, Session& session)
 }
 
 [[nodiscard]] Result<EntryResult>
+extractArEntry(Session& session, ar::Reader& reader, const ar::Entry& entry) {
+    auto path = session.path(entry.name);
+    if (!path) {
+        return std::unexpected(path.error());
+    }
+
+    EntryMetadata metadata{
+        .mode = entry.mode,
+        .mtimeNanoseconds = mtimeNanoseconds(entry.mtimeSeconds, 0),
+    };
+    return writeFile(session, *path, metadata, [&](auto&& sink) {
+        return reader.streamEntry(entry, session.scratch(), sink);
+    });
+}
+
+ExitCode extractAr(std::string_view argument, File file, Session& session) {
+    auto reader = ar::Reader::open(std::move(file));
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    for (const auto& entry : reader->entries()) {
+        auto result = extractArEntry(session, *reader, entry);
+        session.record(entry.name, result);
+        if (!result && result.error().kind == ErrorKind::LimitExceeded) {
+            return session.finish();
+        }
+    }
+    return session.finish();
+}
+
+[[nodiscard]] Result<EntryResult>
+extractCpioEntry(Session& session, cpio::Reader& reader, const cpio::Entry& entry) {
+    auto path = session.path(entry.name);
+    if (!path) {
+        return std::unexpected(path.error());
+    }
+
+    EntryMetadata metadata{
+        .mode = entry.mode,
+        .mtimeNanoseconds = mtimeNanoseconds(entry.mtimeSeconds, 0),
+    };
+    switch (entry.kind) {
+    case cpio::EntryKind::Directory:
+        return session.extractor().createDirectory(*path, metadata);
+    case cpio::EntryKind::Regular:
+        return writeFile(session, *path, metadata, [&](auto&& sink) {
+            return reader.streamEntry(entry, session.scratch(), sink);
+        });
+    case cpio::EntryKind::Symlink: {
+        if (entry.size > maxSymlinkTargetBytes) {
+            return fail(ErrorKind::LimitExceeded, "symlink target too long");
+        }
+
+        std::string& target = session.linkTarget();
+        target.clear();
+        auto read = reader.streamEntry(entry, session.scratch(), [&target](auto chunk) {
+            target.append(reinterpret_cast<const char*>(chunk.data()), chunk.size());
+            return Result<void>{};
+        });
+        if (!read) {
+            return std::unexpected(read.error());
+        }
+        return session.extractor().createSymlink(*path, target, metadata);
+    }
+    case cpio::EntryKind::HardLink: {
+        auto target = session.linkPath(entry.linkTarget);
+        if (!target) {
+            return std::unexpected(target.error());
+        }
+        return session.extractor().createHardLink(*path, *target);
+    }
+    case cpio::EntryKind::CharDevice:
+        return session.extractor().skipOrRefuseSpecialFile(*path, SpecialFileKind::CharacterDevice);
+    case cpio::EntryKind::BlockDevice:
+        return session.extractor().skipOrRefuseSpecialFile(*path, SpecialFileKind::BlockDevice);
+    case cpio::EntryKind::Fifo:
+        return session.extractor().skipOrRefuseSpecialFile(*path, SpecialFileKind::Fifo);
+    case cpio::EntryKind::Socket:
+        return session.extractor().skipOrRefuseSpecialFile(*path, SpecialFileKind::Socket);
+    case cpio::EntryKind::Other:
+        return EntryResult{
+            .outcome = EntryOutcome::Skipped,
+            .reason = "unknown cpio entry type",
+        };
+    }
+    return EntryResult{
+        .outcome = EntryOutcome::Skipped,
+        .reason = "unknown cpio entry type",
+    };
+}
+
+ExitCode extractCpio(std::string_view argument, File file, Session& session) {
+    auto reader = cpio::Reader::open(std::move(file));
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    // NOTE: cpio stores hardlink data with the last link, so earlier links
+    // point at files that do not exist yet; create those links last.
+    std::vector<const cpio::Entry*> deferred;
+    for (const auto& entry : reader->entries()) {
+        if (entry.kind == cpio::EntryKind::HardLink) {
+            deferred.push_back(&entry);
+            continue;
+        }
+
+        auto result = extractCpioEntry(session, *reader, entry);
+        session.record(entry.name, result);
+        if (!result && result.error().kind == ErrorKind::LimitExceeded) {
+            return session.finish();
+        }
+    }
+
+    for (const auto* entry : deferred) {
+        auto result = extractCpioEntry(session, *reader, *entry);
+        session.record(entry->name, result);
+        if (!result && result.error().kind == ErrorKind::LimitExceeded) {
+            return session.finish();
+        }
+    }
+    return session.finish();
+}
+
+[[nodiscard]] Result<EntryResult>
 extractBaleEntry(Session& session, archive::Reader& reader, const archive::ManifestEntry& entry) {
     auto path = session.path(entry.path);
     if (!path) {
@@ -545,6 +672,12 @@ ExitCode extractArchive(
     }
     if (archive->format.container == Container::Tar) {
         return extractTar(argument, std::move(*archive), session);
+    }
+    if (archive->format.container == Container::Ar) {
+        return extractAr(argument, std::move(archive->file), session);
+    }
+    if (archive->format.container == Container::Cpio) {
+        return extractCpio(argument, std::move(archive->file), session);
     }
     return reportFailure(
         argument,

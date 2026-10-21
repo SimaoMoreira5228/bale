@@ -3,6 +3,8 @@
 #include "cli/archive_output.hpp"
 #include "cli/filesystem_path.hpp"
 #include "cli/terminal_text.hpp"
+#include "formats/ar/reader.hpp"
+#include "formats/cpio/reader.hpp"
 #include "formats/sevenzip/reader.hpp"
 #include "formats/tar/reader.hpp"
 #include "formats/zip/reader.hpp"
@@ -339,6 +341,109 @@ Result<void> convertSevenZip(Conversion& conversion, File file) {
     return {};
 }
 
+Result<void> convertArEntry(Conversion& conversion, ar::Reader& reader, const ar::Entry& entry) {
+    auto path = conversion.path(entry.name);
+    if (!path) {
+        return {};
+    }
+
+    archive::EntryAttributes attributes{
+        .mtimeNanoseconds = joinTime(entry.mtimeSeconds, 0),
+        .mode = maskedMode(entry.mode),
+    };
+    return conversion.copyFile(*path, entry.size, attributes, [&](auto&& sink) {
+        return reader.streamEntry(entry, conversion.scratch(), sink);
+    });
+}
+
+Result<void> convertAr(Conversion& conversion, File file) {
+    auto reader = ar::Reader::open(std::move(file));
+    if (!reader) {
+        return std::unexpected(reader.error());
+    }
+
+    for (const auto& entry : reader->entries()) {
+        auto converted = convertArEntry(conversion, *reader, entry);
+        if (!converted) {
+            return converted;
+        }
+    }
+    return {};
+}
+
+Result<void>
+convertCpioEntry(Conversion& conversion, cpio::Reader& reader, const cpio::Entry& entry) {
+    auto path = conversion.path(entry.name);
+    if (!path) {
+        return {};
+    }
+
+    archive::EntryAttributes attributes{
+        .mtimeNanoseconds = joinTime(entry.mtimeSeconds, 0),
+        .mode = maskedMode(entry.mode),
+    };
+    switch (entry.kind) {
+    case cpio::EntryKind::Directory:
+        return conversion.output().addDirectory(path->path, attributes);
+    case cpio::EntryKind::Regular:
+        return conversion.copyFile(*path, entry.size, attributes, [&](auto&& sink) {
+            return reader.streamEntry(entry, conversion.scratch(), sink);
+        });
+    case cpio::EntryKind::Symlink: {
+        if (entry.size == 0 || entry.size > maxSymlinkTargetBytes) {
+            conversion.skip(entry.name, "symlink target empty or too long");
+            return {};
+        }
+
+        std::string& target = conversion.text();
+        target.clear();
+        auto read = reader.streamEntry(entry, conversion.scratch(), [&target](auto chunk) {
+            target.append(reinterpret_cast<const char*>(chunk.data()), chunk.size());
+            return Result<void>{};
+        });
+        if (!read) {
+            return read;
+        }
+        attributes.mode.reset();
+        return conversion.output().addSymlink(path->path, target, attributes);
+    }
+    case cpio::EntryKind::HardLink: {
+        if (!conversion.output().storesHardLinks()) {
+            conversion.skip(entry.name, "the output format cannot store hard links");
+            return {};
+        }
+        auto target = conversion.linkPath(entry.linkTarget);
+        if (!target) {
+            return {};
+        }
+        return conversion.output().addHardLink(path->path, target->path, attributes);
+    }
+    case cpio::EntryKind::CharDevice:
+    case cpio::EntryKind::BlockDevice:
+    case cpio::EntryKind::Fifo:
+    case cpio::EntryKind::Socket:
+    case cpio::EntryKind::Other:
+        break;
+    }
+    conversion.skip(entry.name, "special or unknown cpio entry");
+    return {};
+}
+
+Result<void> convertCpio(Conversion& conversion, File file) {
+    auto reader = cpio::Reader::open(std::move(file));
+    if (!reader) {
+        return std::unexpected(reader.error());
+    }
+
+    for (const auto& entry : reader->entries()) {
+        auto converted = convertCpioEntry(conversion, *reader, entry);
+        if (!converted) {
+            return converted;
+        }
+    }
+    return {};
+}
+
 Result<void> convertBaleEntry(
     Conversion& conversion,
     archive::Reader& reader,
@@ -416,6 +521,12 @@ Result<OutputSummary> convert(OpenedArchive archive, File file, const ConvertOpt
         break;
     case Container::Tar:
         converted = convertTar(conversion, std::move(archive));
+        break;
+    case Container::Ar:
+        converted = convertAr(conversion, std::move(archive.file));
+        break;
+    case Container::Cpio:
+        converted = convertCpio(conversion, std::move(archive.file));
         break;
     case Container::SingleFile:
     case Container::Unknown:

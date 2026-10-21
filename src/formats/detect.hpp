@@ -15,6 +15,8 @@ enum class Container : std::uint8_t {
     Zip,
     SevenZip,
     Tar,
+    Ar,
+    Cpio,
     SingleFile,
 };
 

@@ -1,8 +1,10 @@
 set(bale_fuzz_targets
+    fuzz_ar
     fuzz_archive_path
     fuzz_brotli
     fuzz_bzip2
     fuzz_codecs
+    fuzz_cpio
     fuzz_crypto_aead
     fuzz_crypto_slots
     fuzz_detect
@@ -32,8 +34,10 @@ foreach(target IN LISTS bale_fuzz_targets)
         bale_crypto
         bale_format
         bale_formats
+        bale_formats_ar
         bale_formats_bzip2
         bale_formats_compressed
+        bale_formats_cpio
         bale_formats_gzip
         bale_formats_sevenzip
         bale_formats_tar

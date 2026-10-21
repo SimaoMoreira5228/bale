@@ -4,7 +4,9 @@
 #include "cli/filesystem_path.hpp"
 #include "cli/terminal_text.hpp"
 #include "cli/unlock.hpp"
+#include "formats/ar/reader.hpp"
 #include "formats/compressed/stream.hpp"
+#include "formats/cpio/reader.hpp"
 #include "formats/detect.hpp"
 #include "formats/sevenzip/reader.hpp"
 #include "formats/tar/reader.hpp"
@@ -252,6 +254,75 @@ ExitCode listTar(std::string_view argument, OpenedArchive archive, const ListOpt
     }
 }
 
+[[nodiscard]] char cpioKind(cpio::EntryKind kind) {
+    switch (kind) {
+    case cpio::EntryKind::Regular:
+        return '-';
+    case cpio::EntryKind::Directory:
+        return 'd';
+    case cpio::EntryKind::Symlink:
+        return 'l';
+    case cpio::EntryKind::HardLink:
+        return 'h';
+    case cpio::EntryKind::CharDevice:
+        return 'c';
+    case cpio::EntryKind::BlockDevice:
+        return 'b';
+    case cpio::EntryKind::Fifo:
+        return 'p';
+    case cpio::EntryKind::Socket:
+        return 's';
+    case cpio::EntryKind::Other:
+        return '?';
+    }
+    return '?';
+}
+
+ExitCode listAr(std::string_view argument, File file, const ListOptions& options) {
+    auto reader = ar::Reader::open(std::move(file));
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    std::string escaped;
+    for (const auto& entry : reader->entries()) {
+        auto name = escapeForTerminal(entry.name, escaped);
+        if (!options.detailed) {
+            std::println("{}", name);
+            continue;
+        }
+
+        printRow('-', entry.size, civilFromUnix(entry.mtimeSeconds), name);
+    }
+    return ExitCode::Ok;
+}
+
+ExitCode listCpio(std::string_view argument, File file, const ListOptions& options) {
+    auto reader = cpio::Reader::open(std::move(file));
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    std::string escapedPath;
+    std::string escapedTarget;
+    for (const auto& entry : reader->entries()) {
+        auto path = escapeForTerminal(entry.name, escapedPath);
+        if (!options.detailed) {
+            std::println("{}", path);
+            continue;
+        }
+
+        printRow(
+            cpioKind(entry.kind),
+            entry.size,
+            civilFromUnix(entry.mtimeSeconds),
+            path,
+            escapeForTerminal(entry.linkTarget, escapedTarget)
+        );
+    }
+    return ExitCode::Ok;
+}
+
 [[nodiscard]] char baleKind(archive::EntryKind kind) {
     switch (kind) {
     case archive::EntryKind::Regular:
@@ -487,6 +558,80 @@ ExitCode testSevenZip(std::string_view argument, File file) {
     return result;
 }
 
+ExitCode testAr(std::string_view argument, File file) {
+    auto reader = ar::Reader::open(std::move(file));
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    std::vector<std::byte> scratch(testChunkSize);
+    auto discard = [](std::span<const std::byte>) -> Result<void> {
+        return {};
+    };
+
+    std::uint64_t failures = 0;
+    ExitCode result = ExitCode::Ok;
+    std::string escaped;
+    for (const auto& entry : reader->entries()) {
+        auto checked = reader->streamEntry(entry, scratch, discard);
+        if (checked) {
+            continue;
+        }
+
+        ++failures;
+        if (result == ExitCode::Ok) {
+            result = exitCodeFor(checked.error().kind);
+        }
+        reportError(escapeForTerminal(entry.name, escaped), checked.error());
+    }
+
+    if (failures == 0) {
+        std::println("ok: {} entries", reader->entryCount());
+    } else {
+        std::println("{} of {} entries failed", failures, reader->entryCount());
+    }
+    return result;
+}
+
+ExitCode testCpio(std::string_view argument, File file) {
+    auto reader = cpio::Reader::open(std::move(file));
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    std::vector<std::byte> scratch(testChunkSize);
+    auto discard = [](std::span<const std::byte>) -> Result<void> {
+        return {};
+    };
+
+    std::uint64_t failures = 0;
+    ExitCode result = ExitCode::Ok;
+    std::string escaped;
+    for (const auto& entry : reader->entries()) {
+        if (entry.kind != cpio::EntryKind::Regular && entry.kind != cpio::EntryKind::Symlink) {
+            continue;
+        }
+
+        auto checked = reader->streamEntry(entry, scratch, discard);
+        if (checked) {
+            continue;
+        }
+
+        ++failures;
+        if (result == ExitCode::Ok) {
+            result = exitCodeFor(checked.error().kind);
+        }
+        reportError(escapeForTerminal(entry.name, escaped), checked.error());
+    }
+
+    if (failures == 0) {
+        std::println("ok: {} entries", reader->entryCount());
+    } else {
+        std::println("{} of {} entries failed", failures, reader->entryCount());
+    }
+    return result;
+}
+
 ExitCode testTar(std::string_view argument, OpenedArchive archive) {
     auto source = openTarSource(std::move(archive.file), archive.format.compression);
     if (!source) {
@@ -688,6 +833,10 @@ ExitCode listArchive(std::string_view argument, const ListOptions& options) {
         return listSingleFile(argument, std::move(*archive), options);
     case Container::Tar:
         return listTar(argument, std::move(*archive), options);
+    case Container::Ar:
+        return listAr(argument, std::move(archive->file), options);
+    case Container::Cpio:
+        return listCpio(argument, std::move(archive->file), options);
     case Container::Unknown:
     default:
         return reportFailure(
@@ -727,6 +876,10 @@ ExitCode testArchive(
         return testSingleFile(argument, std::move(*archive));
     case Container::Tar:
         return testTar(argument, std::move(*archive));
+    case Container::Ar:
+        return testAr(argument, std::move(archive->file));
+    case Container::Cpio:
+        return testCpio(argument, std::move(archive->file));
     case Container::Unknown:
     default:
         return reportFailure(
