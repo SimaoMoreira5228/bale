@@ -6,6 +6,7 @@
 #include "formats/cab/header.hpp"
 #include "formats/cpio/header.hpp"
 #include "formats/gzip/header.hpp"
+#include "formats/iso/header.hpp"
 #include "formats/sevenzip/reader.hpp"
 #include "formats/tar/header.hpp"
 #include "formats/xz/stream.hpp"
@@ -103,6 +104,8 @@ std::string_view name(ArchiveFormat format) {
         return "cpio";
     case Container::Cab:
         return "cab";
+    case Container::Iso:
+        return "iso";
     case Container::SingleFile:
         switch (format.compression) {
         case Compression::None:
@@ -152,6 +155,17 @@ Result<ArchiveFormat> detectFormat(const File& file) {
     }
     if (cab::looksLikeCab(headBytes)) {
         return ArchiveFormat{.container = Container::Cab};
+    }
+    if (*size >= iso::minImageSize) {
+        std::array<std::byte, 7> probe{};
+        auto probeRead = file.readExactAt(iso::systemSectors * iso::sectorSize, probe);
+        if (!probeRead) {
+            if (probeRead.error().kind == ErrorKind::Io) {
+                return std::unexpected(probeRead.error());
+            }
+        } else if (iso::looksLikePrimaryDescriptor(probe)) {
+            return ArchiveFormat{.container = Container::Iso};
+        }
     }
     if (headSize == tar::blockSize && tar::looksLikeTar(tar::Block(head))) {
         return ArchiveFormat{.container = Container::Tar};

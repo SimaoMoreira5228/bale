@@ -6,6 +6,7 @@
 #include "formats/ar/reader.hpp"
 #include "formats/cab/reader.hpp"
 #include "formats/cpio/reader.hpp"
+#include "formats/iso/reader.hpp"
 #include "formats/sevenzip/reader.hpp"
 #include "formats/tar/reader.hpp"
 #include "formats/zip/reader.hpp"
@@ -447,6 +448,56 @@ Result<void> convertCpio(Conversion& conversion, File file) {
     return {};
 }
 
+Result<void> convertIsoEntry(Conversion& conversion, iso::Reader& reader, const iso::Entry& entry) {
+    auto path = conversion.path(entry.name);
+    if (!path) {
+        return {};
+    }
+
+    archive::EntryAttributes attributes{
+        .mtimeNanoseconds = joinTime(entry.mtimeSeconds, 0),
+        .mode = maskedMode(entry.mode),
+    };
+    switch (entry.kind) {
+    case iso::EntryKind::Directory:
+        return conversion.output().addDirectory(path->path, attributes);
+    case iso::EntryKind::Regular:
+        return conversion.copyFile(*path, entry.size, attributes, [&](auto&& sink) {
+            return reader.streamEntry(entry, conversion.scratch(), sink);
+        });
+    case iso::EntryKind::Symlink: {
+        if (entry.linkTarget.empty()) {
+            conversion.skip(entry.name, "symlink without a target");
+            return {};
+        }
+        return conversion.output().addSymlink(path->path, entry.linkTarget, attributes);
+    }
+    case iso::EntryKind::CharDevice:
+    case iso::EntryKind::BlockDevice:
+    case iso::EntryKind::Fifo:
+    case iso::EntryKind::Socket:
+    case iso::EntryKind::Other:
+        break;
+    }
+    conversion.skip(entry.name, "special or unknown iso entry");
+    return {};
+}
+
+Result<void> convertIso(Conversion& conversion, File file) {
+    auto reader = iso::Reader::open(std::move(file));
+    if (!reader) {
+        return std::unexpected(reader.error());
+    }
+
+    for (const auto& entry : reader->entries()) {
+        auto converted = convertIsoEntry(conversion, *reader, entry);
+        if (!converted) {
+            return converted;
+        }
+    }
+    return {};
+}
+
 Result<void> convertCabEntry(Conversion& conversion, cab::Reader& reader, const cab::Entry& entry) {
     auto path = conversion.path(entry.name);
     if (!path) {
@@ -570,6 +621,9 @@ Result<OutputSummary> convert(OpenedArchive archive, File file, const ConvertOpt
         break;
     case Container::Cab:
         converted = convertCab(conversion, std::move(archive.file));
+        break;
+    case Container::Iso:
+        converted = convertIso(conversion, std::move(archive.file));
         break;
     case Container::SingleFile:
     case Container::Unknown:
