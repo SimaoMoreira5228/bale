@@ -11,6 +11,7 @@ include(${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake)
 
 add_executable(bale_tests
     archive/archive_test.cpp
+    archive/hardlink_order_test.cpp
     archive/brotli_chunk_test.cpp
     archive/cdc_test.cpp
     archive/compression_test.cpp
@@ -45,6 +46,7 @@ add_executable(bale_tests
     formats/cpio/reader_test.cpp
     formats/gzip/stream_test.cpp
     formats/tar/compressed_reader_test.cpp
+    formats/tar/hardlink_order_test.cpp
     formats/tar/header_test.cpp
     formats/tar/reader_test.cpp
     formats/tar/writer_test.cpp
