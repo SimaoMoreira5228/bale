@@ -82,6 +82,8 @@ struct CreateOptions {
     std::vector<std::array<std::byte, 32>> recipients;
     std::optional<std::string> keyFile;
     std::optional<std::string> signKeyFile;
+    std::optional<archive::ParityConfig> parity;
+    std::optional<std::uint32_t> parityShardSize;
 };
 
 [[nodiscard]] ExitCode createArchive(
@@ -116,6 +118,12 @@ convertArchive(std::string_view input, std::string_view output, const ConvertOpt
 
 [[nodiscard]] ExitCode describeArchive(
     std::string_view argument,
+    const std::optional<std::string>& keyFile = std::nullopt,
+    const VerifyKeys& verifyKeys = {}
+);
+
+[[nodiscard]] ExitCode repairArchive(
+    std::string_view archivePath,
     const std::optional<std::string>& keyFile = std::nullopt,
     const VerifyKeys& verifyKeys = {}
 );

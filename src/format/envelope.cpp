@@ -29,6 +29,11 @@ constexpr std::size_t footerGenerationAt = 24;
 constexpr std::size_t footerDigestAt = 32;
 constexpr std::size_t footerCrcAt = 64;
 constexpr std::size_t footerReservedAt = 68;
+constexpr std::size_t footerParityKAt = 68;
+constexpr std::size_t footerParityMAt = 72;
+constexpr std::size_t footerParitySAt = 76;
+constexpr std::size_t footerParityStripesAt = 80;
+constexpr std::size_t footerParityGroupAt = 88;
 
 bool allZero(std::span<const std::byte> bytes) {
     return std::ranges::all_of(bytes, [](std::byte value) {
@@ -114,6 +119,13 @@ std::array<std::byte, footerSize> encodeFooter(const Footer& footer) {
     storeLe(out.data() + footerLengthAt, footer.commitLength);
     storeLe(out.data() + footerGenerationAt, footer.generation);
     std::ranges::copy(footer.commitDigest, out.begin() + footerDigestAt);
+    if (footer.parity.present) {
+        storeLe(out.data() + footerParityKAt, footer.parity.dataShards);
+        storeLe(out.data() + footerParityMAt, footer.parity.parityShards);
+        storeLe(out.data() + footerParitySAt, footer.parity.shardBytes);
+        storeLe(out.data() + footerParityStripesAt, footer.parity.stripeCount);
+        storeLe(out.data() + footerParityGroupAt, footer.parity.groupId);
+    }
 
     storeLe(out.data() + footerCrcAt, footerChecksum(out));
     return out;
@@ -134,15 +146,26 @@ Result<Footer> decodeFooter(std::span<const std::byte> data, std::uint64_t foote
         return fail(ErrorKind::Integrity, "footer checksum mismatch", footerOffset + footerCrcAt);
     }
 
-    if (!allZero(bytes.subspan<footerReservedAt>())) {
-        return fail(
-            ErrorKind::Malformed,
-            "footer reserved bytes not zero",
-            footerOffset + footerReservedAt
-        );
-    }
-
     Footer footer;
+    if (!allZero(bytes.subspan<footerReservedAt>())) {
+        ParityDescriptor parity;
+        parity.present = true;
+        parity.dataShards = loadLe<std::uint32_t>(bytes.data() + footerParityKAt);
+        parity.parityShards = loadLe<std::uint32_t>(bytes.data() + footerParityMAt);
+        parity.shardBytes = loadLe<std::uint32_t>(bytes.data() + footerParitySAt);
+        parity.stripeCount = loadLe<std::uint64_t>(bytes.data() + footerParityStripesAt);
+        parity.groupId = loadLe<std::uint64_t>(bytes.data() + footerParityGroupAt);
+        auto total = checkedAdd(parity.dataShards, parity.parityShards);
+        if (parity.dataShards == 0 || parity.parityShards == 0 || !total || *total > 256 ||
+            parity.shardBytes == 0 || parity.stripeCount == 0 || parity.groupId == 0) {
+            return fail(
+                ErrorKind::Malformed,
+                "footer parity descriptor is not a valid stripe layout",
+                footerOffset + footerReservedAt
+            );
+        }
+        footer.parity = parity;
+    }
     footer.commitOffset = loadLe<std::uint64_t>(bytes.data() + footerOffsetAt);
     footer.commitLength = loadLe<std::uint64_t>(bytes.data() + footerLengthAt);
     footer.generation = loadLe<std::uint64_t>(bytes.data() + footerGenerationAt);

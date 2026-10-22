@@ -4,6 +4,7 @@
 #include "archive/chunk.hpp"
 #include "archive/index.hpp"
 #include "archive/manifest.hpp"
+#include "archive/parity.hpp"
 #include "archive/writer_profile.hpp"
 #include "base/error.hpp"
 #include "crypto/crypto.hpp"
@@ -52,6 +53,7 @@ struct WriterOptions {
     std::uint32_t workers = defaultWorkers();
     // NOTE: provisional experimental gate; encrypted output is refused unless true.
     bool experimentalEncryption = false;
+    ParityConfig parity;
 };
 
 struct WriterSecrets {
@@ -227,6 +229,8 @@ class Writer {
     [[nodiscard]] Result<void> resolveHardLinks();
     [[nodiscard]] Result<RecordSpan> writeManifest(Blake3Digest& digest);
     [[nodiscard]] Result<RecordSpan> writeIndex(Blake3Digest& digest);
+    [[nodiscard]] Result<ParityDescriptor>
+    emitParity(const RecordSpan& manifest, const RecordSpan& index, const RecordSpan& commitRecord);
     [[nodiscard]] Result<void> addWalked(const WalkEntry& entry);
     [[nodiscard]] Result<void>
     addFileCdc(std::string_view path, const File& source, const EntryAttributes& attributes);
@@ -242,6 +246,7 @@ class Writer {
     std::uint64_t position_ = 0;
     std::uint64_t sequence_ = 0;
     std::uint64_t contentBytes_ = 0;
+    std::uint64_t generationStart_ = superblockSize;
     std::optional<Error> failure_;
     bool finished_ = false;
     std::uint64_t generation_ = 1;

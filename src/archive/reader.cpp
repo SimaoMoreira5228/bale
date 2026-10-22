@@ -1,6 +1,7 @@
 #include "archive/reader.hpp"
 
 #include "archive/encrypted.hpp"
+#include "archive/parity.hpp"
 #include "base/checked.hpp"
 
 #include <algorithm>
@@ -300,7 +301,8 @@ Result<std::span<const std::byte>> Reader::loadChunk(const ChunkKey& key) {
 
 Result<VerifyReport> Reader::walkRecords() {
     VerifyReport report;
-    std::uint64_t maxPayload = std::max(options_.maxMetadataBytes, maxDataPayload);
+    std::uint64_t maxPayload =
+        std::max({options_.maxMetadataBytes, maxDataPayload, maxParityRecordPayload});
     if (encrypted_) {
         maxPayload += encryptedDataHeaderSize + crypto::tagSize + encryptedMetaNonceSize;
     }
@@ -419,6 +421,19 @@ Result<VerifyReport> Reader::walkRecords() {
             break;
         case RecordType::Extension:
             break;
+        case RecordType::Parity: {
+            std::uint16_t wantParityFlags =
+                parityRecordFlag | (encrypted_ ? encryptedRecordFlag : 0);
+            if ((superblock_.requiredFeatures & parityRequiredFeature) == 0 ||
+                header->flags != wantParityFlags) {
+                return fail(
+                    ErrorKind::Malformed,
+                    "parity record outside a parity generation",
+                    position
+                );
+            }
+            break;
+        }
         }
         if (!expected) {
             return fail(

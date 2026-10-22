@@ -1,18 +1,80 @@
 #include "archive/reader.hpp"
 
+#include "archive/parity.hpp"
 #include "archive/signatures.hpp"
+#include "base/endian.hpp"
 
 #include <array>
 
 namespace bale::archive {
 
-Result<void> Reader::loadSignatures() {
-    signatures_.clear();
-    return checkTrailerRecords(footer_.commitOffset + footer_.commitLength, footerOffset_, true);
+Result<std::uint64_t> Reader::checkParityTrailerRecord(
+    std::uint64_t position,
+    std::uint64_t footerOffset,
+    std::uint64_t generation,
+    std::uint16_t wantFlags,
+    const ParityDescriptor& expectedParity,
+    const RecordLimits& limits,
+    std::vector<std::byte>& scratch
+) {
+    std::array<std::byte, recordPrefixSize> prefix{};
+    if (auto read = file_.readExactAt(position, prefix); !read) {
+        return std::unexpected(read.error());
+    }
+    auto header = decodeRecordPrefix(prefix, limits, position);
+    if (!header) {
+        return std::unexpected(header.error());
+    }
+    if (header->type != RecordType::Parity) {
+        return fail(ErrorKind::Malformed, "trailer record is not a parity record", position);
+    }
+    auto want = static_cast<std::uint16_t>(parityRecordFlag | wantFlags);
+    if (header->flags != want) {
+        return fail(ErrorKind::Malformed, "parity record has unexpected flags", position);
+    }
+    auto size = recordSize(header->payloadLength);
+    if (!size) {
+        return std::unexpected(size.error());
+    }
+    if (!fitsWithin(position, *size, footerOffset)) {
+        return fail(ErrorKind::Malformed, "parity record extends past the footer", position);
+    }
+    scratch.resize(static_cast<std::size_t>(*size));
+    if (auto read = file_.readExactAt(position, scratch); !read) {
+        return std::unexpected(read.error());
+    }
+    auto record = decodeRecord(scratch, limits, position);
+    if (!record) {
+        return std::unexpected(record.error());
+    }
+    auto parsed = decodeParityRecord(record->payload, position + recordPrefixSize);
+    if (!parsed) {
+        return std::unexpected(parsed.error());
+    }
+    if (auto checked = checkParityHeader(*parsed, expectedParity, generation, position); !checked) {
+        return std::unexpected(checked.error());
+    }
+    return *size;
 }
 
-Result<void>
-Reader::checkTrailerRecords(std::uint64_t commitEnd, std::uint64_t footerOffset, bool store) {
+Result<void> Reader::loadSignatures() {
+    signatures_.clear();
+    return checkTrailerRecords(
+        footer_.commitOffset + footer_.commitLength,
+        footerOffset_,
+        true,
+        footer_.parity,
+        commit_.generation
+    );
+}
+
+Result<void> Reader::checkTrailerRecords(
+    std::uint64_t commitEnd,
+    std::uint64_t footerOffset,
+    bool store,
+    const ParityDescriptor& expectedParity,
+    std::uint64_t generation
+) {
     if (commitEnd > footerOffset) {
         return fail(ErrorKind::Malformed, "commit record does not precede footer", commitEnd);
     }
@@ -20,6 +82,10 @@ Reader::checkTrailerRecords(std::uint64_t commitEnd, std::uint64_t footerOffset,
     RecordLimits limits{
         .maxPayloadLength = maxSignaturePayloadBytes,
         .maxDecodedLength = maxSignaturePayloadBytes,
+    };
+    RecordLimits parityLimits{
+        .maxPayloadLength = maxParityRecordPayload,
+        .maxDecodedLength = maxParityRecordPayload,
     };
     std::uint16_t wantFlags = encrypted_ ? encryptedRecordFlag : 0;
     std::vector<std::byte> recordBytes;
@@ -32,6 +98,23 @@ Reader::checkTrailerRecords(std::uint64_t commitEnd, std::uint64_t footerOffset,
         std::array<std::byte, recordPrefixSize> prefix{};
         if (auto read = file_.readExactAt(position, prefix); !read) {
             return std::unexpected(read.error());
+        }
+        auto peekType = loadLe<std::uint16_t>(prefix.data() + 4);
+        if (peekType == static_cast<std::uint16_t>(RecordType::Parity)) {
+            auto checked = checkParityTrailerRecord(
+                position,
+                footerOffset,
+                generation,
+                wantFlags,
+                expectedParity,
+                parityLimits,
+                recordBytes
+            );
+            if (!checked) {
+                return std::unexpected(checked.error());
+            }
+            position += *checked;
+            continue;
         }
         auto header = decodeRecordPrefix(prefix, limits, position);
         if (!header) {

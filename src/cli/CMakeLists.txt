@@ -7,6 +7,7 @@ add_library(bale_cli STATIC
     extract_command.cpp
     info_command.cpp
     prompt.cpp
+    repair_command.cpp
     terminal_text.cpp
     unlock.cpp
 )

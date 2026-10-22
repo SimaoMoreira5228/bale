@@ -31,7 +31,7 @@ std::uint32_t prefixChecksum(std::span<const std::byte, recordPrefixSize> prefix
 
 bool isKnownRecordType(std::uint16_t type) {
     return type >= static_cast<std::uint16_t>(RecordType::Data) &&
-        type <= static_cast<std::uint16_t>(RecordType::Extension);
+        type <= static_cast<std::uint16_t>(RecordType::Parity);
 }
 
 }

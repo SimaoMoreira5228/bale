@@ -83,7 +83,7 @@
     },
     {
       "path": "corrupt-unknown-flag.bale",
-      "sha256": "eeae6e7e20b98e571492c97d7ab1deb1a02de4dd53ac6adb7b3371d4918d0d4a",
+      "sha256": "d263339c1a9f14d9315e04c158bbd87cf29c8c5a90df2d9e0338d1564a80f50e",
       "bytes": 825,
       "note": "corrupt fixture derived from plain.bale"
     },
@@ -101,7 +101,7 @@
     },
     {
       "path": "corrupt-bad-record-type.bale",
-      "sha256": "a8403ca97804d5502b9a9114303ce23e13b816e80cc843b6d79e7e42f226e9fe",
+      "sha256": "1d732e5809bb6f25a6732ee1ec1165d88d96a91abd869923773032be1df946d6",
       "bytes": 825,
       "note": "corrupt fixture derived from plain.bale"
     }

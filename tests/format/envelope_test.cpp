@@ -281,7 +281,8 @@ TEST_CASE(
     "record prefix rejects unknown types, unknown required flags and nonzero reserved bytes"
 ) {
     RecordHeader header;
-    header.type = static_cast<RecordType>(6);
+    // NOTE: 6 is the provisional experimental parity record type and is known.
+    header.type = static_cast<RecordType>(7);
     CHECK(
         decodeRecordPrefix(encodeRecordPrefix(header), generousLimits).error().kind ==
         ErrorKind::Unsupported
@@ -301,7 +302,14 @@ TEST_CASE(
         REQUIRE(accepted);
         CHECK(accepted->flags == static_cast<std::uint16_t>(1 << 0));
     }
-    for (int bit = 1; bit < 8; ++bit) {
+    // NOTE: bit 1 is the provisional experimental parity required flag and is known.
+    {
+        header.flags = static_cast<std::uint16_t>(1 << 1);
+        auto accepted = decodeRecordPrefix(encodeRecordPrefix(header), generousLimits);
+        REQUIRE(accepted);
+        CHECK(accepted->flags == static_cast<std::uint16_t>(1 << 1));
+    }
+    for (int bit = 2; bit < 8; ++bit) {
         header.flags = static_cast<std::uint16_t>(1 << bit);
         auto rejected = decodeRecordPrefix(encodeRecordPrefix(header), generousLimits);
         REQUIRE_FALSE(rejected);

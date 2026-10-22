@@ -89,7 +89,7 @@ Result<void> Writer::checkOptions(const WriterOptions& options) {
     if (options.workers == 0 || options.workers > maxWorkers) {
         return fail(ErrorKind::LimitExceeded, "worker count outside the supported range");
     }
-    return {};
+    return validateParityConfig(options.parity);
 }
 
 Result<void> Writer::startPipeline() {
@@ -125,6 +125,9 @@ Result<Writer> Writer::create(File file, const WriterOptions& options) {
     superblock.archiveId = options.archiveId ? *options.archiveId : randomArchiveId();
     superblock.creationTimeNs = options.creationTimeNanoseconds ? *options.creationTimeNanoseconds
                                                                 : currentTimeNanoseconds();
+    if (options.parity.enabled) {
+        superblock.requiredFeatures |= parityRequiredFeature;
+    }
     writer.archiveId_ = superblock.archiveId;
     auto encoded = encodeSuperblock(superblock);
     auto written = writer.appendRaw(encoded);
@@ -157,6 +160,13 @@ Result<Writer> Writer::append(File file, const WriterOptions& options) {
     if ((reader->superblock().requiredFeatures & encryptedRequiredFeature) != 0) {
         return fail(ErrorKind::PasswordRequired, "archive is encrypted");
     }
+    if (options.parity.enabled &&
+        (reader->superblock().requiredFeatures & parityRequiredFeature) == 0) {
+        return fail(
+            ErrorKind::Malformed,
+            "archive superblock was created without parity; recreate with --parity to enable it"
+        );
+    }
     auto verified = reader->verify(VerifyMode::Structure);
     if (!verified) {
         return std::unexpected(verified.error());
@@ -179,6 +189,7 @@ Result<Writer> Writer::append(File file, const WriterOptions& options) {
 
     writer.position_ = position;
     writer.sequence_ = verified->records;
+    writer.generationStart_ = position;
     writer.generation_ = reader->commit().generation + 1;
     writer.previousCommit_ = reader->commitDigest();
     writer.previousFooterOffset_ = reader->footerOffset();
@@ -689,8 +700,11 @@ Result<WriteSummary> Writer::finish() {
     commit.generation = generation_;
     commit.previous = previousCommit_;
     commit.previousFooterOffset = previousFooterOffset_;
+    if (options_.parity.enabled) {
+        commit.requiredFeatures |= parityCommitFeature;
+    }
     if (encrypted_) {
-        commit.requiredFeatures = encryptedCommitFeature;
+        commit.requiredFeatures |= encryptedCommitFeature;
         commit.epoch = epoch_;
     }
     auto manifest = writeManifest(commit.manifest.digest);
@@ -721,6 +735,14 @@ Result<WriteSummary> Writer::finish() {
             !signed_) {
             return std::unexpected(poison(signed_.error()).error());
         }
+        ParityDescriptor parity;
+        if (options_.parity.enabled) {
+            auto emitted = emitParity(*manifest, *index, *record);
+            if (!emitted) {
+                return std::unexpected(emitted.error());
+            }
+            parity = *emitted;
+        }
         auto flushed = flushOutput();
         if (!flushed) {
             return std::unexpected(flushed.error());
@@ -738,6 +760,7 @@ Result<WriteSummary> Writer::finish() {
         footer.commitLength = record->length;
         footer.generation = commit.generation;
         footer.commitDigest = commitDigest;
+        footer.parity = parity;
         auto written = appendRaw(encodeFooter(footer));
         if (!written) {
             return std::unexpected(written.error());
@@ -786,6 +809,14 @@ Result<WriteSummary> Writer::finish() {
     if (auto signed_ = writeSignatures(commitDigest, commit.generation, commit.epoch); !signed_) {
         return std::unexpected(poison(signed_.error()).error());
     }
+    ParityDescriptor parity;
+    if (options_.parity.enabled) {
+        auto emitted = emitParity(*manifest, *index, *commitRecord);
+        if (!emitted) {
+            return std::unexpected(emitted.error());
+        }
+        parity = *emitted;
+    }
     auto flushed = flushOutput();
     if (!flushed) {
         return std::unexpected(flushed.error());
@@ -803,6 +834,7 @@ Result<WriteSummary> Writer::finish() {
     footer.commitLength = commitRecord->length;
     footer.generation = commit.generation;
     footer.commitDigest = commitDigest;
+    footer.parity = parity;
     auto written = appendRaw(encodeFooter(footer));
     if (!written) {
         return std::unexpected(written.error());

@@ -18,6 +18,21 @@ namespace bale::cli {
 
 namespace {
 
+Result<archive::ParityConfig> resolveParity(const CreateOptions& options) {
+    archive::ParityConfig config;
+    if (!options.parity) {
+        return config;
+    }
+    config = *options.parity;
+    if (options.parityShardSize) {
+        config.shardBytes = *options.parityShardSize;
+    }
+    if (auto valid = archive::validateParityConfig(config); !valid) {
+        return std::unexpected(valid.error());
+    }
+    return config;
+}
+
 void reportSkipped(const std::vector<SkippedPath>& skipped) {
     std::string escaped;
     for (const auto& path : skipped) {
@@ -106,6 +121,11 @@ ExitCode writeArchive(
         writerOptions.durable = options.durable;
         writerOptions.workers = options.workers;
         writerOptions.experimentalEncryption = true;
+        auto parity = resolveParity(options);
+        if (!parity) {
+            return reportFailure(archivePath, parity.error());
+        }
+        writerOptions.parity = *parity;
         auto writer =
             archive::Writer::createEncrypted(std::move(file), writerOptions, std::move(secrets));
         if (!writer) {
@@ -147,6 +167,11 @@ ExitCode writeArchive(
     outputOptions.native.compression = options.compression;
     outputOptions.native.durable = options.durable;
     outputOptions.native.workers = options.workers;
+    auto outputParity = resolveParity(options);
+    if (!outputParity) {
+        return reportFailure(archivePath, outputParity.error());
+    }
+    outputOptions.native.parity = *outputParity;
     auto output = ArchiveOutput::create(std::move(file), outputOptions);
     if (!output) {
         return reportFailure(archivePath, output.error());
@@ -264,6 +289,11 @@ ExitCode updateArchive(
         writerOptions.durable = options.durable;
         writerOptions.workers = options.workers;
         writerOptions.experimentalEncryption = true;
+        auto updateParity = resolveParity(options);
+        if (!updateParity) {
+            return reportFailure(archivePath, updateParity.error());
+        }
+        writerOptions.parity = *updateParity;
         auto writer = archive::Writer::appendEncrypted(
             std::move(*file),
             writerOptions,
@@ -308,6 +338,11 @@ ExitCode updateArchive(
     writerOptions.compression = options.compression;
     writerOptions.durable = options.durable;
     writerOptions.workers = options.workers;
+    auto appendParity = resolveParity(options);
+    if (!appendParity) {
+        return reportFailure(archivePath, appendParity.error());
+    }
+    writerOptions.parity = *appendParity;
     auto writer = archive::Writer::append(std::move(*file), writerOptions);
     if (!writer) {
         return reportFailure(archivePath, writer.error());

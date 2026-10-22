@@ -15,7 +15,11 @@ inline constexpr std::uint16_t formatMinor = 0;
 // NOTE: provisional experimental ENCRYPTED wire value; native format is unfrozen and later
 // builds may not read archives using it.
 inline constexpr std::uint32_t encryptedRequiredFeature = 0x00000001;
-inline constexpr std::uint32_t knownRequiredFeatures = encryptedRequiredFeature;
+// NOTE: provisional experimental PARITY wire value; native format is unfrozen and later
+// builds may not read archives using it.
+inline constexpr std::uint32_t parityRequiredFeature = 0x00000002;
+inline constexpr std::uint32_t knownRequiredFeatures =
+    encryptedRequiredFeature | parityRequiredFeature;
 
 inline constexpr std::array superblockMagic{
     std::byte{0x42},
@@ -54,11 +58,21 @@ inline constexpr std::array footerMagic{
     std::byte{0x31},
 };
 
+struct ParityDescriptor {
+    bool present = false;
+    std::uint32_t dataShards = 0;
+    std::uint32_t parityShards = 0;
+    std::uint32_t shardBytes = 0;
+    std::uint64_t stripeCount = 0;
+    std::uint64_t groupId = 0;
+};
+
 struct Footer {
     std::uint64_t commitOffset = 0;
     std::uint64_t commitLength = 0;
     std::uint64_t generation = 0;
     std::array<std::byte, commitDigestSize> commitDigest{};
+    ParityDescriptor parity;
 };
 
 [[nodiscard]] std::array<std::byte, footerSize> encodeFooter(const Footer& footer);

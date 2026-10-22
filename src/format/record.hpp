@@ -16,6 +16,9 @@ enum class RecordType : std::uint8_t {
     Index = 3,
     Commit = 4,
     Extension = 5,
+    // NOTE: provisional experimental PARITY wire value; native format is unfrozen and later
+    // builds may not read archives using it.
+    Parity = 6,
 };
 
 // NOTE: each ID names one exact stream per chunk: Zstd is one zstd frame; Lz4 is one LZ4 frame
@@ -57,7 +60,10 @@ inline constexpr std::uint16_t requiredRecordFlagMask = 0x00FF;
 // NOTE: provisional experimental ENCRYPTED wire value; native format is unfrozen and later
 // builds may not read archives using it.
 inline constexpr std::uint16_t encryptedRecordFlag = 0x0001;
-inline constexpr std::uint16_t knownRequiredRecordFlags = encryptedRecordFlag;
+// NOTE: provisional experimental PARITY wire value; native format is unfrozen and later
+// builds may not read archives using it.
+inline constexpr std::uint16_t parityRecordFlag = 0x0002;
+inline constexpr std::uint16_t knownRequiredRecordFlags = encryptedRecordFlag | parityRecordFlag;
 
 inline constexpr std::array recordMagic{
     std::byte{0x42},

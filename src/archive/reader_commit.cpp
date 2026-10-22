@@ -181,8 +181,13 @@ Result<void> Reader::tryFooter(std::span<const std::byte> bytes, std::uint64_t o
         }
         // NOTE: a signed parent leaves SIGNATURE records between its commit and its
         // NOTE: footer; the gap must validate as a trailer exactly like the latest one.
-        if (auto trailer =
-                checkTrailerRecords(parentCommitEnd, parentCommit.previousFooterOffset, false);
+        if (auto trailer = checkTrailerRecords(
+                parentCommitEnd,
+                parentCommit.previousFooterOffset,
+                false,
+                decodedFooter->parity,
+                decodedFooter->generation
+            );
             !trailer) {
             return std::unexpected(trailer.error());
         }

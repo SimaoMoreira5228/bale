@@ -138,6 +138,17 @@ ExitCode describeNative(
     if (active.encrypted()) {
         std::println("encryption: experimental XChaCha20-Poly1305, epoch {}", active.epoch());
     }
+    if (active.parity().present) {
+        std::println(
+            "parity: experimental {}+{}, shard {} bytes, {} stripes",
+            active.parity().dataShards,
+            active.parity().parityShards,
+            active.parity().shardBytes,
+            active.parity().stripeCount
+        );
+    } else {
+        std::println("parity: none");
+    }
     if (active.hasSignatures()) {
         std::println(
             "signatures: {} covering generation {}",

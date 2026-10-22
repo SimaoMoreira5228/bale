@@ -81,6 +81,12 @@ Result<WriteSummary> Writer::compactEncrypted(
     options.compression.codec = CodecId::Raw;
     options.workers = 1;
     options.experimentalEncryption = true;
+    if (source.footer_.parity.present) {
+        options.parity.enabled = true;
+        options.parity.dataShards = source.footer_.parity.dataShards;
+        options.parity.parityShards = source.footer_.parity.parityShards;
+        options.parity.shardBytes = source.footer_.parity.shardBytes;
+    }
 
     auto madeKey = crypto::SecretBytes::make(source.dataKey_.size());
     if (!madeKey) {
@@ -106,6 +112,9 @@ Result<WriteSummary> Writer::compactEncrypted(
     superblock.archiveId = writer.archiveId_;
     superblock.creationTimeNs = source.superblock_.creationTimeNs;
     superblock.requiredFeatures = encryptedRequiredFeature;
+    if (options.parity.enabled) {
+        superblock.requiredFeatures |= parityRequiredFeature;
+    }
     if (auto written = writer.appendRaw(encodeSuperblock(superblock)); !written) {
         return std::unexpected(written.error());
     }
