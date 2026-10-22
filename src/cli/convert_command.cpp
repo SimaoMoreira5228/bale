@@ -9,6 +9,7 @@
 #include "formats/iso/reader.hpp"
 #include "formats/sevenzip/reader.hpp"
 #include "formats/tar/reader.hpp"
+#include "formats/wim/reader.hpp"
 #include "formats/zip/reader.hpp"
 #include "security/archive_path.hpp"
 
@@ -531,6 +532,78 @@ Result<void> convertCab(Conversion& conversion, File file) {
     return {};
 }
 
+Result<void> convertWimEntry(Conversion& conversion, wim::Reader& reader, const wim::Entry& entry) {
+    auto path = conversion.path(entry.name);
+    if (!path) {
+        return {};
+    }
+
+    archive::EntryAttributes attributes{
+        .mtimeNanoseconds = joinTime(entry.mtimeSeconds, 0),
+        .mode = maskedMode(entry.mode),
+    };
+    switch (entry.kind) {
+    case wim::EntryKind::Directory:
+        return conversion.output().addDirectory(path->path, attributes);
+    case wim::EntryKind::Regular:
+        return conversion.copyFile(*path, entry.size, attributes, [&](auto&& sink) {
+            return reader.streamEntry(entry, conversion.scratch(), sink);
+        });
+    case wim::EntryKind::AlternateStream:
+        conversion.skip(entry.name, "alternate data stream (only the default stream converts)");
+        return {};
+    case wim::EntryKind::Symlink: {
+        if (entry.linkTarget.empty()) {
+            conversion.skip(entry.name, "symlink without a target");
+            return {};
+        }
+        return conversion.output().addSymlink(path->path, entry.linkTarget, attributes);
+    }
+    case wim::EntryKind::HardLink: {
+        if (!conversion.output().storesHardLinks()) {
+            conversion.skip(entry.name, "the output format cannot store hard links");
+            return {};
+        }
+        auto target = conversion.linkPath(entry.linkTarget);
+        if (!target) {
+            return {};
+        }
+        return conversion.output().addHardLink(path->path, target->path, attributes);
+    }
+    case wim::EntryKind::Other:
+        break;
+    }
+    conversion.skip(entry.name, "special or unsupported WIM entry");
+    return {};
+}
+
+Result<void> convertWim(Conversion& conversion, File file, std::uint32_t imageIndex) {
+    auto reader = wim::Reader::open(std::move(file), {}, imageIndex);
+    if (!reader) {
+        return std::unexpected(reader.error());
+    }
+
+    for (const auto& entry : reader->entries()) {
+        if (entry.kind == wim::EntryKind::HardLink) {
+            continue;
+        }
+        auto converted = convertWimEntry(conversion, *reader, entry);
+        if (!converted) {
+            return converted;
+        }
+    }
+    for (const auto& entry : reader->entries()) {
+        if (entry.kind != wim::EntryKind::HardLink) {
+            continue;
+        }
+        auto converted = convertWimEntry(conversion, *reader, entry);
+        if (!converted) {
+            return converted;
+        }
+    }
+    return {};
+}
+
 Result<void> convertBaleEntry(
     Conversion& conversion,
     archive::Reader& reader,
@@ -586,6 +659,9 @@ Result<void> convertBale(Conversion& conversion, File file) {
 }
 
 Result<OutputSummary> convert(OpenedArchive archive, File file, const ConvertOptions& options) {
+    if (archive.format.container != Container::Wim && options.imageIndex != 0) {
+        return fail(ErrorKind::Malformed, "--image applies only to wim archives");
+    }
     OutputOptions outputOptions;
     outputOptions.format = options.format;
     outputOptions.level = options.level;
@@ -596,6 +672,9 @@ Result<OutputSummary> convert(OpenedArchive archive, File file, const ConvertOpt
 
     PathPolicy policy = convertPathPolicy;
     if (archive.format.container == Container::Cab) {
+        policy.backslash = Backslash::Separator;
+    }
+    if (archive.format.container == Container::Wim) {
         policy.backslash = Backslash::Separator;
     }
     Conversion conversion(*output, policy);
@@ -624,6 +703,9 @@ Result<OutputSummary> convert(OpenedArchive archive, File file, const ConvertOpt
         break;
     case Container::Iso:
         converted = convertIso(conversion, std::move(archive.file));
+        break;
+    case Container::Wim:
+        converted = convertWim(conversion, std::move(archive.file), options.imageIndex);
         break;
     case Container::SingleFile:
     case Container::Unknown:

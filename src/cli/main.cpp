@@ -57,17 +57,18 @@ commands:
       --verify-key <hex>      require a commit signature from this Ed25519 public key (repeatable)
   update <archive.bale> <dir> [options]
       append a new snapshot of the directory, reusing unchanged chunks; takes create's options
-  convert <input> <output> [--format <name>] [--level <n>]
-      rewrite a bale, zip, tar, 7z, ar, cpio, cab or iso archive entry by entry in another format
+  convert <input> <output> [--format <name>] [--level <n>] [--image <n>]
+      rewrite a bale, zip, tar, 7z, ar, cpio, cab, iso or wim archive entry by entry in another format
   compact <archive.bale> <output.bale> [--sync] [--experimental-encryption] [--key-file <path>]
       [--sign <path>] [--verify-key <hex>]
       write the current snapshot to a new archive and keep the source
-  list <archive> [--long] [--key-file <path>] [--verify-key <hex>]   list entries, --long adds type, size and modification time
-  test <archive> [--key-file <path>] [--verify-key <hex>]            check archive structure and entry checksums
+  list <archive> [--long] [--image <n>] [--key-file <path>] [--verify-key <hex>]   list entries, --long adds type, size and modification time
+  test <archive> [--image <n>] [--key-file <path>] [--verify-key <hex>]            check archive structure and entry checksums
   repair <archive> [--key-file <path>] [--verify-key <hex>]          repair stripe damage with parity, then check like test
   info <archive> [--key-file <path>] [--verify-key <hex>]            show the format and, for .bale, the recorded compression profile
   extract <archive> [options]
       -o, --output <dir>      extract into dir (default: current directory)
+      --image <n>             wim image index (default: bootable image, else image 1)
       --replace               replace existing regular files
       --skip-existing         keep existing files and skip those entries
       --allow-symlinks        create symlinks whose target stays inside the output
@@ -89,6 +90,15 @@ int exitWith(ExitCode code) {
     return static_cast<int>(code);
 }
 
+std::optional<std::uint32_t> parseImageIndex(std::string_view text) {
+    std::uint32_t value = 0;
+    auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (error != std::errc{} || end != text.data() + text.size() || value == 0) {
+        return std::nullopt;
+    }
+    return value;
+}
+
 int usageError(std::string_view message) {
     std::println(stderr, "bale: {}", message);
     std::print(stderr, "{}", usage);
@@ -102,6 +112,17 @@ int runList(std::span<const std::string_view> arguments) {
         std::string_view argument = arguments[index];
         if (argument == "--long" || argument == "-l") {
             options.detailed = true;
+            continue;
+        }
+        if (argument == "--image") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--image needs an index");
+            }
+            auto parsed = parseImageIndex(arguments[++index]);
+            if (!parsed) {
+                return usageError("--image needs a positive index");
+            }
+            options.imageIndex = *parsed;
             continue;
         }
         if (argument == "--key-file") {
@@ -515,6 +536,17 @@ int runConvert(std::span<const std::string_view> arguments) {
             }
             continue;
         }
+        if (argument == "--image") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--image needs an index");
+            }
+            auto parsed = parseImageIndex(arguments[++index]);
+            if (!parsed) {
+                return usageError("--image needs a positive index");
+            }
+            options.imageIndex = *parsed;
+            continue;
+        }
         if (argument.starts_with('-')) {
             return usageError("unknown option for convert");
         }
@@ -609,6 +641,7 @@ int runCompact(std::span<const std::string_view> arguments) {
 int runTest(std::span<const std::string_view> arguments) {
     std::optional<std::string> keyFile;
     bale::cli::VerifyKeys verifyKeys;
+    std::uint32_t imageIndex = 0;
     std::string_view archive;
     for (std::size_t index = 0; index < arguments.size(); ++index) {
         std::string_view argument = arguments[index];
@@ -617,6 +650,17 @@ int runTest(std::span<const std::string_view> arguments) {
                 return usageError("--key-file needs a path");
             }
             keyFile = std::string(arguments[++index]);
+            continue;
+        }
+        if (argument == "--image") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--image needs an index");
+            }
+            auto parsed = parseImageIndex(arguments[++index]);
+            if (!parsed) {
+                return usageError("--image needs a positive index");
+            }
+            imageIndex = *parsed;
             continue;
         }
         if (argument == "--verify-key") {
@@ -642,7 +686,7 @@ int runTest(std::span<const std::string_view> arguments) {
     if (archive.empty()) {
         return usageError("test takes exactly one archive");
     }
-    return exitWith(bale::cli::testArchive(archive, keyFile, verifyKeys));
+    return exitWith(bale::cli::testArchive(archive, keyFile, verifyKeys, imageIndex));
 }
 
 int runRepair(std::span<const std::string_view> arguments) {
@@ -690,6 +734,7 @@ int runExtract(std::span<const std::string_view> arguments) {
     std::string_view output = ".";
     std::optional<std::string> keyFile;
     bale::cli::VerifyKeys verifyKeys;
+    std::uint32_t imageIndex = 0;
     for (std::size_t index = 0; index < arguments.size(); ++index) {
         std::string_view argument = arguments[index];
         if (argument == "-o" || argument == "--output") {
@@ -698,6 +743,17 @@ int runExtract(std::span<const std::string_view> arguments) {
             }
             ++index;
             output = arguments[index];
+            continue;
+        }
+        if (argument == "--image") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--image needs an index");
+            }
+            auto parsed = parseImageIndex(arguments[++index]);
+            if (!parsed) {
+                return usageError("--image needs a positive index");
+            }
+            imageIndex = *parsed;
             continue;
         }
         if (argument == "--key-file") {
@@ -747,7 +803,9 @@ int runExtract(std::span<const std::string_view> arguments) {
     if (archive.empty()) {
         return usageError("extract needs an archive");
     }
-    return exitWith(bale::cli::extractArchive(archive, output, policy, keyFile, verifyKeys));
+    return exitWith(
+        bale::cli::extractArchive(archive, output, policy, keyFile, verifyKeys, imageIndex)
+    );
 }
 
 int runContext(std::span<const std::string_view> arguments) {
@@ -803,9 +861,9 @@ int runFormats() {
     printFormat("cpio", false, "read-only; SVR4 newc and crc headers, no odc or binary headers");
     printFormat("cab", false, "read-only; stored, MSZIP and LZX folders; no multi-cabinet sets");
     printFormat(
-        "iso",
+        "wim",
         false,
-        "read-only ECMA-119; Rock Ridge, Joliet and El Torito; no UDF, no interleaving"
+        "read-only; stored resources, multi-image via --image; no xpress, lzx or lzms"
     );
     printFormat("gzip", false, "one compressed file, multi-member; named by FNAME or archive name");
     printFormat("zstd", false, "one compressed file, multi-frame, window up to 128 MiB");

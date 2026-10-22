@@ -22,6 +22,7 @@ set(bale_fuzz_targets
     fuzz_tar
     fuzz_terminal_text
     fuzz_tlv
+    fuzz_wim
     fuzz_xz
     fuzz_zip
     fuzz_zstd
@@ -47,6 +48,7 @@ foreach(target IN LISTS bale_fuzz_targets)
         bale_formats_iso
         bale_formats_sevenzip
         bale_formats_tar
+        bale_formats_wim
         bale_formats_xz
         bale_formats_zip
         bale_formats_zstd

@@ -4,6 +4,7 @@
 #include "cli/filesystem_path.hpp"
 #include "cli/terminal_text.hpp"
 #include "cli/unlock.hpp"
+#include "formats/wim/reader.hpp"
 
 #include <cstdint>
 #include <limits>
@@ -178,6 +179,29 @@ ExitCode describeNative(
 
 }
 
+ExitCode describeWim(std::string_view argument, File file) {
+    auto reader = wim::Reader::open(std::move(file));
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    std::println("format: wim");
+    std::println("compression: {}", wim::compressionName(reader->compression()));
+    std::println("images: {}", reader->images().size());
+    if (reader->bootImage() == 0) {
+        std::println("boot: none");
+    } else {
+        std::println("boot: {}", reader->bootImage());
+    }
+    std::string escaped;
+    std::uint32_t index = 0;
+    for (const auto& image : reader->images()) {
+        ++index;
+        std::println("image {}: {}", index, escapeForTerminal(image.name, escaped));
+    }
+    return ExitCode::Ok;
+}
+
 ExitCode describeArchive(
     std::string_view argument,
     const std::optional<std::string>& keyFile,
@@ -199,6 +223,9 @@ ExitCode describeArchive(
 
     if (archive->format.container == Container::Bale) {
         return describeNative(argument, std::move(archive->file), keyFile, verifyKeys);
+    }
+    if (archive->format.container == Container::Wim) {
+        return describeWim(argument, std::move(archive->file));
     }
     std::println("format: {}", name(archive->format));
     return ExitCode::Ok;

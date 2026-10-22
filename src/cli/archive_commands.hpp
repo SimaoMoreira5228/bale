@@ -57,6 +57,7 @@ singleFileName(std::string_view archive, const CompressedStream& stream, std::st
 
 struct ListOptions {
     bool detailed = false;
+    std::uint32_t imageIndex = 0;
     std::optional<std::string> keyFile;
     VerifyKeys verifyKeys;
 };
@@ -66,7 +67,8 @@ struct ListOptions {
 [[nodiscard]] ExitCode testArchive(
     std::string_view argument,
     const std::optional<std::string>& keyFile = std::nullopt,
-    const VerifyKeys& verifyKeys = {}
+    const VerifyKeys& verifyKeys = {},
+    std::uint32_t imageIndex = 0
 );
 
 struct CreateOptions {
@@ -111,6 +113,7 @@ struct CreateOptions {
 struct ConvertOptions {
     OutputFormat format = OutputFormat::Bale;
     std::optional<int> level;
+    std::uint32_t imageIndex = 0;
 };
 
 [[nodiscard]] ExitCode
@@ -135,7 +138,8 @@ convertArchive(std::string_view input, std::string_view output, const ConvertOpt
     std::string_view destination,
     const ExtractPolicy& policy,
     const std::optional<std::string>& keyFile = std::nullopt,
-    const VerifyKeys& verifyKeys = {}
+    const VerifyKeys& verifyKeys = {},
+    std::uint32_t imageIndex = 0
 );
 
 [[nodiscard]] ExitCode extractArchiveHere(

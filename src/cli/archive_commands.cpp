@@ -13,6 +13,7 @@
 #include "formats/sevenzip/reader.hpp"
 #include "formats/tar/reader.hpp"
 #include "formats/tar/source.hpp"
+#include "formats/wim/reader.hpp"
 #include "formats/zip/reader.hpp"
 #include "io/file.hpp"
 
@@ -345,6 +346,24 @@ ExitCode listCpio(std::string_view argument, File file, const ListOptions& optio
         );
     }
     return ExitCode::Ok;
+}
+
+[[nodiscard]] char wimKind(wim::EntryKind kind) {
+    switch (kind) {
+    case wim::EntryKind::Regular:
+        return '-';
+    case wim::EntryKind::Directory:
+        return 'd';
+    case wim::EntryKind::Symlink:
+        return 'l';
+    case wim::EntryKind::HardLink:
+        return 'h';
+    case wim::EntryKind::AlternateStream:
+        return 'a';
+    case wim::EntryKind::Other:
+        return '?';
+    }
+    return '?';
 }
 
 ExitCode listCab(std::string_view argument, File file, const ListOptions& options) {
@@ -740,6 +759,32 @@ ExitCode testCab(std::string_view argument, File file) {
     return result;
 }
 
+ExitCode listWim(std::string_view argument, File file, const ListOptions& options) {
+    auto reader = wim::Reader::open(std::move(file), {}, options.imageIndex);
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    std::string escapedPath;
+    std::string escapedTarget;
+    for (const auto& entry : reader->entries()) {
+        auto path = escapeForTerminal(entry.name, escapedPath);
+        if (!options.detailed) {
+            std::println("{}", path);
+            continue;
+        }
+
+        printRow(
+            wimKind(entry.kind),
+            entry.size,
+            civilFromUnix(entry.mtimeSeconds),
+            path,
+            escapeForTerminal(entry.linkTarget, escapedTarget)
+        );
+    }
+    return ExitCode::Ok;
+}
+
 ExitCode testIso(std::string_view argument, File file) {
     auto reader = iso::Reader::open(std::move(file));
     if (!reader) {
@@ -756,6 +801,46 @@ ExitCode testIso(std::string_view argument, File file) {
     std::string escaped;
     for (const auto& entry : reader->entries()) {
         if (entry.kind != iso::EntryKind::Regular) {
+            continue;
+        }
+
+        auto checked = reader->streamEntry(entry, scratch, discard);
+        if (checked) {
+            continue;
+        }
+
+        ++failures;
+        if (result == ExitCode::Ok) {
+            result = exitCodeFor(checked.error().kind);
+        }
+        reportError(escapeForTerminal(entry.name, escaped), checked.error());
+    }
+
+    if (failures == 0) {
+        std::println("ok: {} entries", reader->entryCount());
+    } else {
+        std::println("{} of {} entries failed", failures, reader->entryCount());
+    }
+    return result;
+}
+
+ExitCode testWim(std::string_view argument, File file, std::uint32_t imageIndex) {
+    auto reader = wim::Reader::open(std::move(file), {}, imageIndex);
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    std::vector<std::byte> scratch(testChunkSize);
+    auto discard = [](std::span<const std::byte>) -> Result<void> {
+        return {};
+    };
+
+    std::uint64_t failures = 0;
+    ExitCode result = ExitCode::Ok;
+    std::string escaped;
+    for (const auto& entry : reader->entries()) {
+        if (entry.kind != wim::EntryKind::Regular &&
+            entry.kind != wim::EntryKind::AlternateStream) {
             continue;
         }
 
@@ -969,6 +1054,13 @@ ExitCode listArchive(std::string_view argument, const ListOptions& options) {
         );
     }
 
+    if (archive->format.container != Container::Wim && options.imageIndex != 0) {
+        return reportFailure(
+            argument,
+            Error{.kind = ErrorKind::Malformed, .what = "--image applies only to wim archives"}
+        );
+    }
+
     switch (archive->format.container) {
     case Container::Bale:
         return listBale(argument, std::move(archive->file), options);
@@ -988,6 +1080,8 @@ ExitCode listArchive(std::string_view argument, const ListOptions& options) {
         return listCab(argument, std::move(archive->file), options);
     case Container::Iso:
         return listIso(argument, std::move(archive->file), options);
+    case Container::Wim:
+        return listWim(argument, std::move(archive->file), options);
     case Container::Unknown:
     default:
         return reportFailure(
@@ -1000,7 +1094,8 @@ ExitCode listArchive(std::string_view argument, const ListOptions& options) {
 ExitCode testArchive(
     std::string_view argument,
     const std::optional<std::string>& keyFile,
-    const VerifyKeys& verifyKeys
+    const VerifyKeys& verifyKeys,
+    std::uint32_t imageIndex
 ) {
     auto archive = openArchive(argument);
     if (!archive) {
@@ -1013,6 +1108,12 @@ ExitCode testArchive(
                 .kind = ErrorKind::Malformed,
                 .what = "--verify-key applies only to bale archives"
             }
+        );
+    }
+    if (archive->format.container != Container::Wim && imageIndex != 0) {
+        return reportFailure(
+            argument,
+            Error{.kind = ErrorKind::Malformed, .what = "--image applies only to wim archives"}
         );
     }
 
@@ -1035,6 +1136,8 @@ ExitCode testArchive(
         return testCab(argument, std::move(archive->file));
     case Container::Iso:
         return testIso(argument, std::move(archive->file));
+    case Container::Wim:
+        return testWim(argument, std::move(archive->file), imageIndex);
     case Container::Unknown:
     default:
         return reportFailure(

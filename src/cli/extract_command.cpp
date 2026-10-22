@@ -10,6 +10,7 @@
 #include "formats/iso/reader.hpp"
 #include "formats/sevenzip/reader.hpp"
 #include "formats/tar/reader.hpp"
+#include "formats/wim/reader.hpp"
 #include "formats/zip/reader.hpp"
 #include "security/archive_path.hpp"
 
@@ -631,6 +632,91 @@ ExitCode extractCab(std::string_view argument, File file, Session& session) {
 }
 
 [[nodiscard]] Result<EntryResult>
+extractWimEntry(Session& session, wim::Reader& reader, const wim::Entry& entry) {
+    auto path = session.path(entry.name);
+    if (!path) {
+        return std::unexpected(path.error());
+    }
+
+    EntryMetadata metadata{
+        .mode = entry.mode,
+        .mtimeNanoseconds = mtimeNanoseconds(entry.mtimeSeconds, 0),
+    };
+    switch (entry.kind) {
+    case wim::EntryKind::Directory:
+        return session.extractor().createDirectory(*path, metadata);
+    case wim::EntryKind::Regular:
+    case wim::EntryKind::AlternateStream:
+        if (entry.kind == wim::EntryKind::AlternateStream) {
+            return EntryResult{
+                .outcome = EntryOutcome::Skipped,
+                .reason = "alternate data stream (only the default stream is extracted)",
+            };
+        }
+        return writeFile(session, *path, metadata, [&](auto&& sink) {
+            return reader.streamEntry(entry, session.scratch(), sink);
+        });
+    case wim::EntryKind::Symlink:
+        if (entry.linkTarget.empty()) {
+            return EntryResult{
+                .outcome = EntryOutcome::Skipped,
+                .reason = "symlink without a target",
+            };
+        }
+        return session.extractor().createSymlink(*path, entry.linkTarget, metadata);
+    case wim::EntryKind::HardLink: {
+        auto target = session.linkPath(entry.linkTarget);
+        if (!target) {
+            return std::unexpected(target.error());
+        }
+        return session.extractor().createHardLink(*path, *target);
+    }
+    case wim::EntryKind::Other:
+        return EntryResult{
+            .outcome = EntryOutcome::Skipped,
+            .reason = "special or unsupported WIM entry",
+        };
+    }
+    return EntryResult{
+        .outcome = EntryOutcome::Skipped,
+        .reason = "special or unsupported WIM entry",
+    };
+}
+
+ExitCode
+extractWim(std::string_view argument, File file, Session& session, std::uint32_t imageIndex) {
+    auto reader = wim::Reader::open(std::move(file), {}, imageIndex);
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    // NOTE: WIM hard links can point either way in archive order, so links
+    // are created after every other entry, like cpio links.
+    std::vector<const wim::Entry*> deferred;
+    for (const auto& entry : reader->entries()) {
+        if (entry.kind == wim::EntryKind::HardLink) {
+            deferred.push_back(&entry);
+            continue;
+        }
+
+        auto result = extractWimEntry(session, *reader, entry);
+        session.record(entry.name, result);
+        if (!result && result.error().kind == ErrorKind::LimitExceeded) {
+            return session.finish();
+        }
+    }
+
+    for (const auto* entry : deferred) {
+        auto result = extractWimEntry(session, *reader, *entry);
+        session.record(entry->name, result);
+        if (!result && result.error().kind == ErrorKind::LimitExceeded) {
+            return session.finish();
+        }
+    }
+    return session.finish();
+}
+
+[[nodiscard]] Result<EntryResult>
 extractBaleEntry(Session& session, archive::Reader& reader, const archive::ManifestEntry& entry) {
     auto path = session.path(entry.path);
     if (!path) {
@@ -718,7 +804,8 @@ ExitCode extractArchive(
     std::string_view destination,
     const ExtractPolicy& policy,
     const std::optional<std::string>& keyFile,
-    const VerifyKeys& verifyKeys
+    const VerifyKeys& verifyKeys,
+    std::uint32_t imageIndex
 ) {
     auto archive = openArchive(argument);
     if (!archive) {
@@ -731,6 +818,12 @@ ExitCode extractArchive(
                 .kind = ErrorKind::Malformed,
                 .what = "--verify-key applies only to bale archives"
             }
+        );
+    }
+    if (archive->format.container != Container::Wim && imageIndex != 0) {
+        return reportFailure(
+            argument,
+            Error{.kind = ErrorKind::Malformed, .what = "--image applies only to wim archives"}
         );
     }
 
@@ -761,6 +854,11 @@ ExitCode extractArchive(
         pathPolicy.backslash = Backslash::Separator;
         Session session(std::move(*extractor), destination, policy, pathPolicy);
         return extractCab(argument, std::move(archive->file), session);
+    }
+    if (archive->format.container == Container::Wim) {
+        pathPolicy.backslash = Backslash::Separator;
+        Session session(std::move(*extractor), destination, policy, pathPolicy);
+        return extractWim(argument, std::move(archive->file), session, imageIndex);
     }
 
     Session session(std::move(*extractor), destination, policy, pathPolicy);
