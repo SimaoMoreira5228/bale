@@ -1241,4 +1241,118 @@ ExitCode testArchive(
     }
 }
 
+std::optional<sevenzip::Codec> parseSevenZipCodec(std::string_view text) {
+    if (text == "copy") {
+        return sevenzip::Codec::Copy;
+    }
+    if (text == "lzma1") {
+        return sevenzip::Codec::Lzma1;
+    }
+    if (text == "lzma2") {
+        return sevenzip::Codec::Lzma2;
+    }
+    if (text == "deflate") {
+        return sevenzip::Codec::Deflate;
+    }
+    if (text == "bzip2") {
+        return sevenzip::Codec::Bzip2;
+    }
+    return std::nullopt;
+}
+
+std::string_view name(sevenzip::Codec codec) {
+    switch (codec) {
+    case sevenzip::Codec::Copy:
+        return "copy";
+    case sevenzip::Codec::Lzma1:
+        return "lzma1";
+    case sevenzip::Codec::Lzma2:
+        return "lzma2";
+    case sevenzip::Codec::Deflate:
+        return "deflate";
+    case sevenzip::Codec::Bzip2:
+        return "bzip2";
+    }
+    return "unknown";
+}
+
+std::optional<std::string_view> checkSevenZipLevel(sevenzip::Codec codec, int level) {
+    switch (codec) {
+    case sevenzip::Codec::Copy:
+        return "--level does not apply to copy";
+    case sevenzip::Codec::Bzip2:
+        if (level < 1 || level > 9) {
+            return "--level must be between 1 and 9 for bzip2";
+        }
+        return std::nullopt;
+    case sevenzip::Codec::Lzma1:
+    case sevenzip::Codec::Lzma2:
+    case sevenzip::Codec::Deflate:
+        if (level < 0 || level > 9) {
+            return "--level must be between 0 and 9";
+        }
+        return std::nullopt;
+    }
+    return "unknown 7z codec";
+}
+
+bool isBaleCodecName(std::string_view text) {
+    return text == "raw" || text == "zstd" || text == "lz4" || text == "lzma2" || text == "brotli";
+}
+
+bool applyBaleCodecName(CreateOptions& options, std::string_view text) {
+    constexpr int defaultZstdLevel = 3;
+    constexpr int defaultLz4Level = 0;
+    constexpr int defaultLzma2Level = 6;
+    constexpr int defaultBrotliLevel = 11;
+    if (text == "raw") {
+        options.compression.codec = CodecId::Raw;
+        options.compression.level = 0;
+    } else if (text == "zstd") {
+        options.compression.codec = CodecId::Zstd;
+        options.compression.level = defaultZstdLevel;
+    } else if (text == "lz4") {
+        options.compression.codec = CodecId::Lz4;
+        options.compression.level = defaultLz4Level;
+    } else if (text == "lzma2") {
+        options.compression.codec = CodecId::Lzma2;
+        options.compression.level = defaultLzma2Level;
+    } else if (text == "brotli") {
+        options.compression.codec = CodecId::Brotli;
+        options.compression.level = defaultBrotliLevel;
+    } else {
+        return false;
+    }
+    options.compression.preset.reset();
+    return true;
+}
+
+std::optional<std::string_view> checkBaleCodecLevel(CodecId codec, std::int32_t level) {
+    switch (codec) {
+    case CodecId::Raw:
+        return "--level does not apply to --codec raw";
+    case CodecId::Zstd:
+        if (level < 1 || level > 22) {
+            return "--level must be between 1 and 22 for zstd";
+        }
+        return std::nullopt;
+    case CodecId::Lz4:
+        if (level < 0 || level > 12) {
+            return "--level must be between 0 and 12 for lz4";
+        }
+        return std::nullopt;
+    case CodecId::Lzma2:
+        if (level < 0 || level > 9) {
+            return "--level must be between 0 and 9 for lzma2";
+        }
+        return std::nullopt;
+    case CodecId::Brotli:
+        if (level < 0 || level > 11) {
+            return "--level must be between 0 and 11 for brotli";
+        }
+        return std::nullopt;
+    }
+    return "codec has no levels";
+}
+
 }

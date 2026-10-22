@@ -21,9 +21,10 @@ struct NamedFormat {
     OutputFormat format;
 };
 
-constexpr std::array<NamedFormat, 7> suffixes{{
+constexpr std::array<NamedFormat, 8> suffixes{{
     {".bale", OutputFormat::Bale},
     {".zip", OutputFormat::Zip},
+    {".7z", OutputFormat::SevenZip},
     {".tar", OutputFormat::Tar},
     {".tar.gz", OutputFormat::TarGzip},
     {".tgz", OutputFormat::TarGzip},
@@ -95,6 +96,19 @@ zipEntry(std::string_view path, const archive::EntryAttributes& attributes, zip:
     return entry;
 }
 
+sevenzip::WriteEntry sevenZipEntry(
+    std::string_view path,
+    const archive::EntryAttributes& attributes,
+    sevenzip::WriteKind kind
+) {
+    return sevenzip::WriteEntry{
+        .path = path,
+        .mtimeNanoseconds = attributes.mtimeNanoseconds,
+        .mode = attributes.mode,
+        .kind = kind,
+    };
+}
+
 Compression tarCompression(OutputFormat format) {
     switch (format) {
     case OutputFormat::TarGzip:
@@ -103,6 +117,7 @@ Compression tarCompression(OutputFormat format) {
         return Compression::Zstd;
     case OutputFormat::Bale:
     case OutputFormat::Zip:
+    case OutputFormat::SevenZip:
     case OutputFormat::Tar:
         break;
     }
@@ -135,6 +150,8 @@ std::string_view name(OutputFormat format) {
         return "bale";
     case OutputFormat::Zip:
         return "zip";
+    case OutputFormat::SevenZip:
+        return "7z";
     case OutputFormat::Tar:
         return "tar";
     case OutputFormat::TarGzip:
@@ -147,6 +164,13 @@ std::string_view name(OutputFormat format) {
 
 std::optional<std::string_view> checkOutputLevel(OutputFormat format, int level) {
     switch (format) {
+    case OutputFormat::SevenZip:
+        // NOTE: codec-specific ranges are validated with the codec in hand
+        // by create and convert; 0-9 covers lzma1, lzma2 and deflate.
+        if (level < 0 || level > 9) {
+            return "--level must be between 0 and 9 for 7z";
+        }
+        return std::nullopt;
     case OutputFormat::Zip:
         if (level < 0 || level > 9) {
             return "--level must be between 0 and 9 for zip";
@@ -205,6 +229,17 @@ Result<ArchiveOutput> ArchiveOutput::create(File file, const OutputOptions& opti
             options.native.durable
         );
     }
+    case OutputFormat::SevenZip: {
+        sevenzip::WriterOptions sevenZipOptions;
+        sevenZipOptions.codec = options.sevenZipCodec;
+        sevenZipOptions.level = options.sevenZipLevel;
+        sevenZipOptions.solid = options.sevenZipSolid;
+        auto writer = sevenzip::Writer::create(std::move(file), sevenZipOptions);
+        if (!writer) {
+            return std::unexpected(writer.error());
+        }
+        return ArchiveOutput(Sink(std::move(*writer)), options.format, options.native.durable);
+    }
     }
     return fail(ErrorKind::Unsupported, "unknown output format");
 }
@@ -226,6 +261,9 @@ ArchiveOutput::addDirectory(std::string_view path, const archive::EntryAttribute
             tarEntry(path, attributes, tar::EntryKind::Directory, defaultDirectoryMode)
         );
     }
+    if (auto* sevenZip = std::get_if<sevenzip::Writer>(&sink_)) {
+        return sevenZip->add(sevenZipEntry(path, attributes, sevenzip::WriteKind::Directory));
+    }
     return std::get<zip::Writer>(sink_).add(zipEntry(path, attributes, zip::WriteKind::Directory));
 }
 
@@ -241,6 +279,11 @@ Result<void> ArchiveOutput::addSymlink(
         auto entry = tarEntry(path, attributes, tar::EntryKind::Symlink, symlinkMode);
         entry.linkTarget = target;
         return tarWriter->add(entry);
+    }
+    if (auto* sevenZip = std::get_if<sevenzip::Writer>(&sink_)) {
+        auto entry = sevenZipEntry(path, attributes, sevenzip::WriteKind::Symlink);
+        entry.linkTarget = target;
+        return sevenZip->add(entry);
     }
     auto entry = zipEntry(path, attributes, zip::WriteKind::Symlink);
     entry.linkTarget = target;
@@ -260,6 +303,9 @@ Result<void> ArchiveOutput::addHardLink(
         entry.linkTarget = target;
         return tarWriter->add(entry);
     }
+    if (std::holds_alternative<sevenzip::Writer>(sink_)) {
+        return fail(ErrorKind::Unsupported, "7z archives cannot store hard links");
+    }
     return fail(ErrorKind::Unsupported, "ZIP archives cannot store hard links");
 }
 
@@ -275,6 +321,11 @@ Result<void> ArchiveOutput::beginFile(
         auto entry = tarEntry(path, attributes, tar::EntryKind::Regular, defaultFileMode);
         entry.size = size;
         return tarWriter->add(entry);
+    }
+    if (auto* sevenZip = std::get_if<sevenzip::Writer>(&sink_)) {
+        auto entry = sevenZipEntry(path, attributes, sevenzip::WriteKind::File);
+        entry.size = size;
+        return sevenZip->add(entry);
     }
     auto entry = zipEntry(path, attributes, zip::WriteKind::File);
     entry.size = size;

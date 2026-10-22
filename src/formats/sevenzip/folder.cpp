@@ -2,6 +2,7 @@
 
 #include "base/checked.hpp"
 #include "base/endian.hpp"
+#include "formats/sevenzip/methods.hpp"
 
 #include <algorithm>
 #include <array>
@@ -13,17 +14,6 @@ namespace bale::sevenzip {
 
 namespace {
 
-constexpr std::array<std::uint8_t, 1> idCopy{0x00};
-constexpr std::array<std::uint8_t, 3> idLzma1{0x03, 0x01, 0x01};
-constexpr std::array<std::uint8_t, 1> idLzma2{0x21};
-constexpr std::array<std::uint8_t, 3> idDeflate{0x04, 0x01, 0x08};
-constexpr std::array<std::uint8_t, 3> idBzip2{0x04, 0x02, 0x02};
-constexpr std::array<std::uint8_t, 4> idAes{0x06, 0xF1, 0x07, 0x01};
-constexpr std::array<std::uint8_t, 3> idPpmd{0x03, 0x04, 0x01};
-constexpr std::array<std::uint8_t, 4> idBcj{0x03, 0x03, 0x01, 0x03};
-constexpr std::array<std::uint8_t, 4> idBcj2{0x03, 0x03, 0x01, 0x1B};
-constexpr std::array<std::uint8_t, 1> idDelta{0x03};
-
 constexpr std::size_t maxStepBytes = std::numeric_limits<std::uint32_t>::max();
 constexpr std::uint32_t lzmaDictMin = 1U << 12;
 
@@ -32,34 +22,34 @@ bool idEquals(std::span<const std::uint8_t> id, std::span<const std::uint8_t> wa
 }
 
 std::string codecName(std::span<const std::uint8_t> id) {
-    if (idEquals(id, idCopy)) {
+    if (idEquals(id, methodCopy)) {
         return "Copy";
     }
-    if (idEquals(id, idLzma1)) {
+    if (idEquals(id, methodLzma1)) {
         return "LZMA1";
     }
-    if (idEquals(id, idLzma2)) {
+    if (idEquals(id, methodLzma2)) {
         return "LZMA2";
     }
-    if (idEquals(id, idDeflate)) {
+    if (idEquals(id, methodDeflate)) {
         return "Deflate";
     }
-    if (idEquals(id, idBzip2)) {
+    if (idEquals(id, methodBzip2)) {
         return "BZip2";
     }
-    if (idEquals(id, idAes)) {
+    if (idEquals(id, methodAes)) {
         return "AES-256";
     }
-    if (idEquals(id, idPpmd)) {
+    if (idEquals(id, methodPpmd)) {
         return "PPMd";
     }
-    if (idEquals(id, idBcj)) {
+    if (idEquals(id, methodBcj)) {
         return "BCJ";
     }
-    if (idEquals(id, idBcj2)) {
+    if (idEquals(id, methodBcj2)) {
         return "BCJ2";
     }
-    if (idEquals(id, idDelta)) {
+    if (idEquals(id, methodDelta)) {
         return "Delta";
     }
     return "unknown";
@@ -105,7 +95,7 @@ std::uint64_t lzma2DictSize(std::uint8_t props) {
 
 CodecInfo resolveCodec(const Folder& folder) {
     for (const auto& coder : folder.coders) {
-        if (idEquals(coder.id, idAes)) {
+        if (idEquals(coder.id, methodAes)) {
             return CodecInfo{
                 .codec = Codec::Copy,
                 .props = {},
@@ -136,23 +126,23 @@ CodecInfo resolveCodec(const Folder& folder) {
     info.props.assign(coder.props.begin(), coder.props.end());
     info.name = codecName(coder.id);
     info.hex = codecHex(coder.id);
-    if (idEquals(coder.id, idCopy)) {
+    if (idEquals(coder.id, methodCopy)) {
         info.codec = Codec::Copy;
         return info;
     }
-    if (idEquals(coder.id, idLzma1)) {
+    if (idEquals(coder.id, methodLzma1)) {
         info.codec = Codec::Lzma1;
         return info;
     }
-    if (idEquals(coder.id, idLzma2)) {
+    if (idEquals(coder.id, methodLzma2)) {
         info.codec = Codec::Lzma2;
         return info;
     }
-    if (idEquals(coder.id, idDeflate)) {
+    if (idEquals(coder.id, methodDeflate)) {
         info.codec = Codec::Deflate;
         return info;
     }
-    if (idEquals(coder.id, idBzip2)) {
+    if (idEquals(coder.id, methodBzip2)) {
         info.codec = Codec::Bzip2;
         return info;
     }

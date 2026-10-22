@@ -5,6 +5,7 @@
 #include "cli/prompt.hpp"
 #include "cli/terminal_text.hpp"
 #include "cli/unlock.hpp"
+#include "formats/detect.hpp"
 #include "fswalk/tree_walker.hpp"
 
 #include <filesystem>
@@ -31,18 +32,6 @@ Result<archive::ParityConfig> resolveParity(const CreateOptions& options) {
         return std::unexpected(valid.error());
     }
     return config;
-}
-
-void reportSkipped(const std::vector<SkippedPath>& skipped) {
-    std::string escaped;
-    for (const auto& path : skipped) {
-        std::println(
-            stderr,
-            "bale: skipped {}: {}",
-            escapeForTerminal(path.path, escaped),
-            path.reason
-        );
-    }
 }
 
 Result<void> addTree(ArchiveOutput& output, TreeWalker& walker) {
@@ -161,6 +150,9 @@ ExitCode writeArchive(
     OutputOptions outputOptions;
     outputOptions.format = options.format;
     outputOptions.level = options.level;
+    outputOptions.sevenZipCodec = options.sevenZipCodec;
+    outputOptions.sevenZipLevel = options.sevenZipLevel;
+    outputOptions.sevenZipSolid = options.sevenZipSolid;
     outputOptions.native.chunkSize = options.chunkSize;
     outputOptions.native.chunkPolicy = options.chunkPolicy;
     outputOptions.native.cdc = options.cdc;
@@ -258,6 +250,44 @@ ExitCode updateArchive(
             return reportFailure(archivePath, seeds.error());
         }
         signSeeds = std::move(*seeds);
+    }
+
+    Container detectedKind = Container::Unknown;
+    {
+        // NOTE: the probe handle must die here: Windows cannot replace a
+        // file with open handles, and the 7z rewrite below renames over it.
+        auto probe = File::openRead(pathFromUtf8(archivePath));
+        if (!probe) {
+            return reportFailure(archivePath, probe.error());
+        }
+        auto detected = detectFormat(*probe);
+        if (!detected) {
+            return reportFailure(archivePath, detected.error());
+        }
+        detectedKind = detected->container;
+    }
+
+    if (detectedKind == Container::SevenZip) {
+        return updateSevenZipArchive(archivePath, directory, options, std::move(signSeeds));
+    }
+    if (detectedKind != Container::Bale) {
+        return reportFailure(
+            archivePath,
+            Error{.kind = ErrorKind::Unsupported, .what = "update supports .bale and .7z archives"}
+        );
+    }
+    if (options.codecName && !isBaleCodecName(*options.codecName)) {
+        std::string onlySevenZip = "--codec " + *options.codecName + " applies only to 7z";
+        return reportFailure(
+            archivePath,
+            Error{.kind = ErrorKind::Unsupported, .what = onlySevenZip}
+        );
+    }
+    if (options.sevenZipSolidExplicit) {
+        return reportFailure(
+            archivePath,
+            Error{.kind = ErrorKind::Unsupported, .what = "--solid and --no-solid apply only to 7z"}
+        );
     }
 
     auto file = File::openAppend(pathFromUtf8(archivePath));

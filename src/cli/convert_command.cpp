@@ -768,6 +768,9 @@ Result<OutputSummary> convert(OpenedArchive archive, File file, const ConvertOpt
     OutputOptions outputOptions;
     outputOptions.format = options.format;
     outputOptions.level = options.level;
+    outputOptions.sevenZipCodec = options.sevenZipCodec;
+    outputOptions.sevenZipLevel = options.sevenZipLevel;
+    outputOptions.sevenZipSolid = options.sevenZipSolid;
     auto output = ArchiveOutput::create(std::move(file), outputOptions);
     if (!output) {
         return std::unexpected(output.error());

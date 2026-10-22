@@ -4,6 +4,7 @@ add_library(bale_cli STATIC
     compact_command.cpp
     convert_command.cpp
     create_command.cpp
+    update_sevenzip.cpp
     extract_command.cpp
     info_command.cpp
     prompt.cpp
