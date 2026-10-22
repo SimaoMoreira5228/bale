@@ -4,6 +4,7 @@
 #include "cli/filesystem_path.hpp"
 #include "cli/terminal_text.hpp"
 #include "cli/unlock.hpp"
+#include "formats/rpm/reader.hpp"
 #include "formats/wim/reader.hpp"
 
 #include <cstdint>
@@ -179,6 +180,62 @@ ExitCode describeNative(
 
 }
 
+ExitCode describeRpm(std::string_view argument, File file) {
+    auto reader = rpm::Reader::open(std::move(file));
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    const auto& package = reader->package();
+    std::println("format: rpm");
+    std::println(
+        "package: {}-{}-{}.{}",
+        package.name,
+        package.version,
+        package.release,
+        package.arch
+    );
+    if (!package.os.empty()) {
+        std::println("os: {}", package.os);
+    }
+    if (package.uncompressed) {
+        std::println(
+            "payload: {} (uncompressed), {} bytes at offset {}",
+            package.payloadFormat,
+            package.payloadBytes,
+            package.payloadOffset
+        );
+    } else {
+        std::println(
+            "payload: {} ({}), {} bytes at offset {}",
+            package.payloadFormat,
+            package.payloadCompressor,
+            package.payloadBytes,
+            package.payloadOffset
+        );
+    }
+    if (!package.payloadFlags.empty()) {
+        std::println("payload flags: {}", package.payloadFlags);
+    }
+    std::println("entries: {}", reader->entryCount());
+    if (package.signatureTags.empty()) {
+        std::println("signatures: none");
+    } else {
+        std::string tags;
+        for (auto tag : package.signatureTags) {
+            if (!tags.empty()) {
+                tags += ", ";
+            }
+            tags += std::to_string(tag);
+        }
+        std::println("signatures: {} header tags ({})", package.signatureTags.size(), tags);
+    }
+    // NOTE: package header signatures are read as data only and never
+    // verified: there is no keyring, so presence is informational.
+    std::println("signatures verified: no (no keyring; presence only)");
+    return ExitCode::Ok;
+}
+
 ExitCode describeWim(std::string_view argument, File file) {
     auto reader = wim::Reader::open(std::move(file));
     if (!reader) {
@@ -226,6 +283,9 @@ ExitCode describeArchive(
     }
     if (archive->format.container == Container::Wim) {
         return describeWim(argument, std::move(archive->file));
+    }
+    if (archive->format.container == Container::Rpm) {
+        return describeRpm(argument, std::move(archive->file));
     }
     std::println("format: {}", name(archive->format));
     return ExitCode::Ok;

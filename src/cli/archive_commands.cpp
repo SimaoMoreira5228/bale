@@ -10,6 +10,7 @@
 #include "formats/cpio/reader.hpp"
 #include "formats/detect.hpp"
 #include "formats/iso/reader.hpp"
+#include "formats/rpm/reader.hpp"
 #include "formats/sevenzip/reader.hpp"
 #include "formats/tar/reader.hpp"
 #include "formats/tar/source.hpp"
@@ -303,6 +304,30 @@ ExitCode listTar(std::string_view argument, OpenedArchive archive, const ListOpt
     return '?';
 }
 
+[[nodiscard]] char rpmKind(rpm::EntryKind kind) {
+    switch (kind) {
+    case rpm::EntryKind::Regular:
+        return '-';
+    case rpm::EntryKind::Directory:
+        return 'd';
+    case rpm::EntryKind::Symlink:
+        return 'l';
+    case rpm::EntryKind::HardLink:
+        return 'h';
+    case rpm::EntryKind::CharDevice:
+        return 'c';
+    case rpm::EntryKind::BlockDevice:
+        return 'b';
+    case rpm::EntryKind::Fifo:
+        return 'p';
+    case rpm::EntryKind::Socket:
+        return 's';
+    case rpm::EntryKind::Other:
+        return '?';
+    }
+    return '?';
+}
+
 ExitCode listAr(std::string_view argument, File file, const ListOptions& options) {
     auto reader = ar::Reader::open(std::move(file));
     if (!reader) {
@@ -339,6 +364,32 @@ ExitCode listCpio(std::string_view argument, File file, const ListOptions& optio
 
         printRow(
             cpioKind(entry.kind),
+            entry.size,
+            civilFromUnix(entry.mtimeSeconds),
+            path,
+            escapeForTerminal(entry.linkTarget, escapedTarget)
+        );
+    }
+    return ExitCode::Ok;
+}
+
+ExitCode listRpm(std::string_view argument, File file, const ListOptions& options) {
+    auto reader = rpm::Reader::open(std::move(file));
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    std::string escapedPath;
+    std::string escapedTarget;
+    for (const auto& entry : reader->entries()) {
+        auto path = escapeForTerminal(entry.name, escapedPath);
+        if (!options.detailed) {
+            std::println("{}", path);
+            continue;
+        }
+
+        printRow(
+            rpmKind(entry.kind),
             entry.size,
             civilFromUnix(entry.mtimeSeconds),
             path,
@@ -720,6 +771,45 @@ ExitCode testCpio(std::string_view argument, File file) {
     return result;
 }
 
+ExitCode testRpm(std::string_view argument, File file) {
+    auto reader = rpm::Reader::open(std::move(file));
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    std::vector<std::byte> scratch(testChunkSize);
+    auto discard = [](std::span<const std::byte>) -> Result<void> {
+        return {};
+    };
+
+    std::uint64_t failures = 0;
+    ExitCode result = ExitCode::Ok;
+    std::string escaped;
+    for (const auto& entry : reader->entries()) {
+        if (entry.kind != rpm::EntryKind::Regular && entry.kind != rpm::EntryKind::Symlink) {
+            continue;
+        }
+
+        auto checked = reader->streamEntry(entry, scratch, discard);
+        if (checked) {
+            continue;
+        }
+
+        ++failures;
+        if (result == ExitCode::Ok) {
+            result = exitCodeFor(checked.error().kind);
+        }
+        reportError(escapeForTerminal(entry.name, escaped), checked.error());
+    }
+
+    if (failures == 0) {
+        std::println("ok: {} entries", reader->entryCount());
+    } else {
+        std::println("{} of {} entries failed", failures, reader->entryCount());
+    }
+    return result;
+}
+
 ExitCode testCab(std::string_view argument, File file) {
     auto reader = cab::Reader::open(std::move(file));
     if (!reader) {
@@ -1076,6 +1166,8 @@ ExitCode listArchive(std::string_view argument, const ListOptions& options) {
         return listAr(argument, std::move(archive->file), options);
     case Container::Cpio:
         return listCpio(argument, std::move(archive->file), options);
+    case Container::Rpm:
+        return listRpm(argument, std::move(archive->file), options);
     case Container::Cab:
         return listCab(argument, std::move(archive->file), options);
     case Container::Iso:
@@ -1132,6 +1224,8 @@ ExitCode testArchive(
         return testAr(argument, std::move(archive->file));
     case Container::Cpio:
         return testCpio(argument, std::move(archive->file));
+    case Container::Rpm:
+        return testRpm(argument, std::move(archive->file));
     case Container::Cab:
         return testCab(argument, std::move(archive->file));
     case Container::Iso:

@@ -5,6 +5,7 @@ add_subdirectory(compressed)
 add_subdirectory(cpio)
 add_subdirectory(gzip)
 add_subdirectory(iso)
+add_subdirectory(rpm)
 add_subdirectory(sevenzip)
 add_subdirectory(tar)
 add_subdirectory(wim)
@@ -16,6 +17,6 @@ add_library(bale_formats STATIC
     detect.cpp
 )
 target_link_libraries(bale_formats
-    PUBLIC bale_format bale_formats_ar bale_formats_cab bale_formats_compressed bale_formats_cpio bale_formats_iso bale_formats_sevenzip bale_formats_tar bale_formats_wim bale_formats_zip bale_io
+    PUBLIC bale_format bale_formats_ar bale_formats_cab bale_formats_compressed bale_formats_cpio bale_formats_iso bale_formats_rpm bale_formats_sevenzip bale_formats_tar bale_formats_wim bale_formats_zip bale_io
     PRIVATE bale_warnings
 )

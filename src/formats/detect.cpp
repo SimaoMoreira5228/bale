@@ -7,6 +7,7 @@
 #include "formats/cpio/header.hpp"
 #include "formats/gzip/header.hpp"
 #include "formats/iso/header.hpp"
+#include "formats/rpm/header.hpp"
 #include "formats/sevenzip/reader.hpp"
 #include "formats/tar/header.hpp"
 #include "formats/wim/header.hpp"
@@ -109,6 +110,8 @@ std::string_view name(ArchiveFormat format) {
         return "iso";
     case Container::Wim:
         return "wim";
+    case Container::Rpm:
+        return "rpm";
     case Container::SingleFile:
         switch (format.compression) {
         case Compression::None:
@@ -158,6 +161,9 @@ Result<ArchiveFormat> detectFormat(const File& file) {
     }
     if (cab::looksLikeCab(headBytes)) {
         return ArchiveFormat{.container = Container::Cab};
+    }
+    if (rpm::looksLikeRpm(headBytes)) {
+        return ArchiveFormat{.container = Container::Rpm};
     }
     if (wim::looksLikeWim(headBytes)) {
         return ArchiveFormat{.container = Container::Wim};

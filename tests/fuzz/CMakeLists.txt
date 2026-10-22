@@ -13,6 +13,7 @@ set(bale_fuzz_targets
     fuzz_gzip
     fuzz_iso
     fuzz_keyslot
+    fuzz_rpm
     fuzz_native_archive
     fuzz_native_records
     fuzz_parity_record
@@ -44,6 +45,7 @@ foreach(target IN LISTS bale_fuzz_targets)
         bale_formats_cab
         bale_formats_compressed
         bale_formats_cpio
+        bale_formats_rpm
         bale_formats_gzip
         bale_formats_iso
         bale_formats_sevenzip

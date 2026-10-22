@@ -7,6 +7,7 @@
 #include "formats/cab/reader.hpp"
 #include "formats/cpio/reader.hpp"
 #include "formats/iso/reader.hpp"
+#include "formats/rpm/reader.hpp"
 #include "formats/sevenzip/reader.hpp"
 #include "formats/tar/reader.hpp"
 #include "formats/wim/reader.hpp"
@@ -17,6 +18,7 @@
 #include <filesystem>
 #include <limits>
 #include <print>
+#include <set>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -449,6 +451,107 @@ Result<void> convertCpio(Conversion& conversion, File file) {
     return {};
 }
 
+Result<void> convertRpmEntry(
+    Conversion& conversion,
+    rpm::Reader& reader,
+    const rpm::Entry& entry,
+    std::set<std::string>& directories
+) {
+    auto path = conversion.path(entry.name);
+    if (!path) {
+        return {};
+    }
+
+    archive::EntryAttributes attributes{
+        .mtimeNanoseconds = joinTime(entry.mtimeSeconds, 0),
+        .mode = maskedMode(entry.mode),
+    };
+    // NOTE: rpm payloads normally carry no directory entries, but the
+    // output requires every parent, so synthesize missing ancestors.
+    if (entry.kind != rpm::EntryKind::Directory) {
+        std::string_view rest = path->path;
+        while (true) {
+            auto slash = rest.find('/');
+            if (slash == std::string_view::npos) {
+                break;
+            }
+            std::string parent(path->path.substr(0, path->path.size() - rest.size() + slash));
+            rest.remove_prefix(slash + 1);
+            if (!directories.insert(parent).second) {
+                continue;
+            }
+            auto made = conversion.output().addDirectory(parent, archive::EntryAttributes{});
+            if (!made) {
+                return made;
+            }
+        }
+    }
+    switch (entry.kind) {
+    case rpm::EntryKind::Directory:
+        if (!directories.insert(std::string(path->path)).second) {
+            return {};
+        }
+        return conversion.output().addDirectory(path->path, attributes);
+    case rpm::EntryKind::Regular:
+        return conversion.copyFile(*path, entry.size, attributes, [&](auto&& sink) {
+            return reader.streamEntry(entry, conversion.scratch(), sink);
+        });
+    case rpm::EntryKind::Symlink: {
+        if (entry.size == 0 || entry.size > maxSymlinkTargetBytes) {
+            conversion.skip(entry.name, "symlink target empty or too long");
+            return {};
+        }
+
+        std::string& target = conversion.text();
+        target.clear();
+        auto read = reader.streamEntry(entry, conversion.scratch(), [&target](auto chunk) {
+            target.append(reinterpret_cast<const char*>(chunk.data()), chunk.size());
+            return Result<void>{};
+        });
+        if (!read) {
+            return read;
+        }
+        attributes.mode.reset();
+        return conversion.output().addSymlink(path->path, target, attributes);
+    }
+    case rpm::EntryKind::HardLink: {
+        if (!conversion.output().storesHardLinks()) {
+            conversion.skip(entry.name, "the output format cannot store hard links");
+            return {};
+        }
+        auto target = conversion.linkPath(entry.linkTarget);
+        if (!target) {
+            return {};
+        }
+        return conversion.output().addHardLink(path->path, target->path, attributes);
+    }
+    case rpm::EntryKind::CharDevice:
+    case rpm::EntryKind::BlockDevice:
+    case rpm::EntryKind::Fifo:
+    case rpm::EntryKind::Socket:
+    case rpm::EntryKind::Other:
+        break;
+    }
+    conversion.skip(entry.name, "special or unknown rpm entry");
+    return {};
+}
+
+Result<void> convertRpm(Conversion& conversion, File file) {
+    auto reader = rpm::Reader::open(std::move(file));
+    if (!reader) {
+        return std::unexpected(reader.error());
+    }
+
+    std::set<std::string> directories;
+    for (const auto& entry : reader->entries()) {
+        auto converted = convertRpmEntry(conversion, *reader, entry, directories);
+        if (!converted) {
+            return converted;
+        }
+    }
+    return {};
+}
+
 Result<void> convertIsoEntry(Conversion& conversion, iso::Reader& reader, const iso::Entry& entry) {
     auto path = conversion.path(entry.name);
     if (!path) {
@@ -697,6 +800,9 @@ Result<OutputSummary> convert(OpenedArchive archive, File file, const ConvertOpt
         break;
     case Container::Cpio:
         converted = convertCpio(conversion, std::move(archive.file));
+        break;
+    case Container::Rpm:
+        converted = convertRpm(conversion, std::move(archive.file));
         break;
     case Container::Cab:
         converted = convertCab(conversion, std::move(archive.file));

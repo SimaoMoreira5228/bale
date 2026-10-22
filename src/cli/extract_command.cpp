@@ -8,6 +8,7 @@
 #include "formats/compressed/stream.hpp"
 #include "formats/cpio/reader.hpp"
 #include "formats/iso/reader.hpp"
+#include "formats/rpm/reader.hpp"
 #include "formats/sevenzip/reader.hpp"
 #include "formats/tar/reader.hpp"
 #include "formats/wim/reader.hpp"
@@ -541,6 +542,99 @@ ExitCode extractCpio(std::string_view argument, File file, Session& session) {
 }
 
 [[nodiscard]] Result<EntryResult>
+extractRpmEntry(Session& session, rpm::Reader& reader, const rpm::Entry& entry) {
+    auto path = session.path(entry.name);
+    if (!path) {
+        return std::unexpected(path.error());
+    }
+
+    EntryMetadata metadata{
+        .mode = entry.mode,
+        .mtimeNanoseconds = mtimeNanoseconds(entry.mtimeSeconds, 0),
+    };
+    switch (entry.kind) {
+    case rpm::EntryKind::Directory:
+        return session.extractor().createDirectory(*path, metadata);
+    case rpm::EntryKind::Regular:
+        return writeFile(session, *path, metadata, [&](auto&& sink) {
+            return reader.streamEntry(entry, session.scratch(), sink);
+        });
+    case rpm::EntryKind::Symlink: {
+        if (entry.size > maxSymlinkTargetBytes) {
+            return fail(ErrorKind::LimitExceeded, "symlink target too long");
+        }
+
+        std::string& target = session.linkTarget();
+        target.clear();
+        auto read = reader.streamEntry(entry, session.scratch(), [&target](auto chunk) {
+            target.append(reinterpret_cast<const char*>(chunk.data()), chunk.size());
+            return Result<void>{};
+        });
+        if (!read) {
+            return std::unexpected(read.error());
+        }
+        return session.extractor().createSymlink(*path, target, metadata);
+    }
+    case rpm::EntryKind::HardLink: {
+        auto target = session.linkPath(entry.linkTarget);
+        if (!target) {
+            return std::unexpected(target.error());
+        }
+        return session.extractor().createHardLink(*path, *target);
+    }
+    case rpm::EntryKind::CharDevice:
+        return session.extractor().skipOrRefuseSpecialFile(*path, SpecialFileKind::CharacterDevice);
+    case rpm::EntryKind::BlockDevice:
+        return session.extractor().skipOrRefuseSpecialFile(*path, SpecialFileKind::BlockDevice);
+    case rpm::EntryKind::Fifo:
+        return session.extractor().skipOrRefuseSpecialFile(*path, SpecialFileKind::Fifo);
+    case rpm::EntryKind::Socket:
+        return session.extractor().skipOrRefuseSpecialFile(*path, SpecialFileKind::Socket);
+    case rpm::EntryKind::Other:
+        return EntryResult{
+            .outcome = EntryOutcome::Skipped,
+            .reason = "unknown rpm entry type",
+        };
+    }
+    return EntryResult{
+        .outcome = EntryOutcome::Skipped,
+        .reason = "unknown rpm entry type",
+    };
+}
+
+ExitCode extractRpm(std::string_view argument, File file, Session& session) {
+    auto reader = rpm::Reader::open(std::move(file));
+    if (!reader) {
+        return reportFailure(argument, reader.error());
+    }
+
+    // NOTE: rpm payloads are cpio archives, so hardlink data lives with the
+    // last link; create those links after every other entry, like cpio links.
+    std::vector<const rpm::Entry*> deferred;
+    for (const auto& entry : reader->entries()) {
+        if (entry.kind == rpm::EntryKind::HardLink) {
+            deferred.push_back(&entry);
+            continue;
+        }
+
+        auto result = extractRpmEntry(session, *reader, entry);
+        session.record(entry.name, result);
+        if (!result && result.error().kind == ErrorKind::LimitExceeded) {
+            return session.finish();
+        }
+    }
+
+    for (const auto* entry : deferred) {
+        auto result = extractRpmEntry(session, *reader, *entry);
+        session.record(entry->name, result);
+        if (!result && result.error().kind == ErrorKind::LimitExceeded) {
+            return session.finish();
+        }
+    }
+    return session.finish();
+}
+
+[[nodiscard]] Result<EntryResult>
 extractIsoEntry(Session& session, iso::Reader& reader, const iso::Entry& entry) {
     auto path = session.path(entry.name);
     if (!path) {
@@ -873,6 +967,9 @@ ExitCode extractArchive(
     }
     if (archive->format.container == Container::Cpio) {
         return extractCpio(argument, std::move(archive->file), session);
+    }
+    if (archive->format.container == Container::Rpm) {
+        return extractRpm(argument, std::move(archive->file), session);
     }
     if (archive->format.container == Container::Iso) {
         return extractIso(argument, std::move(archive->file), session);
