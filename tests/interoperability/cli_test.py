@@ -150,6 +150,14 @@ def test_native(work, source):
     check("updated snapshot entry", "replacement.txt" in listing.stdout, listing.stdout)
     check("old snapshot entry removed", "docs/deep/random.bin" not in listing.stdout, listing.stdout)
 
+    history = run("history", archive, cwd=work)
+    expect_exit("bale history", history, EXIT_OK)
+    check(
+        "history lists both generations and marks the current one",
+        "generation 1" in history.stdout and "* generation 2" in history.stdout,
+        history.stdout,
+    )
+
     archive_size = archive.stat().st_size
     compacted = work / "compacted.bale"
     expect_exit("bale compact", run("compact", archive, compacted, cwd=work), EXIT_OK)

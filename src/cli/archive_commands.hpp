@@ -146,6 +146,12 @@ convertArchive(std::string_view input, std::string_view output, const ConvertOpt
     const VerifyKeys& verifyKeys = {}
 );
 
+[[nodiscard]] ExitCode historyArchive(
+    std::string_view argument,
+    const std::optional<std::string>& keyFile = std::nullopt,
+    const VerifyKeys& verifyKeys = {}
+);
+
 [[nodiscard]] ExitCode repairArchive(
     std::string_view archivePath,
     const std::optional<std::string>& keyFile = std::nullopt,
