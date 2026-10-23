@@ -36,6 +36,10 @@ struct TestWim {
     std::uint32_t bootIndex = 0;
     bool solid = false;
     std::vector<std::vector<std::byte>> compressedBlobs;
+    // NOTE: real compressed bodies: (plain, per-chunk stored payloads) for
+    // blobs whose layout the test controls. Matched by plain content like
+    // compressedBlobs; the chunk count must be ceil(plain/chunkSize).
+    std::vector<std::pair<std::vector<std::byte>, std::vector<std::vector<std::byte>>>> lzxBlobs;
     bool corruptTable = false;
     std::map<std::string, std::string> subdirOverride;
 };

@@ -104,7 +104,13 @@ parseLookup(const File& file, const Header& header, std::uint64_t fileSize, cons
         if ((parsed.ref.flags & resFlagSolid) != 0 && header.version != versionSolid) {
             parsed.ref.flags = static_cast<std::uint8_t>(parsed.ref.flags & ~resFlagSolid);
         }
-        if (!fitsWithin(parsed.ref.offset, parsed.ref.sizeInWim, fileSize)) {
+        // NOTE: solid members address their resource, not the file: their
+        // offsets are base positions inside the solid resource, so the file
+        // range check does not apply to them. Placement against the owning
+        // resource happens when the reader resolves blobs.
+        bool isSolidMember =
+            (parsed.ref.flags & resFlagSolid) != 0 && parsed.ref.uncompressed != solidResourceMagic;
+        if (!isSolidMember && !fitsWithin(parsed.ref.offset, parsed.ref.sizeInWim, fileSize)) {
             return fail(ErrorKind::Malformed, "WIM blob is out of range", parsed.ref.offset);
         }
         // NOTE: resource markers of a solid run carry a zero hash by design;

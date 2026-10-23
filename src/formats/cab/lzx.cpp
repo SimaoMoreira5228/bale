@@ -3,6 +3,7 @@
 #include "base/endian.hpp"
 
 #include <cstring>
+#include <string_view>
 
 namespace bale::cab {
 
@@ -15,20 +16,33 @@ constexpr std::uint64_t e8CutoffOffset = std::uint64_t{1} << 30;
 constexpr std::size_t lengthSymbols = 249;
 constexpr std::size_t pretreeSymbols = 20;
 constexpr std::size_t alignedSymbols = 8;
+constexpr std::uint32_t wimDefaultBlockSize = 32768;
+
+[[nodiscard]] std::string_view overrunWhat(LzxFraming framing) {
+    if (framing == LzxFraming::Wim) {
+        return "WIM LZX chunk exceeds its declared size";
+    }
+    return "LZX stream exceeds its cabinet folder";
+}
 
 }
 
-Result<LzxDecoder> LzxDecoder::create(unsigned windowBits, std::uint64_t totalOut) {
+Result<LzxDecoder>
+LzxDecoder::create(unsigned windowBits, std::uint64_t totalOut, LzxFraming framing) {
     if (windowBits < 15 || windowBits > 21) {
+        if (framing == LzxFraming::Wim) {
+            return fail(ErrorKind::Unsupported, "WIM LZX window is not supported");
+        }
         return fail(ErrorKind::Unsupported, "cabinet LZX window is not supported");
     }
-    LzxDecoder decoder(windowBits);
+    LzxDecoder decoder(windowBits, framing);
     decoder.totalOut_ = totalOut;
     decoder.atEnd_ = totalOut == 0;
     return decoder;
 }
 
-LzxDecoder::LzxDecoder(unsigned windowBits) : windowBits_(windowBits) {
+LzxDecoder::LzxDecoder(unsigned windowBits, LzxFraming framing) :
+    windowBits_(windowBits), framing_(framing) {
     windowSize_ = std::uint32_t{1} << windowBits_;
     switch (windowBits_) {
     case 15:
@@ -104,6 +118,9 @@ Result<std::span<const std::byte>> LzxDecoder::finish() {
         );
     }
     if (blockLeft_ != 0) {
+        if (framing_ == LzxFraming::Wim) {
+            return fail(ErrorKind::Malformed, "WIM LZX chunk ends inside a block");
+        }
         return fail(ErrorKind::Malformed, "cabinet folder ends inside an LZX block");
     }
     if (phase_ == Phase::InTokens || phase_ == Phase::InRaw) {
@@ -187,7 +204,9 @@ bool LzxDecoder::emitByte(std::uint8_t value) {
     if (emitted_ == totalOut_) {
         atEnd_ = true;
     }
-    if (emitted_ != 0 && emitted_ % e8FrameBytes == 0) {
+    // NOTE: the 32 KiB frame padding below is CAB framing; WIM chunks have
+    // no alignment padding, so the flag must stay clear in WIM mode.
+    if (framing_ == LzxFraming::Cab && emitted_ != 0 && emitted_ % e8FrameBytes == 0) {
         padPending_ = true;
     }
     if (e8Enabled_) {
@@ -460,7 +479,7 @@ Result<bool> LzxDecoder::readToken() {
         std::uint32_t element = **symbol;
         if (element < 256) {
             if (!emitByte(static_cast<std::uint8_t>(element))) {
-                return fail(ErrorKind::Malformed, "LZX stream exceeds its cabinet folder");
+                return fail(ErrorKind::Malformed, overrunWhat(framing_));
             }
             return true;
         }
@@ -558,7 +577,7 @@ Result<bool> LzxDecoder::readMatch(std::uint32_t formatted) {
     for (std::uint32_t index = 0; index < tokLength_; ++index) {
         std::uint64_t from = emitted_ - match;
         if (!emitByte(static_cast<std::uint8_t>(window_[from % windowSize_]))) {
-            return fail(ErrorKind::Malformed, "LZX stream exceeds its cabinet folder");
+            return fail(ErrorKind::Malformed, overrunWhat(framing_));
         }
     }
     tokStage_ = 0;
@@ -597,7 +616,7 @@ Result<bool> LzxDecoder::readRaw() {
             return false;
         }
         if (!emitByte(*byte)) {
-            return fail(ErrorKind::Malformed, "LZX stream exceeds its cabinet folder");
+            return fail(ErrorKind::Malformed, overrunWhat(framing_));
         }
         --rawLeft_;
     }
@@ -620,6 +639,12 @@ Result<bool> LzxDecoder::advance() {
     }
     switch (phase_) {
     case Phase::NeedStreamHeader: {
+        if (framing_ == LzxFraming::Wim) {
+            // NOTE: WIM chunks carry no stream header; the fixed E8 pass
+            // runs per chunk outside the core, so raw bytes land in pending_.
+            phase_ = Phase::NeedBlockHeader;
+            return true;
+        }
         if (!flagRead_) {
             if (!fillBits(1)) {
                 return false;
@@ -651,16 +676,52 @@ Result<bool> LzxDecoder::advance() {
             typeRead_ = true;
             blockSizeBytes_ = 0;
             blockSize_ = 0;
+            sizeFlagRead_ = false;
+            sizeIsDefault_ = false;
         }
-        while (blockSizeBytes_ < 3) {
-            if (!fillBits(8)) {
-                return false;
+        if (framing_ == LzxFraming::Wim) {
+            if (!sizeFlagRead_) {
+                if (!fillBits(1)) {
+                    return false;
+                }
+                sizeIsDefault_ = takeBits(1) != 0;
+                sizeFlagRead_ = true;
             }
-            blockSize_ = (blockSize_ << 8) | takeBits(8);
-            ++blockSizeBytes_;
+            if (sizeIsDefault_) {
+                blockSize_ = wimDefaultBlockSize;
+            } else {
+                // NOTE: 16 size bits below 64 KiB windows, 24 above; the
+                // flag bit makes the field 1+16 or 1+24 bits wide.
+                unsigned want = windowSize_ >= 65536 ? 3 : 2;
+                while (blockSizeBytes_ < want) {
+                    if (!fillBits(8)) {
+                        return false;
+                    }
+                    blockSize_ = (blockSize_ << 8) | takeBits(8);
+                    ++blockSizeBytes_;
+                }
+                if (blockSize_ == 0) {
+                    return fail(ErrorKind::Malformed, "WIM LZX block size is invalid");
+                }
+            }
+        } else {
+            while (blockSizeBytes_ < 3) {
+                if (!fillBits(8)) {
+                    return false;
+                }
+                blockSize_ = (blockSize_ << 8) | takeBits(8);
+                ++blockSizeBytes_;
+            }
         }
         typeRead_ = false;
+        sizeFlagRead_ = false;
         blockLeft_ = blockSize_;
+        if (framing_ == LzxFraming::Wim) {
+            auto room = totalOut_ >= emitted_ ? totalOut_ - emitted_ : 0;
+            if (blockSize_ > room) {
+                return fail(ErrorKind::Malformed, "WIM LZX block exceeds its chunk");
+            }
+        }
         if (blockType_ == 3) {
             if (!alignInput()) {
                 return false;

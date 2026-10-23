@@ -3,6 +3,7 @@
 #include "base/checked.hpp"
 #include "base/error.hpp"
 #include "formats/wim/header.hpp"
+#include "formats/wim/lzx.hpp"
 #include "io/chunk_sink.hpp"
 #include "io/file.hpp"
 
@@ -119,7 +120,14 @@ class Resource {
                 return std::unexpected(stored.error());
             }
             if (*stored != usize) {
-                return refuseChunk(chunk);
+                auto decoded = streamCompressedChunk(chunk, begin, end, sink, *stored, usize);
+                if (!decoded) {
+                    return std::unexpected(decoded.error());
+                }
+                if (chunk == last) {
+                    break;
+                }
+                continue;
             }
             auto start = chunkFileOffset(chunk);
             if (!start) {
@@ -137,6 +145,42 @@ class Resource {
             }
         }
         return {};
+    }
+
+    template <ChunkSink Sink>
+    [[nodiscard]] Result<void> streamCompressedChunk(
+        std::uint64_t chunk,
+        std::uint64_t begin,
+        std::uint64_t end,
+        Sink&& sink,
+        std::uint64_t stored,
+        std::uint64_t usize
+    ) const {
+        if (format_ != Compression::Lzx) {
+            return refuseChunk(chunk);
+        }
+        auto start = chunkFileOffset(chunk);
+        if (!start) {
+            return std::unexpected(start.error());
+        }
+        auto plain = decodeLzxChunk(*file_, *start, stored, usize, chunkSize_, *start);
+        if (!plain) {
+            return std::unexpected(plain.error());
+        }
+        auto base = checkedMul(chunk, chunkSize_);
+        if (!base) {
+            return fail(ErrorKind::Malformed, "WIM chunk offset overflows", ref_.offset);
+        }
+        // NOTE: same clamp as the stored path above: the range can span
+        // chunks, so slice this chunk's share out of the decoded buffer.
+        // The loop bounds guarantee the slice is non-empty here.
+        std::uint64_t from = begin > *base ? begin - *base : 0;
+        std::uint64_t until = (end - *base) < plain->size() ? end - *base : plain->size();
+        if (until <= from || until > plain->size()) {
+            return fail(ErrorKind::Malformed, "WIM resource range extends past its end");
+        }
+        std::span<const std::byte> part(plain->data() + from, until - from);
+        return sink(part);
     }
 
     [[nodiscard]] Result<std::uint64_t> chunkFileOffset(std::uint64_t chunk) const;

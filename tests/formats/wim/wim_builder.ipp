@@ -334,6 +334,10 @@ inline std::vector<std::byte> buildWim(const TestWim& spec) {
             }
         }
     }
+    std::map<std::vector<std::byte>, std::vector<std::vector<std::byte>>> lzx;
+    for (const auto& [plain, stored] : spec.lzxBlobs) {
+        lzx[plain] = stored;
+    }
 
     Bytes blobs;
     Bytes table;
@@ -389,6 +393,25 @@ inline std::vector<std::byte> buildWim(const TestWim& spec) {
             }
             for (std::uint64_t chunk = 0; chunk < chunks; ++chunk) {
                 body.push_back(std::byte{0});
+            }
+            emit(body, hash, 0x04, data.size());
+            continue;
+        }
+        auto coded = lzx.find(data);
+        if (coded != lzx.end()) {
+            // NOTE: real compressed body: chunk table of cumulative stored
+            // offsets followed by the stored chunks. The test pins the
+            // chunk count against ceil(plain/chunkSize) before building.
+            Bytes body;
+            std::uint64_t offset = 0;
+            for (std::size_t chunk = 1; chunk < coded->second.size(); ++chunk) {
+                offset += coded->second[chunk - 1].size();
+                for (int shift = 0; shift < 32; shift += 8) {
+                    body.push_back(static_cast<std::byte>((offset >> shift) & 0xFF));
+                }
+            }
+            for (const auto& stored : coded->second) {
+                body.insert(body.end(), stored.begin(), stored.end());
             }
             emit(body, hash, 0x04, data.size());
             continue;
