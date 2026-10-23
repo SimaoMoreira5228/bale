@@ -52,6 +52,33 @@ std::string codecName(std::span<const std::uint8_t> id) {
     if (idEquals(id, methodDelta)) {
         return "Delta";
     }
+    if (idEquals(id, methodSwap2)) {
+        return "Swap2";
+    }
+    if (idEquals(id, methodSwap4)) {
+        return "Swap4";
+    }
+    if (idEquals(id, methodPpc)) {
+        return "PPC";
+    }
+    if (idEquals(id, methodIa64)) {
+        return "IA64";
+    }
+    if (idEquals(id, methodArm)) {
+        return "ARM";
+    }
+    if (idEquals(id, methodArmThumb)) {
+        return "ARMT";
+    }
+    if (idEquals(id, methodSparc)) {
+        return "SPARC";
+    }
+    if (idEquals(id, methodArm64)) {
+        return "ARM64";
+    }
+    if (idEquals(id, methodRiscv)) {
+        return "RISC-V";
+    }
     return "unknown";
 }
 
@@ -93,6 +120,38 @@ std::uint64_t lzma2DictSize(std::uint8_t props) {
 
 }
 
+bool isMainCodec(std::span<const std::uint8_t> id, Codec& codec) {
+    if (idEquals(id, methodCopy)) {
+        codec = Codec::Copy;
+        return true;
+    }
+    if (idEquals(id, methodLzma1)) {
+        codec = Codec::Lzma1;
+        return true;
+    }
+    if (idEquals(id, methodLzma2)) {
+        codec = Codec::Lzma2;
+        return true;
+    }
+    if (idEquals(id, methodDeflate)) {
+        codec = Codec::Deflate;
+        return true;
+    }
+    if (idEquals(id, methodBzip2)) {
+        codec = Codec::Bzip2;
+        return true;
+    }
+    return false;
+}
+
+CodecInfo unsupportedInfo(std::string name, std::string hex) {
+    CodecInfo info;
+    info.supported = false;
+    info.name = std::move(name);
+    info.hex = std::move(hex);
+    return info;
+}
+
 CodecInfo resolveCodec(const Folder& folder) {
     for (const auto& coder : folder.coders) {
         if (idEquals(coder.id, methodAes)) {
@@ -104,6 +163,10 @@ CodecInfo resolveCodec(const Folder& folder) {
                 .name = {},
                 .hex = {},
             };
+        }
+        if (idEquals(coder.id, methodBcj2)) {
+            CodecInfo info = unsupportedInfo(codecName(coder.id), codecHex(coder.id));
+            return info;
         }
     }
 
@@ -126,24 +189,15 @@ CodecInfo resolveCodec(const Folder& folder) {
     info.props.assign(coder.props.begin(), coder.props.end());
     info.name = codecName(coder.id);
     info.hex = codecHex(coder.id);
-    if (idEquals(coder.id, methodCopy)) {
-        info.codec = Codec::Copy;
+    if (idEquals(coder.id, methodBcj)) {
+        if (!coder.props.empty()) {
+            info.supported = false;
+            return info;
+        }
+        info.codec = Codec::Bcj;
         return info;
     }
-    if (idEquals(coder.id, methodLzma1)) {
-        info.codec = Codec::Lzma1;
-        return info;
-    }
-    if (idEquals(coder.id, methodLzma2)) {
-        info.codec = Codec::Lzma2;
-        return info;
-    }
-    if (idEquals(coder.id, methodDeflate)) {
-        info.codec = Codec::Deflate;
-        return info;
-    }
-    if (idEquals(coder.id, methodBzip2)) {
-        info.codec = Codec::Bzip2;
+    if (isMainCodec(coder.id, info.codec)) {
         return info;
     }
 
@@ -403,6 +457,12 @@ Result<FolderSession> FolderSession::start(
 }
 
 Result<void> FolderSession::prepareDecoder() {
+    useBcj_ = plan_.codec.codec == Codec::Bcj;
+    if (useBcj_) {
+        bcj_.reset();
+        decoder_.emplace<std::monostate>();
+        return {};
+    }
     switch (plan_.codec.codec) {
     case Codec::Copy:
         decoder_.emplace<std::monostate>();
@@ -434,6 +494,8 @@ Result<void> FolderSession::prepareDecoder() {
         decoder_.emplace<RawLzma>(std::move(*decoder));
         return {};
     }
+    case Codec::Bcj:
+        return fail(ErrorKind::Malformed, "7z BCJ codec is missing its filter");
     }
     return fail(ErrorKind::Unsupported, "7z codec is not supported");
 }
@@ -584,6 +646,9 @@ Result<std::span<const std::byte>> FolderSession::nextChunk() {
     if (!entryActive_ || entryDone_) {
         return std::span<const std::byte>{};
     }
+    if (useBcj_) {
+        return nextFiltered();
+    }
     if (plan_.codec.codec == Codec::Copy) {
         return nextCopy();
     }
@@ -725,6 +790,82 @@ Result<std::span<const std::byte>> FolderSession::nextCoded() {
         if (!part->empty()) {
             return *part;
         }
+    }
+}
+
+Result<std::span<const std::byte>> FolderSession::nextFiltered() {
+    while (true) {
+        if (entryLeft_ == 0) {
+            auto finished = finishEntry();
+            if (!finished) {
+                return std::unexpected(finished.error());
+            }
+            return std::span<const std::byte>{};
+        }
+
+        if (pending_.empty()) {
+            auto filled = fillInput();
+            if (!filled) {
+                return std::unexpected(filled.error());
+            }
+        }
+
+        std::uint64_t windowSize =
+            std::min(static_cast<std::uint64_t>(output_.size()), entryEnd_ - unpackPosition_);
+        if (windowSize == 0) {
+            return fail(ErrorKind::LimitExceeded, "scratch buffer is empty");
+        }
+        auto window = output_.first(static_cast<std::size_t>(windowSize));
+
+        if (!pending_.empty()) {
+            auto step = bcj_.filter(pending_, window);
+            if (!step) {
+                auto error = step.error();
+                error.offset = packPosition_;
+                pending_ = {};
+                return std::unexpected(error);
+            }
+
+            auto consumed = noteConsumed(step->consumed);
+            if (!consumed) {
+                pending_ = {};
+                return std::unexpected(consumed.error());
+            }
+
+            if (step->produced > 0) {
+                auto part = deliver(window.first(step->produced));
+                if (!part) {
+                    return std::unexpected(part.error());
+                }
+                if (!part->empty()) {
+                    return *part;
+                }
+                continue;
+            }
+        }
+
+        if (pending_.empty() && packPosition_ >= packDataEnd_) {
+            auto flushed = bcj_.flush(window);
+            if (!flushed) {
+                return std::unexpected(flushed.error());
+            }
+            if (*flushed == 0) {
+                return fail(ErrorKind::Truncated, "7z data stream truncated", packPosition_);
+            }
+            auto part = deliver(window.first(*flushed));
+            if (!part) {
+                return std::unexpected(part.error());
+            }
+            if (!part->empty()) {
+                return *part;
+            }
+            continue;
+        }
+
+        if (pending_.empty()) {
+            continue;
+        }
+        return fail(ErrorKind::Malformed, "7z filter made no progress", packPosition_);
     }
 }
 

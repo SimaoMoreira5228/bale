@@ -3,6 +3,7 @@
 #include "base/error.hpp"
 #include "checksum/crc.hpp"
 #include "codecs/decoders.hpp"
+#include "formats/sevenzip/branch.hpp"
 #include "formats/sevenzip/header.hpp"
 #include "io/chunk_sink.hpp"
 #include "io/file.hpp"
@@ -25,6 +26,7 @@ enum class Codec : std::uint8_t {
     Lzma2,
     Deflate,
     Bzip2,
+    Bcj,
 };
 
 struct CodecInfo {
@@ -129,6 +131,7 @@ class FolderSession {
     [[nodiscard]] Result<std::span<const std::byte>> deliver(std::span<const std::byte> chunk);
     [[nodiscard]] Result<std::span<const std::byte>> nextCopy();
     [[nodiscard]] Result<std::span<const std::byte>> nextCoded();
+    [[nodiscard]] Result<std::span<const std::byte>> nextFiltered();
     [[nodiscard]] Result<void> finishEntry();
 
     File file_;
@@ -137,6 +140,8 @@ class FolderSession {
     Inflater* inflater_ = nullptr;
     Bzip2Decoder* bzip2_ = nullptr;
     std::variant<std::monostate, Inflater*, Bzip2Decoder*, RawLzma> decoder_;
+    BcjFilter bcj_;
+    bool useBcj_ = false;
     std::uint64_t packPosition_ = 0;
     std::uint64_t packDataEnd_ = 0;
     std::size_t packSegment_ = 0;

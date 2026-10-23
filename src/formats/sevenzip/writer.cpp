@@ -85,6 +85,8 @@ std::span<const std::uint8_t> idFor(Codec codec) {
         return methodDeflate;
     case Codec::Bzip2:
         return methodBzip2;
+    case Codec::Bcj:
+        return methodBcj;
     }
     return methodCopy;
 }
@@ -171,6 +173,8 @@ Result<Writer> Writer::create(File file, const WriterOptions& options) {
             return fail(ErrorKind::Unsupported, "7z bzip2 compression level out of range");
         }
         break;
+    case Codec::Bcj:
+        return fail(ErrorKind::Unsupported, "7z codec is not supported for writing");
     }
 
     std::vector<std::byte> placeholder(signatureSize, std::byte{0});
