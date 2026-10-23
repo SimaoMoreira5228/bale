@@ -1,7 +1,9 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace bale::sevenzip {
 
@@ -19,5 +21,14 @@ inline constexpr std::array<std::uint8_t, 3> methodPpmd{0x03, 0x04, 0x01};
 inline constexpr std::array<std::uint8_t, 4> methodBcj{0x03, 0x03, 0x01, 0x03};
 inline constexpr std::array<std::uint8_t, 4> methodBcj2{0x03, 0x03, 0x01, 0x1B};
 inline constexpr std::array<std::uint8_t, 1> methodDelta{0x03};
+inline constexpr std::array<std::uint8_t, 3> methodSwap2{0x02, 0x03, 0x02};
+inline constexpr std::array<std::uint8_t, 3> methodSwap4{0x02, 0x03, 0x04};
+inline constexpr std::array<std::uint8_t, 4> methodPpc{0x03, 0x03, 0x02, 0x05};
+inline constexpr std::array<std::uint8_t, 4> methodIa64{0x03, 0x03, 0x04, 0x01};
+inline constexpr std::array<std::uint8_t, 4> methodArm{0x03, 0x03, 0x05, 0x01};
+inline constexpr std::array<std::uint8_t, 4> methodArmThumb{0x03, 0x03, 0x07, 0x01};
+inline constexpr std::array<std::uint8_t, 4> methodSparc{0x03, 0x03, 0x08, 0x05};
+inline constexpr std::array<std::uint8_t, 1> methodArm64{0x0A};
+inline constexpr std::array<std::uint8_t, 1> methodRiscv{0x0B};
 
 }

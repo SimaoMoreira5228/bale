@@ -1,4 +1,5 @@
 add_library(bale_formats_sevenzip STATIC
+    branch.cpp
     coding.cpp
     encode.cpp
     files.cpp

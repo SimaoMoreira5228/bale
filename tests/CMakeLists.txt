@@ -65,6 +65,7 @@ add_executable(bale_tests
     formats/tar/writer_test.cpp
     formats/sevenzip/reader_test.cpp
     formats/sevenzip/writer_test.cpp
+    formats/sevenzip/bcj_test.cpp
     formats/zip/reader_test.cpp
     formats/zip/writer_test.cpp
     formats/zstd/stream_test.cpp

@@ -1272,6 +1272,8 @@ std::string_view name(sevenzip::Codec codec) {
         return "deflate";
     case sevenzip::Codec::Bzip2:
         return "bzip2";
+    case sevenzip::Codec::Bcj:
+        return "bcj";
     }
     return "unknown";
 }
@@ -1288,6 +1290,7 @@ std::optional<std::string_view> checkSevenZipLevel(sevenzip::Codec codec, int le
     case sevenzip::Codec::Lzma1:
     case sevenzip::Codec::Lzma2:
     case sevenzip::Codec::Deflate:
+    case sevenzip::Codec::Bcj:
         if (level < 0 || level > 9) {
             return "--level must be between 0 and 9";
         }
