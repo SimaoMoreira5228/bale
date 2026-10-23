@@ -47,6 +47,7 @@ add_executable(bale_tests
     fswalk/tree_walker_test.cpp
     formats/detect_test.cpp
     formats/wim/reader_test.cpp
+    formats/wim/lzx_test.cpp
     formats/wim/refuse_test.cpp
     formats/ar/reader_test.cpp
     formats/cab/decoder_test.cpp

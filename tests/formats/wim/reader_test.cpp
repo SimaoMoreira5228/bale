@@ -258,11 +258,12 @@ TEST_CASE("wim reader enforces entry limits") {
     CHECK(parsed.error().kind == ErrorKind::LimitExceeded);
 }
 
-TEST_CASE("wim reader refuses a compressed stream per entry") {
-    // NOTE: stored metadata with one LZX-flagged data blob: open succeeds so
-    // list works, and only the compressed stream refuses with Unsupported.
+TEST_CASE("wim reader refuses an XPRESS stream per entry") {
+    // NOTE: stored metadata with one XPRESS-flagged data blob: open
+    // succeeds so list works, and only the compressed stream refuses with
+    // Unsupported. LZX blobs decode (see lzx_test.cpp).
     wim::test::TestWim spec;
-    spec.flags = 0x00040002;
+    spec.flags = 0x00020002;
     spec.chunkSize = 32768;
     wim::test::TestFile file;
     file.path = "z.bin";

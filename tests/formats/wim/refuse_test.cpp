@@ -115,12 +115,13 @@ TEST_CASE("wim reader rejects ambiguous compression flags") {
     CHECK(reader.error().kind == ErrorKind::Malformed);
 }
 
-TEST_CASE("wim reader refuses wimlib compressed goldens") {
-    // NOTE: wl_xpress.wim, wl_lzx.wim and wl_lzms.wim were captured with
-    // wimlib-imagex 1.14.5 (--compress=xpress/lzx, --compress=LZMS --solid).
-    // Their metadata is compressed, so even open refuses: no new codec code
-    // exists in this workstream to decode them.
-    for (const std::string name : {"wl_xpress.wim", "wl_lzx.wim", "wl_lzms.wim"}) {
+TEST_CASE("wim reader refuses wimlib XPRESS and LZMS goldens") {
+    // NOTE: wl_xpress.wim and wl_lzms.wim were captured with
+    // wimlib-imagex 1.14.5 (--compress=xpress, --compress=LZMS --solid).
+    // Their metadata is compressed, so even open refuses: XPRESS is a
+    // different algorithm and LZMS is out of scope. LZX goldens decode
+    // (see lzx_test.cpp).
+    for (const std::string name : {"wl_xpress.wim", "wl_lzms.wim"}) {
         auto reader = openBytes(golden(name));
         REQUIRE_FALSE(reader);
         CHECK(reader.error().kind == ErrorKind::Unsupported);

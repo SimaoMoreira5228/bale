@@ -11,6 +11,16 @@
 
 namespace bale::cab {
 
+// NOTE: WIM reuses this decoder with its own framing ([MS-WIM] chunk layout
+// plus the public WIM LZX notes: no stream header, 1 flag + 16/24-bit block
+// sizes, per-chunk E8 outside the core, no 32 KiB alignment padding). CAB is
+// the default and its path is unchanged; WIM framing lives behind the flag.
+
+enum class LzxFraming : std::uint8_t {
+    Cab,
+    Wim,
+};
+
 // NOTE: clean-room LZX decoder written from the public format description in
 // [MS-PATCH] (Microsoft LZX DELTA spec, whose sections 2.1 and 2.3 through 2.7
 // specify the base LZX bitstream) and the cabinet framing in [MS-CAB]. CAB
@@ -24,7 +34,8 @@ class LzxDecoder {
         bool starved = false;
     };
 
-    [[nodiscard]] static Result<LzxDecoder> create(unsigned windowBits, std::uint64_t totalOut);
+    [[nodiscard]] static Result<LzxDecoder>
+    create(unsigned windowBits, std::uint64_t totalOut, LzxFraming framing = LzxFraming::Cab);
 
     LzxDecoder(LzxDecoder&& other) noexcept = default;
     LzxDecoder& operator=(LzxDecoder&& other) noexcept = default;
@@ -51,7 +62,7 @@ class LzxDecoder {
         InRaw,
     };
 
-    explicit LzxDecoder(unsigned windowBits);
+    explicit LzxDecoder(unsigned windowBits, LzxFraming framing = LzxFraming::Cab);
 
     [[nodiscard]] bool fillBits(unsigned count);
     [[nodiscard]] std::uint32_t takeBits(unsigned count);
@@ -121,6 +132,7 @@ class LzxDecoder {
     bool atEnd_ = false;
     bool padPending_ = false;
     Phase phase_ = Phase::NeedStreamHeader;
+    LzxFraming framing_ = LzxFraming::Cab;
     bool flagRead_ = false;
     bool e8Enabled_ = false;
     bool e8SizeRead_ = false;
@@ -130,6 +142,8 @@ class LzxDecoder {
     bool symActive_ = false;
     bool rawPad_ = false;
     bool rawRepeatRead_ = false;
+    bool sizeFlagRead_ = false;
+    bool sizeIsDefault_ = false;
     bool finished_ = false;
     std::uint8_t rawRepeat_[12] = {};
 };
