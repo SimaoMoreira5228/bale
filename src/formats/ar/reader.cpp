@@ -33,12 +33,12 @@ bool isGnuReference(std::string_view raw) {
 Result<std::uint64_t> parseTableOffset(std::string_view raw, std::uint64_t at) {
     std::uint64_t value = 0;
     for (char digit : raw.substr(1)) {
-        auto scaled = checkedMul<std::uint64_t>(value, 10);
+        auto scaled = checkedMul(value, 10u);
         if (!scaled) {
             return fail(ErrorKind::Malformed, "ar string table offset overflows", at);
         }
 
-        auto next = checkedAdd<std::uint64_t>(*scaled, static_cast<std::uint64_t>(digit - '0'));
+        auto next = checkedAdd(*scaled, static_cast<std::uint64_t>(digit - '0'));
         if (!next) {
             return fail(ErrorKind::Malformed, "ar string table offset overflows", at);
         }
@@ -52,7 +52,7 @@ Result<std::uint64_t> parseTableOffset(std::string_view raw, std::uint64_t at) {
 Result<Reader> Reader::open(File file, const Limits& limits) {
     auto size = file.size();
     if (!size) {
-        return std::unexpected(size.error());
+        return tl::unexpected<Error>(size.error());
     }
 
     std::array<std::byte, magic.size()> head{};
@@ -62,7 +62,7 @@ Result<Reader> Reader::open(File file, const Limits& limits) {
 
     auto read = file.readExactAt(0, head);
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
     if (!looksLikeAr(head)) {
         return fail(ErrorKind::Malformed, "not an ar archive");
@@ -71,7 +71,7 @@ Result<Reader> Reader::open(File file, const Limits& limits) {
     Reader reader(std::move(file), limits);
     auto indexed = reader.index(*size);
     if (!indexed) {
-        return std::unexpected(indexed.error());
+        return tl::unexpected<Error>(indexed.error());
     }
     return reader;
 }
@@ -91,17 +91,17 @@ Result<void> Reader::index(std::uint64_t fileSize) {
         std::array<std::byte, headerSize> header{};
         auto read = file_.readExactAt(offset, header);
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
 
         auto member = parseMember(header, offset);
         if (!member) {
-            return std::unexpected(member.error());
+            return tl::unexpected<Error>(member.error());
         }
 
         auto added = addMember(*member, fileSize);
         if (!added) {
-            return std::unexpected(added.error());
+            return tl::unexpected<Error>(added.error());
         }
 
         auto dataEnd = checkedAdd(member->dataOffset, member->size);
@@ -150,7 +150,7 @@ Result<void> Reader::addMember(const Member& member, std::uint64_t fileSize) {
         auto read =
             file_.readExactAt(member.dataOffset, std::as_writable_bytes(std::span(stringTable_)));
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         hasStringTable_ = true;
         return {};
@@ -167,13 +167,13 @@ Result<void> Reader::addMember(const Member& member, std::uint64_t fileSize) {
     if (isGnuReference(name)) {
         auto resolved = resolveGnuName(member);
         if (!resolved) {
-            return std::unexpected(resolved.error());
+            return tl::unexpected<Error>(resolved.error());
         }
         name = *resolved;
     } else if (name.starts_with("#1/")) {
         auto extended = resolveBsdName(member, name, dataOffset, size);
         if (!extended) {
-            return std::unexpected(extended.error());
+            return tl::unexpected<Error>(extended.error());
         }
     } else if (name.starts_with('/') || name.starts_with('#')) {
         return fail(ErrorKind::Unsupported, "unknown ar member name form", member.headerOffset);
@@ -245,7 +245,7 @@ Result<std::string_view> Reader::resolveGnuName(const Member& member) {
 
     auto at = parseTableOffset(member.rawName, member.headerOffset);
     if (!at) {
-        return std::unexpected(at.error());
+        return tl::unexpected<Error>(at.error());
     }
     if (*at >= stringTable_.size()) {
         return fail(
@@ -283,7 +283,7 @@ Result<void> Reader::resolveBsdName(
             return fail(ErrorKind::Unsupported, "unknown ar member name form", member.headerOffset);
         }
 
-        auto scaled = checkedMul<std::uint64_t>(length, 10);
+        auto scaled = checkedMul(length, 10u);
         if (!scaled) {
             return fail(
                 ErrorKind::Malformed,
@@ -292,7 +292,7 @@ Result<void> Reader::resolveBsdName(
             );
         }
 
-        auto next = checkedAdd<std::uint64_t>(*scaled, static_cast<std::uint64_t>(digit - '0'));
+        auto next = checkedAdd(*scaled, static_cast<std::uint64_t>(digit - '0'));
         if (!next) {
             return fail(
                 ErrorKind::Malformed,
@@ -327,7 +327,7 @@ Result<void> Reader::resolveBsdName(
     auto read =
         file_.readExactAt(member.dataOffset, std::as_writable_bytes(std::span(extendedName_)));
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
 
     name = extendedName_;

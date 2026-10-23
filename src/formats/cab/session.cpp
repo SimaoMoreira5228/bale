@@ -45,13 +45,13 @@ Result<Session> Session::start(File file, const Folder& folder, Inflater* inflat
     if (folder.method == methodLzx) {
         auto decoder = LzxDecoder::create(folder.windowBits, folder.uncompressedBytes);
         if (!decoder) {
-            return std::unexpected(decoder.error());
+            return tl::unexpected<Error>(decoder.error());
         }
         session.lzx_.emplace(std::move(*decoder));
     }
     if (folder.method == methodMszip && inflater != nullptr) {
         if (auto reset = inflater->reset(); !reset) {
-            return std::unexpected(reset.error());
+            return tl::unexpected<Error>(reset.error());
         }
     }
     return session;
@@ -112,7 +112,7 @@ Result<void> Session::loadBlock(std::size_t block) {
     payload_.resize(*bytes);
     auto read = file_.readExactAt(info.payloadOffset, std::span(payload_));
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
 
     if (info.checksum != 0) {
@@ -173,7 +173,7 @@ Result<std::span<const std::byte>> Session::nextStored() {
             }
             auto loaded = loadBlock(block_);
             if (!loaded) {
-                return std::unexpected(loaded.error());
+                return tl::unexpected<Error>(loaded.error());
             }
             blockLoaded_ = true;
             blockPosition_ = 0;
@@ -202,7 +202,7 @@ Result<std::span<const std::byte>> Session::nextStored() {
 
         auto part = deliver(chunk);
         if (!part) {
-            return std::unexpected(part.error());
+            return tl::unexpected<Error>(part.error());
         }
         if (!part->empty()) {
             return *part;
@@ -226,7 +226,7 @@ Result<std::span<const std::byte>> Session::nextMszip() {
         if (!blockLoaded_) {
             auto loaded = loadBlock(block_);
             if (!loaded) {
-                return std::unexpected(loaded.error());
+                return tl::unexpected<Error>(loaded.error());
             }
             const DataBlock& info = folder_.blocks[block_];
             if (inflater_ == nullptr) {
@@ -245,13 +245,13 @@ Result<std::span<const std::byte>> Session::nextMszip() {
             }
             if (streamEnded_) {
                 if (auto reset = inflater_->reset(); !reset) {
-                    return std::unexpected(reset.error());
+                    return tl::unexpected<Error>(reset.error());
                 }
                 streamEnded_ = false;
                 if (!mszipHistory_.empty()) {
                     auto primed = inflater_->setDictionary(mszipHistory_);
                     if (!primed) {
-                        return std::unexpected(primed.error());
+                        return tl::unexpected<Error>(primed.error());
                     }
                 }
             }
@@ -288,7 +288,7 @@ Result<std::span<const std::byte>> Session::nextMszip() {
         if (!step) {
             auto error = step.error();
             error.offset = info.payloadOffset;
-            return std::unexpected(error);
+            return tl::unexpected<Error>(error);
         }
         blockPosition_ += step->consumed;
         blockProduced_ += step->produced;
@@ -316,7 +316,7 @@ Result<std::span<const std::byte>> Session::nextMszip() {
 
         auto part = deliver(std::span<const std::byte>(window.data(), step->produced));
         if (!part) {
-            return std::unexpected(part.error());
+            return tl::unexpected<Error>(part.error());
         }
         mszipHistory_.insert(
             mszipHistory_.end(),
@@ -347,7 +347,7 @@ Result<std::span<const std::byte>> Session::nextLzx() {
         if (!tail_.empty()) {
             auto part = deliver(tail_);
             if (!part) {
-                return std::unexpected(part.error());
+                return tl::unexpected<Error>(part.error());
             }
             tail_ = {};
             if (!part->empty()) {
@@ -366,7 +366,7 @@ Result<std::span<const std::byte>> Session::nextLzx() {
             }
             auto done = decoder.finish();
             if (!done) {
-                return std::unexpected(done.error());
+                return tl::unexpected<Error>(done.error());
             }
             tail_ = *done;
             lzxDone_ = true;
@@ -376,11 +376,11 @@ Result<std::span<const std::byte>> Session::nextLzx() {
         if (lzxStarved_ && inputBlock_ < folder_.blocks.size()) {
             auto loaded = loadBlock(inputBlock_);
             if (!loaded) {
-                return std::unexpected(loaded.error());
+                return tl::unexpected<Error>(loaded.error());
             }
             auto pushed = decoder.push(payload_);
             if (!pushed) {
-                return std::unexpected(pushed.error());
+                return tl::unexpected<Error>(pushed.error());
             }
             ++inputBlock_;
             lzxStarved_ = false;
@@ -395,7 +395,7 @@ Result<std::span<const std::byte>> Session::nextLzx() {
         auto window = output_.first(static_cast<std::size_t>(room));
         auto decoded = decoder.decode(std::span<std::byte>(window));
         if (!decoded) {
-            return std::unexpected(decoded.error());
+            return tl::unexpected<Error>(decoded.error());
         }
         lzxStarved_ = decoded->starved;
 
@@ -418,7 +418,7 @@ Result<std::span<const std::byte>> Session::nextLzx() {
 
         auto part = deliver(std::span<const std::byte>(window.data(), decoded->produced));
         if (!part) {
-            return std::unexpected(part.error());
+            return tl::unexpected<Error>(part.error());
         }
         if (!part->empty()) {
             return *part;

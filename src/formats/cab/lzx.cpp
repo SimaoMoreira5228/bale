@@ -321,7 +321,7 @@ Result<bool> LzxDecoder::readLengths() {
         if (lenNeedCode_) {
             auto second = decodeSymbol(pretree_);
             if (!second) {
-                return std::unexpected(second.error());
+                return tl::unexpected<Error>(second.error());
             }
             if (!*second) {
                 return false;
@@ -340,7 +340,7 @@ Result<bool> LzxDecoder::readLengths() {
         if (!lenCodeRead_) {
             auto code = decodeSymbol(pretree_);
             if (!code) {
-                return std::unexpected(code.error());
+                return tl::unexpected<Error>(code.error());
             }
             if (!*code) {
                 return false;
@@ -384,7 +384,7 @@ Result<bool> LzxDecoder::readLengths() {
 
     auto built = buildTree(*tree, count);
     if (!built) {
-        return std::unexpected(built.error());
+        return tl::unexpected<Error>(built.error());
     }
     if (treeTarget_ == 1) {
         prevMain_ = mainTree_.lengths;
@@ -415,7 +415,7 @@ Result<bool> LzxDecoder::readTrees() {
             }
             auto built = buildTree(alignedTree_, alignedSymbols);
             if (!built) {
-                return std::unexpected(built.error());
+                return tl::unexpected<Error>(built.error());
             }
             treeStage_ = 1;
             treeTarget_ = 0;
@@ -438,7 +438,7 @@ Result<bool> LzxDecoder::readTrees() {
         }
         auto built = buildTree(pretree_, pretreeSymbols);
         if (!built) {
-            return std::unexpected(built.error());
+            return tl::unexpected<Error>(built.error());
         }
         treeStage_ = 2;
         lenIndex_ = treeTarget_ == 1 ? 256 : 0;
@@ -449,7 +449,7 @@ Result<bool> LzxDecoder::readTrees() {
 
     auto done = readLengths();
     if (!done) {
-        return std::unexpected(done.error());
+        return tl::unexpected<Error>(done.error());
     }
     if (!*done) {
         return false;
@@ -470,7 +470,7 @@ Result<bool> LzxDecoder::readToken() {
     if (tokStage_ == 0) {
         auto symbol = decodeSymbol(mainTree_);
         if (!symbol) {
-            return std::unexpected(symbol.error());
+            return tl::unexpected<Error>(symbol.error());
         }
         if (!*symbol) {
             return false;
@@ -497,7 +497,7 @@ Result<bool> LzxDecoder::readToken() {
     if (tokStage_ == 1) {
         auto symbol = decodeSymbol(lengthTree_);
         if (!symbol) {
-            return std::unexpected(symbol.error());
+            return tl::unexpected<Error>(symbol.error());
         }
         if (!*symbol) {
             return false;
@@ -537,7 +537,7 @@ Result<bool> LzxDecoder::readToken() {
 
     auto symbol = decodeSymbol(alignedTree_);
     if (!symbol) {
-        return std::unexpected(symbol.error());
+        return tl::unexpected<Error>(symbol.error());
     }
     if (!*symbol) {
         return false;
@@ -782,7 +782,7 @@ Result<LzxDecoder::Output> LzxDecoder::decode(std::span<std::byte> out) {
 
         auto stepped = advance();
         if (!stepped) {
-            return std::unexpected(stepped.error());
+            return tl::unexpected<Error>(stepped.error());
         }
         if (!*stepped) {
             result.starved = true;

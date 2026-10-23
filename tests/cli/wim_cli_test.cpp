@@ -97,37 +97,40 @@ TEST_CASE("wim cli extracts a contained symlink when allowed") {
 #endif
 }
 
-TEST_CASE("wim cli converts an LZX image") {
-    // NOTE: lzx_multi.wim exercises the convert-out pipeline over
-    // LZX-decoded streams (multi-chunk file plus links and streams).
-    test::TempPath temp;
-    std::error_code ignored;
-    std::filesystem::create_directories(temp.path(), ignored);
-    std::string converted = (temp.path() / "lzx.zip").string();
-    cli::ConvertOptions options;
-    options.format = cli::OutputFormat::Zip;
-    ExitCode code = cli::convertArchive(goldenWim("lzx_multi.wim").string(), converted, options);
-    CHECK(code == ExitCode::Ok);
-    cli::ListOptions list;
-    code = cli::listArchive(converted, list);
-    CHECK(code == ExitCode::Ok);
-}
+TEST_CASE("wim cli converts LZX and selected images") {
+    SUBCASE("LZX image") {
+        // NOTE: lzx_multi.wim exercises the convert-out pipeline over
+        // LZX-decoded streams (multi-chunk file plus links and streams).
+        test::TempPath temp;
+        std::error_code ignored;
+        std::filesystem::create_directories(temp.path(), ignored);
+        std::string converted = (temp.path() / "lzx.zip").string();
+        cli::ConvertOptions options;
+        options.format = cli::OutputFormat::Zip;
+        ExitCode code =
+            cli::convertArchive(goldenWim("lzx_multi.wim").string(), converted, options);
+        CHECK(code == ExitCode::Ok);
+        cli::ListOptions list;
+        code = cli::listArchive(converted, list);
+        CHECK(code == ExitCode::Ok);
+    }
 
-TEST_CASE("wim cli converts the selected image") {
-    test::TempPath temp;
-    std::error_code ignored;
-    std::filesystem::create_directories(temp.path(), ignored);
-    std::string converted = (temp.path() / "image3.zip").string();
-    cli::ConvertOptions options;
-    options.format = cli::OutputFormat::Zip;
-    options.imageIndex = 3;
-    ExitCode code = cli::convertArchive(goldenWim("multi.wim").string(), converted, options);
-    CHECK(code == ExitCode::Ok);
-    // NOTE: listing the converted zip proves convert-out carries the
-    // selected image's entries through the generic pipeline.
-    cli::ListOptions list;
-    code = cli::listArchive(converted, list);
-    CHECK(code == ExitCode::Ok);
+    SUBCASE("selected image") {
+        test::TempPath temp;
+        std::error_code ignored;
+        std::filesystem::create_directories(temp.path(), ignored);
+        std::string converted = (temp.path() / "image3.zip").string();
+        cli::ConvertOptions options;
+        options.format = cli::OutputFormat::Zip;
+        options.imageIndex = 3;
+        ExitCode code = cli::convertArchive(goldenWim("multi.wim").string(), converted, options);
+        CHECK(code == ExitCode::Ok);
+        // NOTE: listing the converted zip proves convert-out carries the
+        // selected image's entries through the generic pipeline.
+        cli::ListOptions list;
+        code = cli::listArchive(converted, list);
+        CHECK(code == ExitCode::Ok);
+    }
 }
 
 TEST_CASE("wim cli rejects --image for other formats") {

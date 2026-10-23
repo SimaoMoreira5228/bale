@@ -97,7 +97,7 @@ Result<void> Writer::startPipeline() {
         options_.chunkPolicy == ChunkPolicy::Cdc ? options_.cdc.max : options_.chunkSize;
     auto pipeline = ChunkPipeline::create(options_.compression, buffer, options_.workers);
     if (!pipeline) {
-        return std::unexpected(pipeline.error());
+        return tl::unexpected<Error>(pipeline.error());
     }
     pipeline_ = std::move(*pipeline);
     return {};
@@ -106,7 +106,7 @@ Result<void> Writer::startPipeline() {
 Result<Writer> Writer::create(File file, const WriterOptions& options) {
     auto valid = checkOptions(options);
     if (!valid) {
-        return std::unexpected(valid.error());
+        return tl::unexpected<Error>(valid.error());
     }
     if (options.experimentalEncryption) {
         return fail(
@@ -118,7 +118,7 @@ Result<Writer> Writer::create(File file, const WriterOptions& options) {
     Writer writer(std::move(file), options);
     auto started = writer.startPipeline();
     if (!started) {
-        return std::unexpected(started.error());
+        return tl::unexpected<Error>(started.error());
     }
 
     Superblock superblock;
@@ -132,7 +132,7 @@ Result<Writer> Writer::create(File file, const WriterOptions& options) {
     auto encoded = encodeSuperblock(superblock);
     auto written = writer.appendRaw(encoded);
     if (!written) {
-        return std::unexpected(written.error());
+        return tl::unexpected<Error>(written.error());
     }
     return writer;
 }
@@ -140,7 +140,7 @@ Result<Writer> Writer::create(File file, const WriterOptions& options) {
 Result<Writer> Writer::append(File file, const WriterOptions& options) {
     auto valid = checkOptions(options);
     if (!valid) {
-        return std::unexpected(valid.error());
+        return tl::unexpected<Error>(valid.error());
     }
     if (options.experimentalEncryption) {
         return fail(
@@ -151,11 +151,11 @@ Result<Writer> Writer::append(File file, const WriterOptions& options) {
 
     auto readFile = file.duplicate();
     if (!readFile) {
-        return std::unexpected(readFile.error());
+        return tl::unexpected<Error>(readFile.error());
     }
     auto reader = Reader::open(std::move(*readFile));
     if (!reader) {
-        return std::unexpected(reader.error());
+        return tl::unexpected<Error>(reader.error());
     }
     if ((reader->superblock().requiredFeatures & encryptedRequiredFeature) != 0) {
         return fail(ErrorKind::PasswordRequired, "archive is encrypted");
@@ -169,7 +169,7 @@ Result<Writer> Writer::append(File file, const WriterOptions& options) {
     }
     auto verified = reader->verify(VerifyMode::Structure);
     if (!verified) {
-        return std::unexpected(verified.error());
+        return tl::unexpected<Error>(verified.error());
     }
     if (reader->commit().generation == std::numeric_limits<std::uint64_t>::max()) {
         return fail(ErrorKind::LimitExceeded, "archive generation limit exceeded");
@@ -178,13 +178,13 @@ Result<Writer> Writer::append(File file, const WriterOptions& options) {
     Writer writer(std::move(file), options);
     auto started = writer.startPipeline();
     if (!started) {
-        return std::unexpected(started.error());
+        return tl::unexpected<Error>(started.error());
     }
 
     std::uint64_t position = reader->footerOffset() + footerSize;
     auto truncated = writer.file_.truncate(position);
     if (!truncated) {
-        return std::unexpected(truncated.error());
+        return tl::unexpected<Error>(truncated.error());
     }
 
     writer.position_ = position;
@@ -203,7 +203,7 @@ Result<Writer> Writer::append(File file, const WriterOptions& options) {
 
 Result<void> Writer::check() const {
     if (failure_) {
-        return std::unexpected(*failure_);
+        return tl::unexpected<Error>(*failure_);
     }
     if (finished_) {
         return fail(ErrorKind::Malformed, "archive already finished");
@@ -216,7 +216,7 @@ Result<void> Writer::poison(const Error& error) {
     if (pipeline_) {
         pipeline_->cancel();
     }
-    return std::unexpected(error);
+    return tl::unexpected<Error>(error);
 }
 
 Writer::NameRef Writer::storeName(std::string_view path) {
@@ -235,7 +235,7 @@ std::string_view Writer::nameAt(std::size_t offset, std::size_t size) const {
 Result<Writer::PendingEntry*> Writer::beginEntry(std::string_view path, EntryKind kind) {
     auto usable = check();
     if (!usable) {
-        return std::unexpected(usable.error());
+        return tl::unexpected<Error>(usable.error());
     }
     if (openFile_) {
         return fail(ErrorKind::Malformed, "previous file entry is still open");
@@ -246,7 +246,7 @@ Result<Writer::PendingEntry*> Writer::beginEntry(std::string_view path, EntryKin
 
     auto valid = validateEntryPath(path, options_.limits, scratch_);
     if (!valid) {
-        return std::unexpected(valid.error());
+        return tl::unexpected<Error>(valid.error());
     }
 
     auto name = storeName(path);
@@ -259,7 +259,7 @@ Result<Writer::PendingEntry*> Writer::beginEntry(std::string_view path, EntryKin
 }
 
 Result<void> Writer::appendRaw(std::span<const std::byte> data) {
-    auto end = checkedAdd<std::uint64_t>(position_, data.size());
+    auto end = checkedAdd(position_, data.size());
     if (!end) {
         return poison(Error{.kind = ErrorKind::LimitExceeded, .what = "archive size overflows"});
     }
@@ -325,7 +325,7 @@ Result<Writer::RecordSpan> Writer::writeRecord(
          {std::span<const std::byte>(prefix), head, body, std::span<const std::byte>(trailer)}) {
         auto written = appendRaw(part);
         if (!written) {
-            return std::unexpected(written.error());
+            return tl::unexpected<Error>(written.error());
         }
     }
 
@@ -341,7 +341,7 @@ Result<void> Writer::addDirectory(std::string_view path, const EntryAttributes& 
 
     auto entry = beginEntry(path, EntryKind::Directory);
     if (!entry) {
-        return std::unexpected(entry.error());
+        return tl::unexpected<Error>(entry.error());
     }
     (*entry)->mtimeNanoseconds = attributes.mtimeNanoseconds;
     (*entry)->mode = attributes.mode;
@@ -360,7 +360,7 @@ Result<void> Writer::addSymlink(
 
     auto entry = beginEntry(path, EntryKind::Symlink);
     if (!entry) {
-        return std::unexpected(entry.error());
+        return tl::unexpected<Error>(entry.error());
     }
     std::size_t position = entries_.size() - 1;
 
@@ -379,7 +379,7 @@ Result<void> Writer::addHardLink(std::string_view path, std::string_view target)
 
     auto entry = beginEntry(path, EntryKind::HardLink);
     if (!entry) {
-        return std::unexpected(entry.error());
+        return tl::unexpected<Error>(entry.error());
     }
     std::size_t position = entries_.size() - 1;
 
@@ -561,14 +561,14 @@ Result<Writer::RecordSpan> Writer::writeManifest(Blake3Digest& digest) {
         objectIds_ = std::move(manifest.objectIds);
     }
     if (!encoded) {
-        return std::unexpected(poison(encoded.error()).error());
+        return tl::unexpected<Error>(poison(encoded.error()).error());
     }
 
     if (!encrypted_) {
         Manifest decoded;
         auto valid = decodeManifest(payload_, 0, options_.limits, decoded);
         if (!valid) {
-            return std::unexpected(poison(valid.error()).error());
+            return tl::unexpected<Error>(poison(valid.error()).error());
         }
 
         digest = Blake3::of(HashDomain::Manifest, payload_);
@@ -578,12 +578,12 @@ Result<Writer::RecordSpan> Writer::writeManifest(Blake3Digest& digest) {
     std::vector<std::byte> plain(payload_.begin(), payload_.end());
     auto nonce = makeRecordNonce();
     if (!nonce) {
-        return std::unexpected(poison(nonce.error()).error());
+        return tl::unexpected<Error>(poison(nonce.error()).error());
     }
     auto aad = manifestAad(archiveIdSpan(archiveId_), epoch_);
     auto sealed = crypto::seal(dataKey_.bytes(), *nonce, plain, aad);
     if (!sealed) {
-        return std::unexpected(poison(sealed.error()).error());
+        return tl::unexpected<Error>(poison(sealed.error()).error());
     }
     payload_.clear();
     payload_.insert(payload_.end(), nonce->begin(), nonce->end());
@@ -598,7 +598,7 @@ Result<Writer::RecordSpan> Writer::writeIndex(Blake3Digest& digest) {
 
     auto encoded = encodeIndex(sorted, payload_);
     if (!encoded) {
-        return std::unexpected(poison(encoded.error()).error());
+        return tl::unexpected<Error>(poison(encoded.error()).error());
     }
 
     if (!encrypted_) {
@@ -608,12 +608,12 @@ Result<Writer::RecordSpan> Writer::writeIndex(Blake3Digest& digest) {
     std::vector<std::byte> plain(payload_.begin(), payload_.end());
     auto nonce = makeRecordNonce();
     if (!nonce) {
-        return std::unexpected(poison(nonce.error()).error());
+        return tl::unexpected<Error>(poison(nonce.error()).error());
     }
     auto aad = indexAad(archiveIdSpan(archiveId_), epoch_);
     auto sealed = crypto::seal(dataKey_.bytes(), *nonce, plain, aad);
     if (!sealed) {
-        return std::unexpected(poison(sealed.error()).error());
+        return tl::unexpected<Error>(poison(sealed.error()).error());
     }
     payload_.clear();
     payload_.insert(payload_.end(), nonce->begin(), nonce->end());
@@ -653,7 +653,7 @@ Result<void> Writer::writeSignatures(
         }
         auto made = makeSignature(seed.bytes(), id, generation, epoch, digest);
         if (!made) {
-            return std::unexpected(made.error());
+            return tl::unexpected<Error>(made.error());
         }
         std::vector<std::byte> payload;
         if (auto encoded = encodeSignature(*made, payload); !encoded) {
@@ -668,7 +668,7 @@ Result<void> Writer::writeSignatures(
             encrypted_ ? encryptedRecordFlag : 0
         );
         if (!record) {
-            return std::unexpected(record.error());
+            return tl::unexpected<Error>(record.error());
         }
     }
     return {};
@@ -677,23 +677,23 @@ Result<void> Writer::writeSignatures(
 Result<WriteSummary> Writer::finish() {
     auto usable = check();
     if (!usable) {
-        return std::unexpected(usable.error());
+        return tl::unexpected<Error>(usable.error());
     }
     if (openFile_) {
         return fail(ErrorKind::Malformed, "file entry is still open");
     }
     auto drained = pump(true);
     if (!drained) {
-        return std::unexpected(drained.error());
+        return tl::unexpected<Error>(drained.error());
     }
 
     auto sorted = sortEntries();
     if (!sorted) {
-        return std::unexpected(sorted.error());
+        return tl::unexpected<Error>(sorted.error());
     }
     auto linked = resolveHardLinks();
     if (!linked) {
-        return std::unexpected(linked.error());
+        return tl::unexpected<Error>(linked.error());
     }
 
     Commit commit;
@@ -709,49 +709,49 @@ Result<WriteSummary> Writer::finish() {
     }
     auto manifest = writeManifest(commit.manifest.digest);
     if (!manifest) {
-        return std::unexpected(manifest.error());
+        return tl::unexpected<Error>(manifest.error());
     }
     commit.manifest.offset = manifest->offset;
     commit.manifest.length = manifest->length;
 
     auto index = writeIndex(commit.index.digest);
     if (!index) {
-        return std::unexpected(index.error());
+        return tl::unexpected<Error>(index.error());
     }
     commit.index.offset = index->offset;
     commit.index.length = index->length;
 
     auto encoded = encodeCommit(commit, payload_);
     if (!encoded) {
-        return std::unexpected(poison(encoded.error()).error());
+        return tl::unexpected<Error>(poison(encoded.error()).error());
     }
     if (!encrypted_) {
         auto commitDigest = Blake3::of(HashDomain::Commit, payload_);
         auto record = writeRecord(RecordType::Commit, payload_, {});
         if (!record) {
-            return std::unexpected(record.error());
+            return tl::unexpected<Error>(record.error());
         }
         if (auto signed_ = writeSignatures(commitDigest, commit.generation, commit.epoch);
             !signed_) {
-            return std::unexpected(poison(signed_.error()).error());
+            return tl::unexpected<Error>(poison(signed_.error()).error());
         }
         ParityDescriptor parity;
         if (options_.parity.enabled) {
             auto emitted = emitParity(*manifest, *index, *record);
             if (!emitted) {
-                return std::unexpected(emitted.error());
+                return tl::unexpected<Error>(emitted.error());
             }
             parity = *emitted;
         }
         auto flushed = flushOutput();
         if (!flushed) {
-            return std::unexpected(flushed.error());
+            return tl::unexpected<Error>(flushed.error());
         }
 
         if (options_.durable) {
             auto synced = file_.sync();
             if (!synced) {
-                return std::unexpected(poison(synced.error()).error());
+                return tl::unexpected<Error>(poison(synced.error()).error());
             }
         }
 
@@ -763,17 +763,17 @@ Result<WriteSummary> Writer::finish() {
         footer.parity = parity;
         auto written = appendRaw(encodeFooter(footer));
         if (!written) {
-            return std::unexpected(written.error());
+            return tl::unexpected<Error>(written.error());
         }
         flushed = flushOutput();
         if (!flushed) {
-            return std::unexpected(flushed.error());
+            return tl::unexpected<Error>(flushed.error());
         }
 
         if (options_.durable) {
             auto synced = file_.sync();
             if (!synced) {
-                return std::unexpected(poison(synced.error()).error());
+                return tl::unexpected<Error>(poison(synced.error()).error());
             }
         }
 
@@ -790,12 +790,12 @@ Result<WriteSummary> Writer::finish() {
     std::vector<std::byte> commitPlain(payload_.begin(), payload_.end());
     auto commitNonce = makeRecordNonce();
     if (!commitNonce) {
-        return std::unexpected(poison(commitNonce.error()).error());
+        return tl::unexpected<Error>(poison(commitNonce.error()).error());
     }
     auto commitAadBytes = commitAad(archiveIdSpan(archiveId_), epoch_);
     auto commitSealed = crypto::seal(dataKey_.bytes(), *commitNonce, commitPlain, commitAadBytes);
     if (!commitSealed) {
-        return std::unexpected(poison(commitSealed.error()).error());
+        return tl::unexpected<Error>(poison(commitSealed.error()).error());
     }
     payload_.clear();
     payload_.insert(payload_.end(), commitNonce->begin(), commitNonce->end());
@@ -804,28 +804,28 @@ Result<WriteSummary> Writer::finish() {
     auto commitRecord =
         writeRecord(RecordType::Commit, payload_, {}, CodecId::Raw, 0, encryptedRecordFlag);
     if (!commitRecord) {
-        return std::unexpected(commitRecord.error());
+        return tl::unexpected<Error>(commitRecord.error());
     }
     if (auto signed_ = writeSignatures(commitDigest, commit.generation, commit.epoch); !signed_) {
-        return std::unexpected(poison(signed_.error()).error());
+        return tl::unexpected<Error>(poison(signed_.error()).error());
     }
     ParityDescriptor parity;
     if (options_.parity.enabled) {
         auto emitted = emitParity(*manifest, *index, *commitRecord);
         if (!emitted) {
-            return std::unexpected(emitted.error());
+            return tl::unexpected<Error>(emitted.error());
         }
         parity = *emitted;
     }
     auto flushed = flushOutput();
     if (!flushed) {
-        return std::unexpected(flushed.error());
+        return tl::unexpected<Error>(flushed.error());
     }
 
     if (options_.durable) {
         auto synced = file_.sync();
         if (!synced) {
-            return std::unexpected(poison(synced.error()).error());
+            return tl::unexpected<Error>(poison(synced.error()).error());
         }
     }
 
@@ -837,17 +837,17 @@ Result<WriteSummary> Writer::finish() {
     footer.parity = parity;
     auto written = appendRaw(encodeFooter(footer));
     if (!written) {
-        return std::unexpected(written.error());
+        return tl::unexpected<Error>(written.error());
     }
     flushed = flushOutput();
     if (!flushed) {
-        return std::unexpected(flushed.error());
+        return tl::unexpected<Error>(flushed.error());
     }
 
     if (options_.durable) {
         auto synced = file_.sync();
         if (!synced) {
-            return std::unexpected(poison(synced.error()).error());
+            return tl::unexpected<Error>(poison(synced.error()).error());
         }
     }
 

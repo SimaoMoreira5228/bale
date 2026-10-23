@@ -90,7 +90,6 @@ Reader openArchive(const std::filesystem::path& path) {
 
 }
 
-
 TEST_CASE("cdc cuts match the published vectors") {
     CdcParams params{
         .min = 16,

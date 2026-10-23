@@ -37,7 +37,7 @@ readTerminated(ByteReader& reader, std::size_t limit, std::string_view tooLong) 
     std::string_view text(reinterpret_cast<const char*>(rest.data()), length);
     auto skipped = reader.skip(length + 1);
     if (!skipped) {
-        return std::unexpected(skipped.error());
+        return tl::unexpected<Error>(skipped.error());
     }
     return text;
 }
@@ -68,7 +68,7 @@ parseHeader(std::span<const std::byte> data, const Limits& limits, std::uint64_t
     ByteReader reader(data, offset);
     auto fixed = reader.skip(fixedHeaderSize);
     if (!fixed) {
-        return std::unexpected(fixed.error());
+        return tl::unexpected<Error>(fixed.error());
     }
 
     if ((header.flags & flagExtra) != 0) {
@@ -94,7 +94,7 @@ parseHeader(std::span<const std::byte> data, const Limits& limits, std::uint64_t
     if ((header.flags & flagName) != 0) {
         auto name = readTerminated(reader, limits.maxNameLength, "gzip file name exceeds limit");
         if (!name) {
-            return std::unexpected(name.error());
+            return tl::unexpected<Error>(name.error());
         }
         header.name = *name;
     }
@@ -103,7 +103,7 @@ parseHeader(std::span<const std::byte> data, const Limits& limits, std::uint64_t
         auto comment =
             readTerminated(reader, limits.maxCommentLength, "gzip comment exceeds limit");
         if (!comment) {
-            return std::unexpected(comment.error());
+            return tl::unexpected<Error>(comment.error());
         }
         header.comment = *comment;
     }

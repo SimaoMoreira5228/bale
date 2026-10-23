@@ -7,7 +7,7 @@ namespace bale {
 Result<FileInput> FileInput::open(File file, std::size_t capacity) {
     auto size = file.size();
     if (!size) {
-        return std::unexpected(size.error());
+        return tl::unexpected<Error>(size.error());
     }
 
     auto clipped = static_cast<std::size_t>(std::min<std::uint64_t>(capacity, *size));

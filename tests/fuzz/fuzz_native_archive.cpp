@@ -36,8 +36,8 @@ bool startsWith(
 }
 
 std::span<std::byte> recordPayload(Bytes& bytes, std::uint64_t offset, std::uint64_t length) {
-    if (!bale::fitsWithin<std::uint64_t>(offset, length, bytes.size()) ||
-        length < bale::recordFramingSize || !startsWith(bytes, offset, bale::recordMagic)) {
+    if (!bale::fitsWithin(offset, length, bytes.size()) || length < bale::recordFramingSize ||
+        !startsWith(bytes, offset, bale::recordMagic)) {
         return {};
     }
     return std::span(bytes).subspan(

@@ -173,6 +173,18 @@ TEST_CASE("TLV writer refuses out-of-order, duplicate and out-of-range field num
 }
 
 TEST_CASE("TLV reader rejects hostile structures with the offset of the bad field") {
+    SUBCASE("unsigned values must be a single minimal ULEB128 with no trailing bytes") {
+        auto data = bytes({0x02, 0x02, 0x05, 0x00, 0x04, 0x02, 0x80, 0x00});
+        TlvReader reader(data);
+        TlvField field;
+
+        REQUIRE(reader.next(field) == true);
+        CHECK(decodeTlvUnsigned(field).error().kind == ErrorKind::Malformed);
+
+        REQUIRE(reader.next(field) == true);
+        CHECK(decodeTlvUnsigned(field).error().kind == ErrorKind::Malformed);
+    }
+
     auto outOfOrder = tlvError({0x04, 0x00, 0x02, 0x00});
     CHECK(outOfOrder.kind == ErrorKind::Malformed);
     CHECK(outOfOrder.offset == 102);
@@ -195,18 +207,6 @@ TEST_CASE("TLV reader rejects hostile structures with the offset of the bad fiel
     );
     CHECK(tlvError({0x02}).kind == ErrorKind::Truncated);
     CHECK(tlvError({0x82}).kind == ErrorKind::Truncated);
-}
-
-TEST_CASE("TLV unsigned values must be a single minimal ULEB128 with no trailing bytes") {
-    auto data = bytes({0x02, 0x02, 0x05, 0x00, 0x04, 0x02, 0x80, 0x00});
-    TlvReader reader(data);
-    TlvField field;
-
-    REQUIRE(reader.next(field) == true);
-    CHECK(decodeTlvUnsigned(field).error().kind == ErrorKind::Malformed);
-
-    REQUIRE(reader.next(field) == true);
-    CHECK(decodeTlvUnsigned(field).error().kind == ErrorKind::Malformed);
 }
 
 TEST_CASE("TLV lists decode count and length-prefixed elements and reject hostile framing") {

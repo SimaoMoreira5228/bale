@@ -47,21 +47,21 @@ TEST_CASE("CRC-32 and CRC32C match their published check values") {
     CHECK(Crc32c::of(bytesOf("123456789")) == 0xE3069283);
     CHECK(Crc32::of({}) == 0);
     CHECK(Crc32c::of({}) == 0);
-}
 
-TEST_CASE("CRC32C matches the RFC 3720 iSCSI vectors") {
-    std::array<std::byte, 32> zeros{};
-    CHECK(Crc32c::of(zeros) == 0x8A9136AA);
+    SUBCASE("RFC 3720 iSCSI vectors") {
+        std::array<std::byte, 32> zeros{};
+        CHECK(Crc32c::of(zeros) == 0x8A9136AA);
 
-    std::array<std::byte, 32> ones{};
-    ones.fill(std::byte{0xFF});
-    CHECK(Crc32c::of(ones) == 0x62A8AB43);
+        std::array<std::byte, 32> ones{};
+        ones.fill(std::byte{0xFF});
+        CHECK(Crc32c::of(ones) == 0x62A8AB43);
 
-    std::array<std::byte, 32> ascending{};
-    for (std::size_t index = 0; index < ascending.size(); ++index) {
-        ascending[index] = static_cast<std::byte>(index);
+        std::array<std::byte, 32> ascending{};
+        for (std::size_t index = 0; index < ascending.size(); ++index) {
+            ascending[index] = static_cast<std::byte>(index);
+        }
+        CHECK(Crc32c::of(ascending) == 0x46DD794E);
     }
-    CHECK(Crc32c::of(ascending) == 0x46DD794E);
 }
 
 TEST_CASE("incremental updates at unaligned split points equal a single pass") {

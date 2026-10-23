@@ -36,30 +36,32 @@ std::string gzipNamed(std::string_view archive, std::string_view storedName) {
 
 }
 
-TEST_CASE("singleFileName trusts a gzip FNAME only when it is one safe component") {
-    CHECK(gzipNamed("downloads/archive.gz", "report.txt") == "report.txt");
-    CHECK(gzipNamed("downloads/archive.gz", "") == "archive");
-    CHECK(gzipNamed("downloads/archive.gz", "../../etc/passwd") == "archive");
-    CHECK(gzipNamed("downloads/archive.gz", "/etc/passwd") == "archive");
-    CHECK(gzipNamed("downloads/archive.gz", "sub/file.txt") == "archive");
-    CHECK(gzipNamed("downloads/archive.gz", "..") == "archive");
-    CHECK(gzipNamed("downloads/archive.gz", "caf\xE9.txt") == "archive");
-    CHECK(gzipNamed("downloads/archive.gz", "con") == "archive");
-}
+TEST_CASE("singleFileName trusts a safe gzip FNAME and falls back to the archive name") {
+    SUBCASE("safe FNAME wins") {
+        CHECK(gzipNamed("downloads/archive.gz", "report.txt") == "report.txt");
+        CHECK(gzipNamed("downloads/archive.gz", "") == "archive");
+        CHECK(gzipNamed("downloads/archive.gz", "../../etc/passwd") == "archive");
+        CHECK(gzipNamed("downloads/archive.gz", "/etc/passwd") == "archive");
+        CHECK(gzipNamed("downloads/archive.gz", "sub/file.txt") == "archive");
+        CHECK(gzipNamed("downloads/archive.gz", "..") == "archive");
+        CHECK(gzipNamed("downloads/archive.gz", "caf\xE9.txt") == "archive");
+        CHECK(gzipNamed("downloads/archive.gz", "con") == "archive");
+    }
 
-TEST_CASE("singleFileName falls back to the archive name without its suffix") {
-    std::vector<std::byte> data(10, std::byte{'z'});
-    auto zstd = test::zstdCompress(data, 20);
-    CHECK(nameFor("x/notes.txt.zst", zstd, Compression::Zstd) == "notes.txt");
-    CHECK(nameFor("x/blob.bin", zstd, Compression::Zstd) == "blob.bin.out");
-    CHECK(nameFor(".zst", zstd, Compression::Zstd) == ".zst.out");
-    CHECK(gzipNamed("plain", "") == "plain.out");
+    SUBCASE("archive name without its suffix") {
+        std::vector<std::byte> data(10, std::byte{'z'});
+        auto zstd = test::zstdCompress(data, 20);
+        CHECK(nameFor("x/notes.txt.zst", zstd, Compression::Zstd) == "notes.txt");
+        CHECK(nameFor("x/blob.bin", zstd, Compression::Zstd) == "blob.bin.out");
+        CHECK(nameFor(".zst", zstd, Compression::Zstd) == ".zst.out");
+        CHECK(gzipNamed("plain", "") == "plain.out");
 
-    auto xz = test::xzCompress(std::span(data));
-    CHECK(nameFor("x/notes.txt.xz", xz, Compression::Xz) == "notes.txt");
-    CHECK(nameFor("x/blob.bin", xz, Compression::Xz) == "blob.bin.out");
+        auto xz = test::xzCompress(std::span(data));
+        CHECK(nameFor("x/notes.txt.xz", xz, Compression::Xz) == "notes.txt");
+        CHECK(nameFor("x/blob.bin", xz, Compression::Xz) == "blob.bin.out");
 
-    auto bz2 = test::bzip2Compress(std::span(data));
-    CHECK(nameFor("x/notes.txt.bz2", bz2, Compression::Bzip2) == "notes.txt");
-    CHECK(nameFor("x/blob.bin", bz2, Compression::Bzip2) == "blob.bin.out");
+        auto bz2 = test::bzip2Compress(std::span(data));
+        CHECK(nameFor("x/notes.txt.bz2", bz2, Compression::Bzip2) == "notes.txt");
+        CHECK(nameFor("x/blob.bin", bz2, Compression::Bzip2) == "blob.bin.out");
+    }
 }

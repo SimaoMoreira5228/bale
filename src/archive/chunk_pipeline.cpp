@@ -78,7 +78,7 @@ Result<std::unique_ptr<ChunkPipeline>> ChunkPipeline::create(
     for (std::size_t encoder = 0; encoder < encoderCount; ++encoder) {
         auto created = ChunkEncoder::create(profile, chunkSize);
         if (!created) {
-            return std::unexpected(created.error());
+            return tl::unexpected<Error>(created.error());
         }
         encoders.push_back(std::move(*created));
     }
@@ -94,9 +94,8 @@ Result<std::unique_ptr<ChunkPipeline>> ChunkPipeline::create(
     if (threaded) {
         pipeline->workers_.reserve(workers);
         for (std::size_t worker = 0; worker < workers; ++worker) {
-            pipeline->workers_.emplace_back([owner = pipeline.get(),
-                                             worker](const std::stop_token& stop) {
-                owner->work(stop, worker);
+            pipeline->workers_.emplace_back([owner = pipeline.get(), worker] {
+                owner->work(worker);
             });
         }
     }
@@ -105,6 +104,11 @@ Result<std::unique_ptr<ChunkPipeline>> ChunkPipeline::create(
 
 ChunkPipeline::~ChunkPipeline() {
     cancel();
+    for (auto& worker : workers_) {
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
 }
 
 bool ChunkPipeline::full() const {
@@ -259,12 +263,12 @@ std::optional<std::size_t> ChunkPipeline::claim() {
     return std::nullopt;
 }
 
-void ChunkPipeline::work(const std::stop_token& stop, std::size_t worker) {
+void ChunkPipeline::work(std::size_t worker) {
     ChunkEncoder& encoder = encoders_[worker];
     std::unique_lock lock(mutex_);
     while (true) {
         std::optional<std::size_t> index;
-        workReady_.wait(lock, stop, [this, &index] {
+        workReady_.wait(lock, [this, &index] {
             if (!cancelled_) {
                 index = claim();
             }

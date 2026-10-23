@@ -80,11 +80,11 @@ Result<ChunkSlot*> Writer::acquireSlot() {
     while (pipeline_->full()) {
         auto event = pipeline_->next(true);
         if (!event) {
-            return std::unexpected(check().error());
+            return tl::unexpected<Error>(check().error());
         }
         auto handled = handle(*event);
         if (!handled) {
-            return std::unexpected(handled.error());
+            return tl::unexpected<Error>(handled.error());
         }
     }
     return &pipeline_->freeSlot();
@@ -177,7 +177,7 @@ Result<void> Writer::appendChunk(ChunkSlot& slot) {
         descriptor_.size() + slot.size
     );
     if (!span) {
-        return std::unexpected(span.error());
+        return tl::unexpected<Error>(span.error());
     }
 
     IndexEntry& entry = index_[*slot.indexPosition];
@@ -200,7 +200,7 @@ Writer::addFile(std::string_view path, const File& source, const EntryAttributes
 
     auto entry = beginEntry(path, EntryKind::Regular);
     if (!entry) {
-        return std::unexpected(entry.error());
+        return tl::unexpected<Error>(entry.error());
     }
     std::size_t position = entries_.size() - 1;
 
@@ -208,7 +208,7 @@ Writer::addFile(std::string_view path, const File& source, const EntryAttributes
     while (true) {
         auto slot = acquireSlot();
         if (!slot) {
-            return std::unexpected(slot.error());
+            return tl::unexpected<Error>(slot.error());
         }
         std::span<std::byte> buffer = (*slot)->input;
         std::size_t filled = 0;
@@ -269,14 +269,14 @@ Result<void> Writer::addBytes(
 
     auto entry = beginEntry(path, EntryKind::Regular);
     if (!entry) {
-        return std::unexpected(entry.error());
+        return tl::unexpected<Error>(entry.error());
     }
     std::size_t position = entries_.size() - 1;
 
     for (std::size_t at = 0; at < data.size(); at += options_.chunkSize) {
         auto slot = acquireSlot();
         if (!slot) {
-            return std::unexpected(slot.error());
+            return tl::unexpected<Error>(slot.error());
         }
         auto chunk = data.subspan(at, std::min<std::size_t>(options_.chunkSize, data.size() - at));
         std::ranges::copy(chunk, (*slot)->input.begin());
@@ -302,7 +302,7 @@ Result<void> Writer::beginFile(std::string_view path, const EntryAttributes& att
 
     auto entry = beginEntry(path, EntryKind::Regular);
     if (!entry) {
-        return std::unexpected(entry.error());
+        return tl::unexpected<Error>(entry.error());
     }
     (*entry)->mtimeNanoseconds = attributes.mtimeNanoseconds;
     (*entry)->mode = attributes.mode;
@@ -329,7 +329,7 @@ Result<void> Writer::writeFile(std::span<const std::byte> data) {
     while (!data.empty()) {
         auto slot = acquireSlot();
         if (!slot) {
-            return std::unexpected(slot.error());
+            return tl::unexpected<Error>(slot.error());
         }
 
         std::span<std::byte> buffer = (*slot)->input;
@@ -408,14 +408,14 @@ Writer::addTree(const std::filesystem::path& root, const std::filesystem::path& 
     };
     auto walker = TreeWalker::open(root, walkOptions);
     if (!walker) {
-        return std::unexpected(walker.error());
+        return tl::unexpected<Error>(walker.error());
     }
 
     Result<void> result;
     while (result) {
         auto next = walker->next();
         if (!next) {
-            result = std::unexpected(next.error());
+            result = tl::unexpected<Error>(next.error());
             break;
         }
         if (*next == nullptr) {
@@ -464,7 +464,7 @@ Result<void> Writer::writeFileCdc(std::span<const std::byte> data) {
     while (!data.empty()) {
         auto slot = acquireSlot();
         if (!slot) {
-            return std::unexpected(slot.error());
+            return tl::unexpected<Error>(slot.error());
         }
 
         std::span<std::byte> buffer = (*slot)->input;

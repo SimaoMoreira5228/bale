@@ -60,7 +60,7 @@ Result<std::string> readName(ByteReader& reader, std::uint64_t maxBytes, const L
 
         auto unit = reader.u16le();
         if (!unit) {
-            return std::unexpected(unit.error());
+            return tl::unexpected<Error>(unit.error());
         }
         consumed += 2;
 
@@ -104,7 +104,7 @@ readNames(ByteReader& reader, std::uint64_t files, std::uint64_t propSize, const
     std::uint64_t start = reader.position();
     auto external = readId(reader);
     if (!external) {
-        return std::unexpected(external.error());
+        return tl::unexpected<Error>(external.error());
     }
     if (*external != 0) {
         return fail(
@@ -119,7 +119,7 @@ readNames(ByteReader& reader, std::uint64_t files, std::uint64_t propSize, const
     for (std::uint64_t index = 0; index < files; ++index) {
         auto name = readName(reader, propSize - (reader.position() - start), limits);
         if (!name) {
-            return std::unexpected(name.error());
+            return tl::unexpected<Error>(name.error());
         }
         names.push_back(std::move(*name));
     }
@@ -140,7 +140,7 @@ Result<void> readTimes(
 
     auto defined = readId(reader);
     if (!defined) {
-        return std::unexpected(defined.error());
+        return tl::unexpected<Error>(defined.error());
     }
     if (*defined != 0 && *defined != 1) {
         return fail(ErrorKind::Malformed, "7z time flag must be 0 or 1", offset);
@@ -150,14 +150,14 @@ Result<void> readTimes(
     if (*defined == 0) {
         auto read = readBits(reader, files);
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         bits = std::move(*read);
     }
 
     auto external = readId(reader);
     if (!external) {
-        return std::unexpected(external.error());
+        return tl::unexpected<Error>(external.error());
     }
     if (*external != 0) {
         return fail(
@@ -175,7 +175,7 @@ Result<void> readTimes(
 
         auto stamp = reader.u64le();
         if (!stamp) {
-            return std::unexpected(stamp.error());
+            return tl::unexpected<Error>(stamp.error());
         }
         metas[index].mtimeNanoseconds = fileTimeToUnix(*stamp);
     }
@@ -197,7 +197,7 @@ Result<void> readAttributes(
 
     auto defined = readId(reader);
     if (!defined) {
-        return std::unexpected(defined.error());
+        return tl::unexpected<Error>(defined.error());
     }
     if (*defined != 0 && *defined != 1) {
         return fail(ErrorKind::Malformed, "7z attribute flag must be 0 or 1", offset);
@@ -207,14 +207,14 @@ Result<void> readAttributes(
     if (*defined == 0) {
         auto read = readBits(reader, files);
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         bits = std::move(*read);
     }
 
     auto external = readId(reader);
     if (!external) {
-        return std::unexpected(external.error());
+        return tl::unexpected<Error>(external.error());
     }
     if (*external != 0) {
         return fail(
@@ -232,7 +232,7 @@ Result<void> readAttributes(
 
         auto attributes = reader.u32le();
         if (!attributes) {
-            return std::unexpected(attributes.error());
+            return tl::unexpected<Error>(attributes.error());
         }
         std::uint32_t mode = *attributes >> 16;
         if (mode != 0) {
@@ -257,7 +257,7 @@ Result<void> readStartPositions(
 
     auto defined = readId(reader);
     if (!defined) {
-        return std::unexpected(defined.error());
+        return tl::unexpected<Error>(defined.error());
     }
     if (*defined != 0 && *defined != 1) {
         return fail(ErrorKind::Malformed, "7z start flag must be 0 or 1", offset);
@@ -267,14 +267,14 @@ Result<void> readStartPositions(
     if (*defined == 0) {
         auto read = readBits(reader, files);
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         bits = std::move(*read);
     }
 
     auto external = readId(reader);
     if (!external) {
-        return std::unexpected(external.error());
+        return tl::unexpected<Error>(external.error());
     }
     if (*external != 0) {
         return fail(
@@ -292,7 +292,7 @@ Result<void> readStartPositions(
 
         auto position = reader.u64le();
         if (!position) {
-            return std::unexpected(position.error());
+            return tl::unexpected<Error>(position.error());
         }
         metas[index].startPos = *position;
     }
@@ -309,7 +309,7 @@ Result<void> readFilesInfo(ByteReader& reader, Model& model, const Limits& limit
     auto offset = reader.offset();
     auto numFiles = readNumber(reader);
     if (!numFiles) {
-        return std::unexpected(numFiles.error());
+        return tl::unexpected<Error>(numFiles.error());
     }
     if (*numFiles > limits.maxEntries) {
         return fail(ErrorKind::LimitExceeded, "7z entry count exceeds limit", offset);
@@ -320,7 +320,7 @@ Result<void> readFilesInfo(ByteReader& reader, Model& model, const Limits& limit
     while (true) {
         auto prop = readId(reader);
         if (!prop) {
-            return std::unexpected(prop.error());
+            return tl::unexpected<Error>(prop.error());
         }
         if (*prop == nidEnd) {
             break;
@@ -329,7 +329,7 @@ Result<void> readFilesInfo(ByteReader& reader, Model& model, const Limits& limit
         auto propOffset = reader.offset();
         auto propSize = readNumber(reader);
         if (!propSize) {
-            return std::unexpected(propSize.error());
+            return tl::unexpected<Error>(propSize.error());
         }
         if (*propSize > reader.remaining()) {
             return fail(ErrorKind::Malformed, "7z file property overruns the header", propOffset);
@@ -346,7 +346,7 @@ Result<void> readFilesInfo(ByteReader& reader, Model& model, const Limits& limit
             }
             auto bits = reader.bytes(checkedCast<std::size_t>(*propSize).value_or(0));
             if (!bits) {
-                return std::unexpected(bits.error());
+                return tl::unexpected<Error>(bits.error());
             }
             for (std::size_t index = 0; index < model.files.size(); ++index) {
                 bool empty = bitSet(*bits, index);
@@ -367,7 +367,7 @@ Result<void> readFilesInfo(ByteReader& reader, Model& model, const Limits& limit
             }
             auto bits = reader.bytes(checkedCast<std::size_t>(*propSize).value_or(0));
             if (!bits) {
-                return std::unexpected(bits.error());
+                return tl::unexpected<Error>(bits.error());
             }
             std::uint64_t cursor = 0;
             for (auto& meta : model.files) {
@@ -384,7 +384,7 @@ Result<void> readFilesInfo(ByteReader& reader, Model& model, const Limits& limit
             }
             auto bits = reader.bytes(checkedCast<std::size_t>(*propSize).value_or(0));
             if (!bits) {
-                return std::unexpected(bits.error());
+                return tl::unexpected<Error>(bits.error());
             }
             std::uint64_t cursor = 0;
             for (auto& meta : model.files) {
@@ -405,7 +405,7 @@ Result<void> readFilesInfo(ByteReader& reader, Model& model, const Limits& limit
         case nidName: {
             auto names = readNames(reader, *numFiles, *propSize, limits);
             if (!names) {
-                return std::unexpected(names.error());
+                return tl::unexpected<Error>(names.error());
             }
             for (std::size_t index = 0; index < model.files.size(); ++index) {
                 model.files[index].name = std::move((*names)[index]);
@@ -439,7 +439,7 @@ Result<void> readFilesInfo(ByteReader& reader, Model& model, const Limits& limit
         case nidDummy: {
             auto skipped = reader.skip(checkedCast<std::size_t>(*propSize).value_or(0));
             if (!skipped) {
-                return std::unexpected(skipped.error());
+                return tl::unexpected<Error>(skipped.error());
             }
             break;
         }

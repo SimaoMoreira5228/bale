@@ -99,7 +99,7 @@ Bytes buildCab(TestCab spec) {
     for (const auto& folder : spec.folders) {
         put32(foldersBytes, 0); // data offset patched below
         put16(foldersBytes, static_cast<std::uint16_t>(folder.blocks.size()));
-        std::uint16_t type = folder.method | (static_cast<std::uint16_t>(folder.windowBits) << 8);
+        std::uint16_t type = static_cast<std::uint16_t>(folder.method | (folder.windowBits << 8));
         put16(foldersBytes, type);
         foldersBytes.insert(foldersBytes.end(), folder.folderReserve, std::byte{0xA5});
     }
@@ -230,28 +230,30 @@ Bytes collect(cab::Reader& reader, const cab::Entry& entry, std::size_t scratchS
     return out;
 }
 
-TEST_CASE("cab reader opens the embedded micro cabinet") {
-    Bytes bytes(cab::test::kCabMicroMatch.begin(), cab::test::kCabMicroMatch.end());
-    auto reader = openBytes(bytes);
-    REQUIRE(reader);
-    auto entries = reader->entries();
-    REQUIRE(entries.size() == 1);
-    CHECK(entries[0].name == "micro_match.txt");
-    CHECK(entries[0].size == cab::test::kLzxMicroMatchOut.size());
-    auto data = collect(*reader, entries[0]);
-    Bytes expected(cab::test::kLzxMicroMatchOut.begin(), cab::test::kLzxMicroMatchOut.end());
-    CHECK(data == expected);
-}
+TEST_CASE("cab reader opens the embedded cabinets") {
+    SUBCASE("micro cabinet") {
+        Bytes bytes(cab::test::kCabMicroMatch.begin(), cab::test::kCabMicroMatch.end());
+        auto reader = openBytes(bytes);
+        REQUIRE(reader);
+        auto entries = reader->entries();
+        REQUIRE(entries.size() == 1);
+        CHECK(entries[0].name == "micro_match.txt");
+        CHECK(entries[0].size == cab::test::kLzxMicroMatchOut.size());
+        auto data = collect(*reader, entries[0]);
+        Bytes expected(cab::test::kLzxMicroMatchOut.begin(), cab::test::kLzxMicroMatchOut.end());
+        CHECK(data == expected);
+    }
 
-TEST_CASE("cab reader opens the embedded slots 8/9 cabinet") {
-    Bytes bytes(cab::test::kCabSlots89.begin(), cab::test::kCabSlots89.end());
-    auto reader = openBytes(bytes);
-    REQUIRE(reader);
-    auto entries = reader->entries();
-    REQUIRE(entries.size() == 1);
-    auto data = collect(*reader, entries[0], 7);
-    Bytes expected(cab::test::kLzxSlots89Out.begin(), cab::test::kLzxSlots89Out.end());
-    CHECK(data == expected);
+    SUBCASE("slots 8/9 cabinet") {
+        Bytes bytes(cab::test::kCabSlots89.begin(), cab::test::kCabSlots89.end());
+        auto reader = openBytes(bytes);
+        REQUIRE(reader);
+        auto entries = reader->entries();
+        REQUIRE(entries.size() == 1);
+        auto data = collect(*reader, entries[0], 7);
+        Bytes expected(cab::test::kLzxSlots89Out.begin(), cab::test::kLzxSlots89Out.end());
+        CHECK(data == expected);
+    }
 }
 
 TEST_CASE("cab reader extracts an LZX folder split across CFDATA blocks") {

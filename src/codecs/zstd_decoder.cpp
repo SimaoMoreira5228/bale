@@ -9,7 +9,7 @@ namespace bale {
 
 namespace {
 
-std::unexpected<Error> zstdFailure(std::size_t code) {
+tl::unexpected<Error> zstdFailure(std::size_t code) {
     switch (ZSTD_getErrorCode(code)) {
     case ZSTD_error_frameParameter_windowTooLarge:
         return fail(ErrorKind::LimitExceeded, "zstd frame window exceeds limit");

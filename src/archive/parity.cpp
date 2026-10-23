@@ -43,11 +43,11 @@ Result<ParityConfig> explicitSpec(std::string_view text) {
     };
     auto data = parsePart(text.substr(0, plus));
     if (!data) {
-        return std::unexpected(data.error());
+        return tl::unexpected<Error>(data.error());
     }
     auto parity = parsePart(text.substr(plus + 1));
     if (!parity) {
-        return std::unexpected(parity.error());
+        return tl::unexpected<Error>(parity.error());
     }
     ParityConfig config;
     config.enabled = true;
@@ -123,14 +123,14 @@ Result<ParityDescriptor> makeParityDescriptor(
 ) {
     auto valid = validateParityConfig(config);
     if (!valid) {
-        return std::unexpected(valid.error());
+        return tl::unexpected<Error>(valid.error());
     }
     if (groupId == 0) {
         return fail(ErrorKind::Malformed, "parity group id must not be zero");
     }
     auto stripes = stripeCountFor(streamLength, config.dataShards, config.shardBytes);
     if (!stripes) {
-        return std::unexpected(stripes.error());
+        return tl::unexpected<Error>(stripes.error());
     }
     ParityDescriptor descriptor;
     descriptor.present = true;

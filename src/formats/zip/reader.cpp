@@ -101,7 +101,7 @@ Result<bool> readSignatureAt(const File& file, std::uint64_t offset, std::uint32
     std::array<std::byte, 4> bytes{};
     auto read = file.readExactAt(offset, bytes);
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
     return loadLe<std::uint32_t>(bytes.data()) == signature;
 }
@@ -115,7 +115,7 @@ readZip64Record(const File& file, std::uint64_t at, std::uint64_t locatorPositio
     std::array<std::byte, zip64EndRecordSize> record{};
     auto read = file.readExactAt(at, record);
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
     if (loadLe<std::uint32_t>(record.data()) != zip64EndRecordSignature) {
         return std::optional<Zip64End>{};
@@ -146,7 +146,7 @@ Result<Zip64End> readZip64End(const File& file, std::uint64_t locatorPosition) {
     std::array<std::byte, zip64LocatorSize> locator{};
     auto read = file.readExactAt(locatorPosition, locator);
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
 
     auto disk = loadLe<std::uint32_t>(locator.data() + 4);
@@ -162,7 +162,7 @@ Result<Zip64End> readZip64End(const File& file, std::uint64_t locatorPosition) {
 
     auto direct = readZip64Record(file, recordOffset, locatorPosition);
     if (!direct) {
-        return std::unexpected(direct.error());
+        return tl::unexpected<Error>(direct.error());
     }
     if (*direct) {
         return **direct;
@@ -179,7 +179,7 @@ Result<Zip64End> readZip64End(const File& file, std::uint64_t locatorPosition) {
 
     auto moved = readZip64Record(file, shifted, locatorPosition);
     if (!moved) {
-        return std::unexpected(moved.error());
+        return tl::unexpected<Error>(moved.error());
     }
     if (!*moved) {
         return fail(ErrorKind::Malformed, "ZIP64 end record not found", locatorPosition);
@@ -224,7 +224,7 @@ Result<EndRecord> readEndRecord(
     if (position >= zip64LocatorSize) {
         auto signature = readSignatureAt(file, position - zip64LocatorSize, zip64LocatorSignature);
         if (!signature) {
-            return std::unexpected(signature.error());
+            return tl::unexpected<Error>(signature.error());
         }
         locatorPresent = *signature;
     }
@@ -234,7 +234,7 @@ Result<EndRecord> readEndRecord(
     if (locatorPresent) {
         auto zip64 = readZip64End(file, position - zip64LocatorSize);
         if (!zip64) {
-            return std::unexpected(zip64.error());
+            return tl::unexpected<Error>(zip64.error());
         }
 
         bool consistent = agrees(disk, saturated16, 0) && agrees(directoryDisk, saturated16, 0) &&
@@ -282,7 +282,7 @@ Result<EndRecord> readEndRecord(
         return fail(ErrorKind::LimitExceeded, "central directory exceeds limit", position);
     }
 
-    auto minimumSize = checkedMul<std::uint64_t>(end.entryCount, centralHeaderSize);
+    auto minimumSize = checkedMul(end.entryCount, centralHeaderSize);
     if (!minimumSize || *minimumSize > end.directorySize) {
         return fail(ErrorKind::Malformed, "entry count does not fit central directory", position);
     }
@@ -290,7 +290,7 @@ Result<EndRecord> readEndRecord(
     if (end.directorySize > 0) {
         auto signature = readSignatureAt(file, directoryStart, centralHeaderSignature);
         if (!signature) {
-            return std::unexpected(signature.error());
+            return tl::unexpected<Error>(signature.error());
         }
         if (!*signature) {
             return fail(ErrorKind::Malformed, "no central directory at computed offset", position);
@@ -326,7 +326,7 @@ Result<std::string_view> nameAsUtf8(const Entry& entry, std::string& storage) {
 Result<Reader> Reader::open(File file, const Limits& limits) {
     auto fileSize = file.size();
     if (!fileSize) {
-        return std::unexpected(fileSize.error());
+        return tl::unexpected<Error>(fileSize.error());
     }
     if (*fileSize < endRecordSize) {
         return fail(ErrorKind::Malformed, "file too small to be a ZIP archive");
@@ -337,7 +337,7 @@ Result<Reader> Reader::open(File file, const Limits& limits) {
     std::vector<std::byte> tail(tailSize);
     auto read = file.readExactAt(tailOffset, tail);
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
 
     std::optional<EndRecord> found;
@@ -369,7 +369,7 @@ Result<Reader> Reader::open(File file, const Limits& limits) {
 
     if (!found) {
         if (firstError) {
-            return std::unexpected(*firstError);
+            return tl::unexpected<Error>(*firstError);
         }
         return fail(ErrorKind::Malformed, "end of central directory not found");
     }
@@ -387,7 +387,7 @@ Result<Reader> Reader::open(File file, const Limits& limits) {
     auto directoryRead =
         reader.file_.readExactAt(found->prefix + found->directoryOffset, directory);
     if (!directoryRead) {
-        return std::unexpected(directoryRead.error());
+        return tl::unexpected<Error>(directoryRead.error());
     }
 
     auto comment = std::span<const std::byte>(tail).subspan(foundAt + endRecordSize);
@@ -401,7 +401,7 @@ Result<Reader> Reader::open(File file, const Limits& limits) {
     while (true) {
         auto more = cursor.next(entry);
         if (!more) {
-            return std::unexpected(more.error());
+            return tl::unexpected<Error>(more.error());
         }
         if (!*more) {
             break;
@@ -429,14 +429,14 @@ Result<std::uint64_t> Reader::dataOffset(const Entry& entry) const {
     auto directoryStart = prefix_ + directoryOffset_;
     auto shifted = checkedAdd(prefix_, entry.localHeaderOffset);
     auto headerOffset = shifted.value_or(directoryStart);
-    if (!shifted || !fitsWithin<std::uint64_t>(headerOffset, localHeaderSize, directoryStart)) {
+    if (!shifted || !fitsWithin(headerOffset, localHeaderSize, directoryStart)) {
         return fail(ErrorKind::Malformed, "local header outside the data area", headerOffset);
     }
 
     std::array<std::byte, localHeaderSize> header{};
     auto read = file_.readExactAt(headerOffset, header);
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
     if (loadLe<std::uint32_t>(header.data()) != localHeaderSignature) {
         return fail(ErrorKind::Malformed, "bad local header signature", headerOffset);
@@ -473,7 +473,7 @@ Result<std::uint64_t> Reader::dataOffset(const Entry& entry) const {
         auto chunk = std::span(name).first(std::min(name.size(), nameLength - compared));
         auto nameRead = file_.readExactAt(headerOffset + localHeaderSize + compared, chunk);
         if (!nameRead) {
-            return std::unexpected(nameRead.error());
+            return tl::unexpected<Error>(nameRead.error());
         }
         if (std::memcmp(chunk.data(), entry.name.data() + compared, chunk.size()) != 0) {
             return fail(
@@ -494,7 +494,7 @@ Result<std::uint64_t> Reader::dataOffset(const Entry& entry) const {
         }
     }
 
-    if (!fitsWithin<std::uint64_t>(dataStart, entry.compressedSize, directoryStart)) {
+    if (!fitsWithin(dataStart, entry.compressedSize, directoryStart)) {
         return fail(ErrorKind::Malformed, "entry data overruns the data area", dataStart);
     }
     return dataStart;
@@ -522,12 +522,12 @@ Result<Reader::EntryStream> Reader::beginEntry(const Entry& entry, std::span<std
         if (inflater_) {
             auto reset = inflater_->reset();
             if (!reset) {
-                return std::unexpected(reset.error());
+                return tl::unexpected<Error>(reset.error());
             }
         } else {
             auto created = Inflater::create();
             if (!created) {
-                return std::unexpected(created.error());
+                return tl::unexpected<Error>(created.error());
             }
             inflater_.emplace(std::move(*created));
         }
@@ -542,7 +542,7 @@ Result<Reader::EntryStream> Reader::beginEntry(const Entry& entry, std::span<std
 
     auto offset = dataOffset(entry);
     if (!offset) {
-        return std::unexpected(offset.error());
+        return tl::unexpected<Error>(offset.error());
     }
 
     stream.dataStart = *offset;
@@ -575,7 +575,7 @@ Result<std::span<const std::byte>> Reader::nextStored(EntryStream& stream) {
     );
     auto read = file_.readExactAt(stream.position, chunk);
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
 
     stream.position += chunk.size();
@@ -598,7 +598,7 @@ Result<std::span<const std::byte>> Reader::nextDeflated(EntryStream& stream) {
             );
             auto read = file_.readExactAt(stream.position, chunk);
             if (!read) {
-                return std::unexpected(read.error());
+                return tl::unexpected<Error>(read.error());
             }
 
             stream.pending = chunk;
@@ -617,7 +617,7 @@ Result<std::span<const std::byte>> Reader::nextDeflated(EntryStream& stream) {
         if (!step) {
             auto error = step.error();
             error.offset = stream.dataStart;
-            return std::unexpected(error);
+            return tl::unexpected<Error>(error);
         }
 
         stream.pending = stream.pending.subspan(step->consumed);

@@ -65,13 +65,13 @@ Result<void> Writer::appendChunkEncrypted(ChunkSlot& slot) {
     head.insert(head.end(), epochBytes.begin(), epochBytes.end());
     head.insert(head.end(), nonce->begin(), nonce->end());
 
-    auto end = checkedAdd<std::uint64_t>(plain.size(), crypto::tagSize);
+    auto end = checkedAdd(plain.size(), crypto::tagSize);
     if (!end) {
         return poison(Error{.kind = ErrorKind::LimitExceeded, .what = "chunk too long to seal"});
     }
     auto span = writeRecord(RecordType::Data, head, *sealed, slot.codec, 0, encryptedRecordFlag);
     if (!span) {
-        return std::unexpected(span.error());
+        return tl::unexpected<Error>(span.error());
     }
 
     std::uint32_t position = *slot.indexPosition;
@@ -90,7 +90,7 @@ Writer::createEncrypted(File file, const WriterOptions& options, WriterSecrets&&
         return fail(ErrorKind::Malformed, "encrypted output requires --experimental-encryption");
     }
     if (auto valid = checkOptions(options); !valid) {
-        return std::unexpected(valid.error());
+        return tl::unexpected<Error>(valid.error());
     }
     if (!secrets.hasPassword && secrets.recipientPublicKeys.empty()) {
         return fail(ErrorKind::Malformed, "encrypted archive needs a password or a recipient");
@@ -98,7 +98,7 @@ Writer::createEncrypted(File file, const WriterOptions& options, WriterSecrets&&
 
     auto dataKey = crypto::makeKey();
     if (!dataKey) {
-        return std::unexpected(dataKey.error());
+        return tl::unexpected<Error>(dataKey.error());
     }
 
     Writer writer(std::move(file), options);
@@ -113,7 +113,7 @@ Writer::createEncrypted(File file, const WriterOptions& options, WriterSecrets&&
     writer.kdf_ = secrets.kdf;
     writer.archiveId_ = options.archiveId ? *options.archiveId : randomId();
     if (auto started = writer.startPipeline(); !started) {
-        return std::unexpected(started.error());
+        return tl::unexpected<Error>(started.error());
     }
 
     Superblock superblock;
@@ -130,7 +130,7 @@ Writer::createEncrypted(File file, const WriterOptions& options, WriterSecrets&&
         superblock.requiredFeatures |= parityRequiredFeature;
     }
     if (auto written = writer.appendRaw(encodeSuperblock(superblock)); !written) {
-        return std::unexpected(written.error());
+        return tl::unexpected<Error>(written.error());
     }
 
     std::vector<Keyslot> slots;
@@ -142,7 +142,7 @@ Writer::createEncrypted(File file, const WriterOptions& options, WriterSecrets&&
             writer.epoch_
         );
         if (!wrapped) {
-            return std::unexpected(wrapped.error());
+            return tl::unexpected<Error>(wrapped.error());
         }
         Keyslot slot;
         slot.epoch = writer.epoch_;
@@ -157,7 +157,7 @@ Writer::createEncrypted(File file, const WriterOptions& options, WriterSecrets&&
     for (const auto& pub : writer.recipientPubs_) {
         auto wrapped = crypto::wrapRecipientKey(writer.dataKey_.bytes(), pub);
         if (!wrapped) {
-            return std::unexpected(wrapped.error());
+            return tl::unexpected<Error>(wrapped.error());
         }
         Keyslot slot;
         slot.epoch = writer.epoch_;
@@ -169,7 +169,7 @@ Writer::createEncrypted(File file, const WriterOptions& options, WriterSecrets&&
     for (const auto& slot : slots) {
         std::vector<std::byte> payload;
         if (auto encodedSlot = encodeKeyslot(slot, payload); !encodedSlot) {
-            return std::unexpected(encodedSlot.error());
+            return tl::unexpected<Error>(encodedSlot.error());
         }
         auto span = writer.writeRecord(
             RecordType::Extension,
@@ -180,7 +180,7 @@ Writer::createEncrypted(File file, const WriterOptions& options, WriterSecrets&&
             encryptedRecordFlag
         );
         if (!span) {
-            return std::unexpected(span.error());
+            return tl::unexpected<Error>(span.error());
         }
     }
     return writer;
@@ -196,7 +196,7 @@ Result<Writer> Writer::appendEncrypted(
         return fail(ErrorKind::Malformed, "encrypted output requires --experimental-encryption");
     }
     if (auto valid = checkOptions(options); !valid) {
-        return std::unexpected(valid.error());
+        return tl::unexpected<Error>(valid.error());
     }
     if (!secrets.hasPassword && secrets.recipientPublicKeys.empty()) {
         return fail(ErrorKind::Malformed, "encrypted archive needs a password or a recipient");
@@ -204,11 +204,11 @@ Result<Writer> Writer::appendEncrypted(
 
     auto readFile = file.duplicate();
     if (!readFile) {
-        return std::unexpected(readFile.error());
+        return tl::unexpected<Error>(readFile.error());
     }
     auto reader = Reader::openEncrypted(std::move(*readFile), ReaderOptions{}, std::move(unlock));
     if (!reader) {
-        return std::unexpected(reader.error());
+        return tl::unexpected<Error>(reader.error());
     }
     if (reader->commit().generation == std::numeric_limits<std::uint64_t>::max()) {
         return fail(ErrorKind::LimitExceeded, "archive generation limit exceeded");
@@ -223,7 +223,7 @@ Result<Writer> Writer::appendEncrypted(
 
     auto dataKey = crypto::makeKey();
     if (!dataKey) {
-        return std::unexpected(dataKey.error());
+        return tl::unexpected<Error>(dataKey.error());
     }
 
     Writer writer(std::move(file), options);
@@ -237,12 +237,12 @@ Result<Writer> Writer::appendEncrypted(
     writer.kdf_ = secrets.kdf;
     writer.archiveId_ = reader->superblock().archiveId;
     if (auto started = writer.startPipeline(); !started) {
-        return std::unexpected(started.error());
+        return tl::unexpected<Error>(started.error());
     }
 
     std::uint64_t position = reader->footerOffset() + footerSize;
     if (auto truncated = writer.file_.truncate(position); !truncated) {
-        return std::unexpected(truncated.error());
+        return tl::unexpected<Error>(truncated.error());
     }
     writer.position_ = position;
     writer.sequence_ = reader->sequenceCount();
@@ -261,7 +261,7 @@ Result<Writer> Writer::appendEncrypted(
             writer.epoch_
         );
         if (!wrapped) {
-            return std::unexpected(wrapped.error());
+            return tl::unexpected<Error>(wrapped.error());
         }
         Keyslot slot;
         slot.epoch = writer.epoch_;
@@ -276,7 +276,7 @@ Result<Writer> Writer::appendEncrypted(
     for (const auto& pub : writer.recipientPubs_) {
         auto wrapped = crypto::wrapRecipientKey(writer.dataKey_.bytes(), pub);
         if (!wrapped) {
-            return std::unexpected(wrapped.error());
+            return tl::unexpected<Error>(wrapped.error());
         }
         Keyslot slot;
         slot.epoch = writer.epoch_;
@@ -288,7 +288,7 @@ Result<Writer> Writer::appendEncrypted(
     for (const auto& slot : slots) {
         std::vector<std::byte> payload;
         if (auto encodedSlot = encodeKeyslot(slot, payload); !encodedSlot) {
-            return std::unexpected(encodedSlot.error());
+            return tl::unexpected<Error>(encodedSlot.error());
         }
         auto span = writer.writeRecord(
             RecordType::Extension,
@@ -299,7 +299,7 @@ Result<Writer> Writer::appendEncrypted(
             encryptedRecordFlag
         );
         if (!span) {
-            return std::unexpected(span.error());
+            return tl::unexpected<Error>(span.error());
         }
     }
     return writer;

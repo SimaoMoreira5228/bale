@@ -25,13 +25,12 @@ const HANDLE invalidHandle = INVALID_HANDLE_VALUE;
 constexpr int invalidHandle = -1;
 #endif
 
-std::unexpected<Error>
-systemFailure(std::string_view what, std::uint64_t offset = Error::noOffset) {
+tl::unexpected<Error> systemFailure(std::string_view what, std::uint64_t offset = Error::noOffset) {
     auto failure = fail(ErrorKind::Io, what, offset);
 #ifdef _WIN32
-    failure.error().systemCode = static_cast<int>(GetLastError());
+    failure.value().systemCode = static_cast<int>(GetLastError());
 #else
-    failure.error().systemCode = errno;
+    failure.value().systemCode = errno;
 #endif
     return failure;
 }
@@ -59,7 +58,7 @@ Result<void> File::readExactAt(std::uint64_t offset, std::span<std::byte> out) c
     while (!out.empty()) {
         auto count = readAt(offset, out);
         if (!count) {
-            return std::unexpected(count.error());
+            return tl::unexpected<Error>(count.error());
         }
         if (*count == 0) {
             return fail(ErrorKind::Truncated, "file ended before requested range", offset);
@@ -118,7 +117,7 @@ Result<File> File::openReadWrite(const std::filesystem::path& path) {
 Result<File> File::openAppend(const std::filesystem::path& path) {
     HANDLE handle = CreateFileW(
         path.c_str(),
-        GENERIC_READ | FILE_APPEND_DATA,
+        GENERIC_READ | FILE_APPEND_DATA | FILE_WRITE_DATA,
         FILE_SHARE_READ,
         nullptr,
         OPEN_EXISTING,
@@ -179,8 +178,8 @@ Result<File> File::createNew(const std::filesystem::path& path) {
     );
     if (handle == INVALID_HANDLE_VALUE) {
         auto failure = systemFailure("cannot create file");
-        if (failure.error().systemCode == ERROR_FILE_EXISTS) {
-            failure.error().kind = ErrorKind::AlreadyExists;
+        if (failure.value().systemCode == ERROR_FILE_EXISTS) {
+            failure.value().kind = ErrorKind::AlreadyExists;
         }
         return failure;
     }
@@ -379,8 +378,8 @@ Result<File> File::createNew(const std::filesystem::path& path) {
 
     if (fd < 0) {
         auto failure = systemFailure("cannot create file");
-        if (failure.error().systemCode == EEXIST) {
-            failure.error().kind = ErrorKind::AlreadyExists;
+        if (failure.value().systemCode == EEXIST) {
+            failure.value().kind = ErrorKind::AlreadyExists;
         }
         return failure;
     }

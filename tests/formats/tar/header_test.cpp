@@ -122,26 +122,26 @@ TEST_CASE("Tar header parsing validates the checksum and detects ustar, GNU and 
     BlockBytes zero{};
     CHECK_FALSE(looksLikeTar(zero));
     CHECK(parseHeader(zero, 0).error().kind == ErrorKind::Integrity);
-}
 
-TEST_CASE("Tar header checksum accepts the historic signed sum") {
-    HeaderSpec spec;
-    spec.name = "caf\xE9\xE9\xE9";
-    auto block = makeHeader(spec);
+    SUBCASE("historic signed sum") {
+        HeaderSpec signedSpec;
+        signedSpec.name = "caf\xE9\xE9\xE9";
+        auto signedBlock = makeHeader(signedSpec);
 
-    std::fill_n(block.begin() + 148, 8, std::byte{' '});
-    std::int64_t signedSum = 0;
-    for (auto byte : block) {
-        signedSum += static_cast<std::int8_t>(std::to_integer<std::uint8_t>(byte));
+        std::fill_n(signedBlock.begin() + 148, 8, std::byte{' '});
+        std::int64_t signedSum = 0;
+        for (auto byte : signedBlock) {
+            signedSum += static_cast<std::int8_t>(std::to_integer<std::uint8_t>(byte));
+        }
+        putOctal(signedBlock, 148, 7, static_cast<std::uint64_t>(signedSum));
+
+        auto signedHeader = parseHeader(signedBlock, 0);
+        REQUIRE(signedHeader);
+        CHECK(signedHeader->name == "caf\xE9\xE9\xE9");
+
+        putOctal(signedBlock, 148, 7, static_cast<std::uint64_t>(signedSum) + 1);
+        CHECK(parseHeader(signedBlock, 0).error().kind == ErrorKind::Integrity);
     }
-    putOctal(block, 148, 7, static_cast<std::uint64_t>(signedSum));
-
-    auto header = parseHeader(block, 0);
-    REQUIRE(header);
-    CHECK(header->name == "caf\xE9\xE9\xE9");
-
-    putOctal(block, 148, 7, static_cast<std::uint64_t>(signedSum) + 1);
-    CHECK(parseHeader(block, 0).error().kind == ErrorKind::Integrity);
 }
 
 TEST_CASE("Tar device numbers are parsed only for device entries") {

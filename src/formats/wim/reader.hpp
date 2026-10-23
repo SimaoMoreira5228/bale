@@ -75,7 +75,7 @@ class Reader {
         }
         auto located = locate(entry);
         if (!located) {
-            return std::unexpected(located.error());
+            return tl::unexpected<Error>(located.error());
         }
         const Resource& resource = located->solid ? solidResources_[located->run][located->slot]
                                                   : resources_[located->slot];

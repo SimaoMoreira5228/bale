@@ -47,7 +47,7 @@ Result<std::vector<FreshEntry>> collectFreshEntries(TreeWalker& walker) {
     while (true) {
         auto next = walker.next();
         if (!next) {
-            return std::unexpected(next.error());
+            return tl::unexpected<Error>(next.error());
         }
         if (*next == nullptr) {
             return fresh;
@@ -124,7 +124,7 @@ streamFreshFile(ArchiveOutput& output, const std::filesystem::path& root, const 
     case WalkKind::Regular: {
         auto source = File::openRegularNoFollow(root / pathFromUtf8(entry.path));
         if (!source) {
-            return std::unexpected(source.error());
+            return tl::unexpected<Error>(source.error());
         }
         return output.addFile(entry.path, *source, entry.size, attributes);
     }
@@ -150,33 +150,33 @@ Result<OutputSummary> rewriteSevenZip(
     walkOptions.hardLinks = false;
     auto walker = TreeWalker::open(pathFromUtf8(directory), walkOptions);
     if (!walker) {
-        return std::unexpected(walker.error());
+        return tl::unexpected<Error>(walker.error());
     }
     auto fresh = collectFreshEntries(*walker);
     if (!fresh) {
-        return std::unexpected(fresh.error());
+        return tl::unexpected<Error>(fresh.error());
     }
     reportSkipped(walker->skipped());
     std::filesystem::path rootPath = pathFromUtf8(directory);
 
     auto existing = File::openRead(pathFromUtf8(archivePath));
     if (!existing) {
-        return std::unexpected(existing.error());
+        return tl::unexpected<Error>(existing.error());
     }
     auto reader = sevenzip::Reader::open(std::move(*existing));
     if (!reader) {
-        return std::unexpected(reader.error());
+        return tl::unexpected<Error>(reader.error());
     }
 
     std::vector<sevenzip::Entry> kept(reader->entries().begin(), reader->entries().end());
 
     auto output = ArchiveOutput::create(std::move(tempFile), sevenZipOutputOptions(options));
     if (!output) {
-        return std::unexpected(output.error());
+        return tl::unexpected<Error>(output.error());
     }
     for (auto& seedBytes : signSeeds) {
         if (auto added = output->addSignSeed(std::move(seedBytes)); !added) {
-            return std::unexpected(added.error());
+            return tl::unexpected<Error>(added.error());
         }
     }
 
@@ -222,7 +222,7 @@ Result<OutputSummary> rewriteSevenZip(
             ++freshIndex;
         }
         if (!stored) {
-            return std::unexpected(stored.error());
+            return tl::unexpected<Error>(stored.error());
         }
     }
     return output->finish();

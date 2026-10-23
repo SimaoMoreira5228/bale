@@ -100,7 +100,6 @@ TEST_CASE("brotli chunk round trips pin the codec id and refuse unknown codecs")
     CHECK(unknown.error().kind == ErrorKind::Unsupported);
 }
 
-
 TEST_CASE("brotli writing compresses useful chunks and keeps incompressible chunks raw") {
     TempPath temp;
     auto file = File::createNew(temp.path());
@@ -191,15 +190,7 @@ TEST_CASE("the reader rejects hostile brotli chunks behind a valid record checks
 }
 
 TEST_CASE("writer metadata records the brotli codec and level through a round trip") {
-    for (archive::Preset preset : archive::allPresets) {
-        auto profile = profileFor(preset);
-        CHECK(parsePreset(presetName(preset)) == preset);
-        auto writer = describeWriter("bale", profile, 65536, 1);
-        CHECK(writer.codec == static_cast<std::uint64_t>(profile.codec));
-        CHECK(writer.level == profile.level);
-        CHECK(writer.preset == static_cast<std::uint64_t>(preset));
-    }
-
+    // NOTE: the allPresets parse/describe loop lives in the lzma2 metadata case.
     auto profile = CompressionProfile{
         .preset = std::nullopt,
         .codec = CodecId::Brotli,

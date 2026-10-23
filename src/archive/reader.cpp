@@ -25,7 +25,7 @@ bool spansOverlap(std::uint64_t offset, std::uint64_t length, const RecordRefere
 Result<Reader> Reader::open(File file, const ReaderOptions& options) {
     auto size = file.size();
     if (!size) {
-        return std::unexpected(size.error());
+        return tl::unexpected<Error>(size.error());
     }
     if (*size < superblockSize) {
         return fail(ErrorKind::Truncated, "file too small for a superblock", *size);
@@ -35,12 +35,12 @@ Result<Reader> Reader::open(File file, const ReaderOptions& options) {
     std::array<std::byte, superblockSize> block{};
     auto read = reader.file_.readExactAt(0, block);
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
 
     auto superblock = decodeSuperblock(block);
     if (!superblock) {
-        return std::unexpected(superblock.error());
+        return tl::unexpected<Error>(superblock.error());
     }
     reader.superblock_ = *superblock;
     if ((reader.superblock_.requiredFeatures & encryptedRequiredFeature) != 0) {
@@ -49,7 +49,7 @@ Result<Reader> Reader::open(File file, const ReaderOptions& options) {
 
     auto found = reader.findCommit();
     if (!found) {
-        return std::unexpected(found.error());
+        return tl::unexpected<Error>(found.error());
     }
     return reader;
 }
@@ -74,7 +74,7 @@ Result<Record> Reader::readRecord(
     buffer.resize(static_cast<std::size_t>(length));
     auto read = file_.readExactAt(offset, buffer);
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
 
     RecordLimits limits{
@@ -83,7 +83,7 @@ Result<Record> Reader::readRecord(
     };
     auto record = decodeRecord(buffer, limits, offset);
     if (!record) {
-        return std::unexpected(record.error());
+        return tl::unexpected<Error>(record.error());
     }
     if (record->size != length) {
         return fail(ErrorKind::Malformed, "record length differs from its reference", offset);
@@ -115,7 +115,7 @@ Result<void> Reader::loadMetadata() {
         manifestBytes_
     );
     if (!manifestRecord) {
-        return std::unexpected(manifestRecord.error());
+        return tl::unexpected<Error>(manifestRecord.error());
     }
     if (manifestRecord->header.codec != CodecId::Raw) {
         return fail(ErrorKind::Unsupported, "compressed manifest records are not supported");
@@ -132,7 +132,7 @@ Result<void> Reader::loadMetadata() {
         indexBytes_
     );
     if (!indexRecord) {
-        return std::unexpected(indexRecord.error());
+        return tl::unexpected<Error>(indexRecord.error());
     }
     if (indexRecord->header.codec != CodecId::Raw) {
         return fail(ErrorKind::Unsupported, "compressed index records are not supported");
@@ -231,7 +231,7 @@ Result<std::span<const std::byte>> Reader::loadChunk(const ChunkKey& key) {
         buffer_
     );
     if (!record) {
-        return std::unexpected(record.error());
+        return tl::unexpected<Error>(record.error());
     }
     if (record->header.codec != entry->codec) {
         return fail(
@@ -244,7 +244,7 @@ Result<std::span<const std::byte>> Reader::loadChunk(const ChunkKey& key) {
     auto payloadOffset = entry->recordOffset + recordPrefixSize;
     auto data = decodeDataPayload(record->payload, payloadOffset);
     if (!data) {
-        return std::unexpected(data.error());
+        return tl::unexpected<Error>(data.error());
     }
     if (data->key != key) {
         return fail(
@@ -284,7 +284,7 @@ Result<std::span<const std::byte>> Reader::loadChunk(const ChunkKey& key) {
             std::uint64_t encodedOffset = payloadOffset + data->descriptorSize;
             error.offset =
                 error.offset == Error::noOffset ? encodedOffset : encodedOffset + error.offset;
-            return std::unexpected(error);
+            return tl::unexpected<Error>(error);
         }
         decoded = decodedBuffer_;
     }
@@ -327,12 +327,12 @@ Result<VerifyReport> Reader::walkRecords() {
         }
         auto read = file_.readExactAt(position, prefix);
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
 
         auto header = decodeRecordPrefix(prefix, limits, position);
         if (!header) {
-            return std::unexpected(header.error());
+            return tl::unexpected<Error>(header.error());
         }
         std::uint64_t size = header->payloadLength + recordFramingSize;
         if (!fitsWithin(position, size, footerOffset_)) {
@@ -380,7 +380,7 @@ Result<VerifyReport> Reader::walkRecords() {
                     metadata
                 );
                 if (!record) {
-                    return std::unexpected(record.error());
+                    return tl::unexpected<Error>(record.error());
                 }
                 expected = Blake3::of(HashDomain::Manifest, record->payload) ==
                     generations_[generation].commit.manifest.digest;
@@ -399,7 +399,7 @@ Result<VerifyReport> Reader::walkRecords() {
                     metadata
                 );
                 if (!record) {
-                    return std::unexpected(record.error());
+                    return tl::unexpected<Error>(record.error());
                 }
                 expected = Blake3::of(HashDomain::Index, record->payload) ==
                     generations_[generation].commit.index.digest;
@@ -413,7 +413,7 @@ Result<VerifyReport> Reader::walkRecords() {
                 auto record =
                     readRecord(position, size, RecordType::Commit, maxCommitPayload, metadata);
                 if (!record) {
-                    return std::unexpected(record.error());
+                    return tl::unexpected<Error>(record.error());
                 }
                 expected = Blake3::of(HashDomain::Commit, record->payload) ==
                     generations_[generation].digest;
@@ -466,7 +466,7 @@ Result<VerifyReport> Reader::verify(VerifyMode mode) {
         for (const auto& entry : index_) {
             auto chunk = loadChunk(entry.key);
             if (!chunk) {
-                return std::unexpected(chunk.error());
+                return tl::unexpected<Error>(chunk.error());
             }
             ++report->chunksVerified;
             report->bytesVerified += chunk->size();
@@ -483,7 +483,7 @@ Result<VerifyReport> Reader::verify(VerifyMode mode) {
         for (std::size_t index = 0; index < plains.size(); ++index) {
             auto chunk = loadEncryptedExtent(objects[index], plains[index]);
             if (!chunk) {
-                return std::unexpected(chunk.error());
+                return tl::unexpected<Error>(chunk.error());
             }
             ++report->chunksVerified;
             report->bytesVerified += chunk->size();

@@ -58,7 +58,7 @@ class Reader {
 
                 auto count = file_.readAt(position, chunk);
                 if (!count) {
-                    return std::unexpected(count.error());
+                    return tl::unexpected<Error>(count.error());
                 }
                 if (*count == 0) {
                     return fail(ErrorKind::Truncated, "ISO image ends inside entry data", position);
@@ -66,7 +66,7 @@ class Reader {
 
                 auto sunk = sink(std::span<const std::byte>(chunk.data(), *count));
                 if (!sunk) {
-                    return std::unexpected(sunk.error());
+                    return tl::unexpected<Error>(sunk.error());
                 }
 
                 position += *count;

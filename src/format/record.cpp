@@ -165,12 +165,12 @@ Result<Record>
 decodeRecord(std::span<const std::byte> data, const RecordLimits& limits, std::uint64_t offset) {
     auto header = decodeRecordPrefix(data, limits, offset);
     if (!header) {
-        return std::unexpected(header.error());
+        return tl::unexpected<Error>(header.error());
     }
 
     auto size = recordSize(header->payloadLength);
     if (!size) {
-        return std::unexpected(size.error());
+        return tl::unexpected<Error>(size.error());
     }
     if (*size > data.size()) {
         return fail(ErrorKind::Truncated, "record extends past end of data", offset + data.size());
@@ -182,7 +182,7 @@ decodeRecord(std::span<const std::byte> data, const RecordLimits& limits, std::u
     auto verified =
         verifyRecordTrailer(payload, trailer, offset + recordPrefixSize + payloadLength);
     if (!verified) {
-        return std::unexpected(verified.error());
+        return tl::unexpected<Error>(verified.error());
     }
 
     return Record{

@@ -12,7 +12,7 @@ namespace {
 
 constexpr std::size_t maxStepBytes = std::numeric_limits<unsigned int>::max();
 
-std::unexpected<Error> bzip2Failure(int status) {
+tl::unexpected<Error> bzip2Failure(int status) {
     switch (status) {
     case BZ_MEM_ERROR:
         return fail(ErrorKind::LimitExceeded, "bzip2 decoder allocation failed");

@@ -98,19 +98,15 @@ TEST_CASE("7z BCJ single-coder decodes tiny x86 fixture") {
     }
 }
 
-TEST_CASE("7z BCJ refuses non-empty props") {
-    auto folder = singleCoder({0x03, 0x03, 0x01, 0x03}, std::vector<std::byte>{std::byte{0x00}});
-    auto info = sevenzip::resolveCodec(folder);
-    CHECK(!info.supported);
-}
-
 TEST_CASE("7z filter refusal matrix names each unsupported single filter") {
     struct Case {
         std::vector<std::uint8_t> id;
         std::string_view name;
         std::string_view hex;
+        std::vector<std::byte> props{};
     };
     const std::vector<Case> cases = {
+        {{0x03, 0x03, 0x01, 0x03}, "x86", "03-03-01-03", {std::byte{0x00}}},
         {{0x03, 0x03, 0x01, 0x1B}, "BCJ2", "03-03-01-1B"},
         {{0x03}, "Delta", "03"},
         {{0x03, 0x03, 0x05, 0x01}, "ARM", "03-03-05-01"},
@@ -124,11 +120,13 @@ TEST_CASE("7z filter refusal matrix names each unsupported single filter") {
         {{0x02, 0x03, 0x04}, "Swap4", "02-03-04"},
     };
     for (const auto& want : cases) {
-        auto folder = singleCoder(want.id);
+        auto folder = singleCoder(want.id, want.props);
         auto info = sevenzip::resolveCodec(folder);
         CHECK(!info.supported);
-        CHECK(info.name == want.name);
-        CHECK(info.hex == want.hex);
+        if (want.props.empty()) {
+            CHECK(info.name == want.name);
+            CHECK(info.hex == want.hex);
+        }
     }
 }
 

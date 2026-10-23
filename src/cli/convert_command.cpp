@@ -193,14 +193,14 @@ Result<void> convertTarEntry(Conversion& conversion, tar::Reader& reader, const 
 Result<void> convertTar(Conversion& conversion, OpenedArchive archive) {
     auto source = openTarSource(std::move(archive.file), archive.format.compression);
     if (!source) {
-        return std::unexpected(source.error());
+        return tl::unexpected<Error>(source.error());
     }
 
     tar::Reader reader(std::move(*source));
     while (true) {
         auto next = reader.next();
         if (!next) {
-            return std::unexpected(next.error());
+            return tl::unexpected<Error>(next.error());
         }
         if (*next == nullptr) {
             return {};
@@ -265,7 +265,7 @@ Result<void> convertZipEntry(
 Result<void> convertZip(Conversion& conversion, File file) {
     auto reader = zip::Reader::open(std::move(file));
     if (!reader) {
-        return std::unexpected(reader.error());
+        return tl::unexpected<Error>(reader.error());
     }
 
     auto cursor = reader->entries();
@@ -274,7 +274,7 @@ Result<void> convertZip(Conversion& conversion, File file) {
     while (true) {
         auto more = cursor.next(entry);
         if (!more) {
-            return std::unexpected(more.error());
+            return tl::unexpected<Error>(more.error());
         }
         if (!*more) {
             return {};
@@ -282,7 +282,7 @@ Result<void> convertZip(Conversion& conversion, File file) {
 
         auto name = zip::nameAsUtf8(entry, nameStorage);
         if (!name) {
-            return std::unexpected(name.error());
+            return tl::unexpected<Error>(name.error());
         }
         auto converted = convertZipEntry(conversion, *reader, entry, *name);
         if (!converted) {
@@ -336,7 +336,7 @@ Result<void> convertSevenZipEntry(
 Result<void> convertSevenZip(Conversion& conversion, File file) {
     auto reader = sevenzip::Reader::open(std::move(file));
     if (!reader) {
-        return std::unexpected(reader.error());
+        return tl::unexpected<Error>(reader.error());
     }
 
     for (const auto& entry : reader->entries()) {
@@ -366,7 +366,7 @@ Result<void> convertArEntry(Conversion& conversion, ar::Reader& reader, const ar
 Result<void> convertAr(Conversion& conversion, File file) {
     auto reader = ar::Reader::open(std::move(file));
     if (!reader) {
-        return std::unexpected(reader.error());
+        return tl::unexpected<Error>(reader.error());
     }
 
     for (const auto& entry : reader->entries()) {
@@ -439,7 +439,7 @@ convertCpioEntry(Conversion& conversion, cpio::Reader& reader, const cpio::Entry
 Result<void> convertCpio(Conversion& conversion, File file) {
     auto reader = cpio::Reader::open(std::move(file));
     if (!reader) {
-        return std::unexpected(reader.error());
+        return tl::unexpected<Error>(reader.error());
     }
 
     for (const auto& entry : reader->entries()) {
@@ -539,7 +539,7 @@ Result<void> convertRpmEntry(
 Result<void> convertRpm(Conversion& conversion, File file) {
     auto reader = rpm::Reader::open(std::move(file));
     if (!reader) {
-        return std::unexpected(reader.error());
+        return tl::unexpected<Error>(reader.error());
     }
 
     std::set<std::string> directories;
@@ -590,7 +590,7 @@ Result<void> convertIsoEntry(Conversion& conversion, iso::Reader& reader, const 
 Result<void> convertIso(Conversion& conversion, File file) {
     auto reader = iso::Reader::open(std::move(file));
     if (!reader) {
-        return std::unexpected(reader.error());
+        return tl::unexpected<Error>(reader.error());
     }
 
     for (const auto& entry : reader->entries()) {
@@ -623,7 +623,7 @@ Result<void> convertCabEntry(Conversion& conversion, cab::Reader& reader, const 
 Result<void> convertCab(Conversion& conversion, File file) {
     auto reader = cab::Reader::open(std::move(file));
     if (!reader) {
-        return std::unexpected(reader.error());
+        return tl::unexpected<Error>(reader.error());
     }
 
     for (const auto& entry : reader->entries()) {
@@ -683,7 +683,7 @@ Result<void> convertWimEntry(Conversion& conversion, wim::Reader& reader, const 
 Result<void> convertWim(Conversion& conversion, File file, std::uint32_t imageIndex) {
     auto reader = wim::Reader::open(std::move(file), {}, imageIndex);
     if (!reader) {
-        return std::unexpected(reader.error());
+        return tl::unexpected<Error>(reader.error());
     }
 
     for (const auto& entry : reader->entries()) {
@@ -749,7 +749,7 @@ Result<void> convertBaleEntry(
 Result<void> convertBale(Conversion& conversion, File file) {
     auto reader = archive::Reader::open(std::move(file));
     if (!reader) {
-        return std::unexpected(reader.error());
+        return tl::unexpected<Error>(reader.error());
     }
 
     for (const auto& entry : reader->manifest().entries) {
@@ -773,7 +773,7 @@ Result<OutputSummary> convert(OpenedArchive archive, File file, const ConvertOpt
     outputOptions.sevenZipSolid = options.sevenZipSolid;
     auto output = ArchiveOutput::create(std::move(file), outputOptions);
     if (!output) {
-        return std::unexpected(output.error());
+        return tl::unexpected<Error>(output.error());
     }
 
     PathPolicy policy = convertPathPolicy;
@@ -822,7 +822,7 @@ Result<OutputSummary> convert(OpenedArchive archive, File file, const ConvertOpt
         break;
     }
     if (!converted) {
-        return std::unexpected(converted.error());
+        return tl::unexpected<Error>(converted.error());
     }
     return output->finish();
 }

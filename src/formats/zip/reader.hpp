@@ -131,13 +131,13 @@ class Reader {
     streamEntry(const Entry& entry, std::span<std::byte> scratch, Sink&& sink) {
         auto stream = beginEntry(entry, scratch);
         if (!stream) {
-            return std::unexpected(stream.error());
+            return tl::unexpected<Error>(stream.error());
         }
 
         while (true) {
             auto chunk = nextChunk(*stream);
             if (!chunk) {
-                return std::unexpected(chunk.error());
+                return tl::unexpected<Error>(chunk.error());
             }
             if (chunk->empty()) {
                 return {};
@@ -145,7 +145,7 @@ class Reader {
 
             auto sunk = sink(*chunk);
             if (!sunk) {
-                return std::unexpected(sunk.error());
+                return tl::unexpected<Error>(sunk.error());
             }
         }
     }

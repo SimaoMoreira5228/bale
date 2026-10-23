@@ -13,7 +13,6 @@
 #include <mutex>
 #include <optional>
 #include <span>
-#include <stop_token>
 #include <thread>
 #include <vector>
 
@@ -123,7 +122,7 @@ class ChunkPipeline {
     [[nodiscard]] bool decidable() const;
     [[nodiscard]] std::optional<std::size_t> claim();
     [[nodiscard]] std::optional<std::size_t> claimBlocking();
-    void work(const std::stop_token& stop, std::size_t worker);
+    void work(std::size_t worker);
     void run(std::size_t index, Stage stage, ChunkEncoder& encoder);
 
     std::mutex mutex_;
@@ -141,7 +140,7 @@ class ChunkPipeline {
     std::uint64_t head_ = 0;
     std::uint64_t decide_ = 0;
     std::uint64_t append_ = 0;
-    std::vector<std::jthread> workers_;
+    std::vector<std::thread> workers_;
 };
 
 }

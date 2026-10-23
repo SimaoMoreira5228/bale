@@ -23,7 +23,6 @@ using bale::test::TempFile;
 namespace {
 
 constexpr std::uint32_t flagLzx = 0x00040002;
-constexpr std::uint32_t flagXpress = 0x00020002;
 constexpr std::uint32_t chunk32k = 32768;
 constexpr std::uint32_t chunk64k = 65536;
 
@@ -159,63 +158,65 @@ Result<wim::Reader> openLzx(
 
 }
 
-TEST_CASE("wim reader decodes the wimlib LZX golden") {
-    // NOTE: wl_lzx.wim was captured with wimlib-imagex 1.14.5
-    // (--compress=lzx); only its metadata resource is LZX-compressed, which
-    // is exactly the refusal this workstream lifts.
-    auto reader = openBytes(golden("wl_lzx.wim"));
-    REQUIRE(reader);
-    REQUIRE(reader->entryCount() == 4);
-    const wim::Entry* alpha = find(*reader, "a.txt");
-    REQUIRE(alpha != nullptr);
-    auto data = collect(*reader, *alpha);
-    CHECK(std::string(reinterpret_cast<const char*>(data.data()), data.size()) == "alpha\n");
-    const wim::Entry* hard = find(*reader, "hard.txt");
-    REQUIRE(hard != nullptr);
-    CHECK(hard->kind == wim::EntryKind::HardLink);
-    CHECK(hard->linkTarget == "a.txt");
-    const wim::Entry* soft = find(*reader, "soft.lnk");
-    REQUIRE(soft != nullptr);
-    CHECK(soft->kind == wim::EntryKind::Symlink);
-    CHECK(soft->linkTarget == "b.txt");
-}
+TEST_CASE("wim LZX decodes the reference goldens") {
+    SUBCASE("wimlib LZX golden") {
+        // NOTE: wl_lzx.wim was captured with wimlib-imagex 1.14.5
+        // (--compress=lzx); only its metadata resource is LZX-compressed, which
+        // is exactly the refusal this workstream lifts.
+        auto reader = openBytes(golden("wl_lzx.wim"));
+        REQUIRE(reader);
+        REQUIRE(reader->entryCount() == 4);
+        const wim::Entry* alpha = find(*reader, "a.txt");
+        REQUIRE(alpha != nullptr);
+        auto data = collect(*reader, *alpha);
+        CHECK(std::string(reinterpret_cast<const char*>(data.data()), data.size()) == "alpha\n");
+        const wim::Entry* hard = find(*reader, "hard.txt");
+        REQUIRE(hard != nullptr);
+        CHECK(hard->kind == wim::EntryKind::HardLink);
+        CHECK(hard->linkTarget == "a.txt");
+        const wim::Entry* soft = find(*reader, "soft.lnk");
+        REQUIRE(soft != nullptr);
+        CHECK(soft->kind == wim::EntryKind::Symlink);
+        CHECK(soft->linkTarget == "b.txt");
+    }
 
-TEST_CASE("wim LZX matches 7-Zip on the multi-chunk golden") {
-    // NOTE: lzx_multi.wim was captured with wimlib-imagex 1.14.5
-    // (--compress=lzx) from a tree with a 100 KiB file (four LZX chunks),
-    // an x86 binary (E8-heavy), links and an empty file. Hashes below are
-    // the 7-Zip 26.04 extraction of the same file.
-    auto reader = openBytes(golden("lzx_multi.wim"));
-    REQUIRE(reader);
-    REQUIRE(reader->entryCount() == 8);
-    CHECK(collect(*reader, *find(*reader, "hello.txt")) == strBytes("hello wim lzx\n"));
-    CHECK(fnv(collect(*reader, *find(*reader, "big.bin"))) == 0x5C798FAE363ABB4BULL);
-    CHECK(fnv(collect(*reader, *find(*reader, "prog"))) == 0x097057C41E8D5F33ULL);
-    CHECK(find(*reader, "empty.txt")->size == 0);
-    CHECK(find(*reader, "hard.txt")->linkTarget == "a.txt");
-}
+    SUBCASE("7-Zip multi-chunk golden") {
+        // NOTE: lzx_multi.wim was captured with wimlib-imagex 1.14.5
+        // (--compress=lzx) from a tree with a 100 KiB file (four LZX chunks),
+        // an x86 binary (E8-heavy), links and an empty file. Hashes below are
+        // the 7-Zip 26.04 extraction of the same file.
+        auto reader = openBytes(golden("lzx_multi.wim"));
+        REQUIRE(reader);
+        REQUIRE(reader->entryCount() == 8);
+        CHECK(collect(*reader, *find(*reader, "hello.txt")) == strBytes("hello wim lzx\n"));
+        CHECK(fnv(collect(*reader, *find(*reader, "big.bin"))) == 0x5C798FAE363ABB4BULL);
+        CHECK(fnv(collect(*reader, *find(*reader, "prog"))) == 0x097057C41E8D5F33ULL);
+        CHECK(find(*reader, "empty.txt")->size == 0);
+        CHECK(find(*reader, "hard.txt")->linkTarget == "a.txt");
+    }
 
-TEST_CASE("wim LZX decodes the solid golden") {
-    // NOTE: lzx_solid.wim was captured with wimlib-imagex 1.14.5
-    // (--compress=lzx --solid --solid-compress=LZX): the same tree packed
-    // into one solid LZX resource. Same hashes as the non-solid golden.
-    auto reader = openBytes(golden("lzx_solid.wim"));
-    REQUIRE(reader);
-    REQUIRE(reader->entryCount() == 8);
-    CHECK(fnv(collect(*reader, *find(*reader, "big.bin"))) == 0x5C798FAE363ABB4BULL);
-    CHECK(fnv(collect(*reader, *find(*reader, "prog"))) == 0x097057C41E8D5F33ULL);
-    CHECK(collect(*reader, *find(*reader, "hello.txt")) == strBytes("hello wim lzx\n"));
-}
+    SUBCASE("solid golden") {
+        // NOTE: lzx_solid.wim was captured with wimlib-imagex 1.14.5
+        // (--compress=lzx --solid --solid-compress=LZX): the same tree packed
+        // into one solid LZX resource. Same hashes as the non-solid golden.
+        auto reader = openBytes(golden("lzx_solid.wim"));
+        REQUIRE(reader);
+        REQUIRE(reader->entryCount() == 8);
+        CHECK(fnv(collect(*reader, *find(*reader, "big.bin"))) == 0x5C798FAE363ABB4BULL);
+        CHECK(fnv(collect(*reader, *find(*reader, "prog"))) == 0x097057C41E8D5F33ULL);
+        CHECK(collect(*reader, *find(*reader, "hello.txt")) == strBytes("hello wim lzx\n"));
+    }
 
-TEST_CASE("wim LZX decodes the 64 KiB-chunk golden") {
-    // NOTE: lzx_chunk64.wim was captured with wimlib-imagex 1.14.5
-    // (--compress=lzx --chunk-size=64K): 24-bit block sizes, 32 slots, no
-    // 32 KiB frame padding, per-chunk E8. Same tree and hashes again.
-    auto reader = openBytes(golden("lzx_chunk64.wim"));
-    REQUIRE(reader);
-    REQUIRE(reader->entryCount() == 8);
-    CHECK(fnv(collect(*reader, *find(*reader, "big.bin"))) == 0x5C798FAE363ABB4BULL);
-    CHECK(fnv(collect(*reader, *find(*reader, "prog"))) == 0x097057C41E8D5F33ULL);
+    SUBCASE("64 KiB-chunk golden") {
+        // NOTE: lzx_chunk64.wim was captured with wimlib-imagex 1.14.5
+        // (--compress=lzx --chunk-size=64K): 24-bit block sizes, 32 slots, no
+        // 32 KiB frame padding, per-chunk E8. Same tree and hashes again.
+        auto reader = openBytes(golden("lzx_chunk64.wim"));
+        REQUIRE(reader);
+        REQUIRE(reader->entryCount() == 8);
+        CHECK(fnv(collect(*reader, *find(*reader, "big.bin"))) == 0x5C798FAE363ABB4BULL);
+        CHECK(fnv(collect(*reader, *find(*reader, "prog"))) == 0x097057C41E8D5F33ULL);
+    }
 }
 
 TEST_CASE("wim LZX decodes a mid-chunk raw block with E8 and an odd pad") {
@@ -442,124 +443,118 @@ TEST_CASE("wim LZX undoes E8 per chunk") {
     CHECK(tiny == std::vector<std::byte>{std::byte{0xE8}, std::byte{0x01}});
 }
 
-TEST_CASE("wim LZX refuses a bad block type") {
-    auto stored = asBytes(wim::test::kLzxverbatim_small_c0);
-    stored[1] = static_cast<std::byte>(std::to_integer<unsigned>(stored[1]) & 0x1F);
-    auto reader = openLzx("v.bin", asBytes(wim::test::kLzxverbatim_small_plain), {stored});
-    REQUIRE(reader);
-    std::vector<std::byte> scratch(64);
-    auto streamed =
-        reader->streamEntry(reader->entries()[0], scratch, [](std::span<const std::byte>) {
-            return Result<void>{};
-        });
-    REQUIRE_FALSE(streamed);
-    CHECK(streamed.error().kind == ErrorKind::Malformed);
+TEST_CASE("wim LZX refuses malformed chunks") {
+    SUBCASE("a bad block type") {
+        auto stored = asBytes(wim::test::kLzxverbatim_small_c0);
+        stored[1] = static_cast<std::byte>(std::to_integer<unsigned>(stored[1]) & 0x1F);
+        auto reader = openLzx("v.bin", asBytes(wim::test::kLzxverbatim_small_plain), {stored});
+        REQUIRE(reader);
+        std::vector<std::byte> scratch(64);
+        auto streamed =
+            reader->streamEntry(reader->entries()[0], scratch, [](std::span<const std::byte>) {
+                return Result<void>{};
+            });
+        REQUIRE_FALSE(streamed);
+        CHECK(streamed.error().kind == ErrorKind::Malformed);
+    }
+    SUBCASE("a zero-size block") {
+        // NOTE: verbatim type, explicit zero size: the first 20 bits carry the
+        // whole header, so bytes 0..3 pin the rejection deterministically.
+        auto stored = asBytes(wim::test::kLzxverbatim_small_c0);
+        stored[0] = std::byte{0x20};
+        stored[1] = std::byte{0x00};
+        stored[2] = std::byte{0x00};
+        stored[3] = std::byte{0x00};
+        auto reader = openLzx("v.bin", asBytes(wim::test::kLzxverbatim_small_plain), {stored});
+        REQUIRE(reader);
+        std::vector<std::byte> scratch(64);
+        auto streamed =
+            reader->streamEntry(reader->entries()[0], scratch, [](std::span<const std::byte>) {
+                return Result<void>{};
+            });
+        REQUIRE_FALSE(streamed);
+        CHECK(streamed.error().kind == ErrorKind::Malformed);
+    }
+    SUBCASE("a block past its chunk") {
+        auto stored = asBytes(wim::test::kLzxverbatim_small_c0);
+        stored[0] = std::byte{0x27};
+        stored[1] = std::byte{0xFF};
+        stored[2] = std::byte{0xFF};
+        stored[3] = std::byte{0x00};
+        auto reader = openLzx("v.bin", asBytes(wim::test::kLzxverbatim_small_plain), {stored});
+        REQUIRE(reader);
+        std::vector<std::byte> scratch(64);
+        auto streamed =
+            reader->streamEntry(reader->entries()[0], scratch, [](std::span<const std::byte>) {
+                return Result<void>{};
+            });
+        REQUIRE_FALSE(streamed);
+        CHECK(streamed.error().kind == ErrorKind::Malformed);
+    }
+    SUBCASE("a damaged Huffman stream") {
+        auto stored = asBytes(wim::test::kLzxverbatim_small_c0);
+        stored[stored.size() / 2] =
+            static_cast<std::byte>(std::to_integer<unsigned>(stored[stored.size() / 2]) ^ 0xFF);
+        auto reader = openLzx("v.bin", asBytes(wim::test::kLzxverbatim_small_plain), {stored});
+        REQUIRE(reader);
+        std::vector<std::byte> scratch(64);
+        auto streamed =
+            reader->streamEntry(reader->entries()[0], scratch, [](std::span<const std::byte>) {
+                return Result<void>{};
+            });
+        REQUIRE_FALSE(streamed);
+        CHECK(streamed.error().kind == ErrorKind::Malformed);
+    }
+    SUBCASE("a chunk that ends early") {
+        auto stored = asBytes(wim::test::kLzxverbatim_small_c0);
+        stored.resize(stored.size() - 10);
+        auto reader = openLzx("v.bin", asBytes(wim::test::kLzxverbatim_small_plain), {stored});
+        REQUIRE(reader);
+        std::vector<std::byte> scratch(64);
+        auto streamed =
+            reader->streamEntry(reader->entries()[0], scratch, [](std::span<const std::byte>) {
+                return Result<void>{};
+            });
+        REQUIRE_FALSE(streamed);
+        CHECK(streamed.error().kind == ErrorKind::Malformed);
+    }
+    SUBCASE("truncation past the file end") {
+        TempFile temp{std::span<const std::byte>(wim::test::kLzxverbatim_small_c0)};
+        REQUIRE(temp.ok());
+        auto file = temp.open();
+        REQUIRE(file);
+        auto decoded = wim::decodeLzxChunk(*file, 0, 200, 263, chunk32k, 0);
+        REQUIRE_FALSE(decoded);
+        CHECK(decoded.error().kind == ErrorKind::Truncated);
+    }
+    SUBCASE("a ragged chunk size") {
+        // NOTE: header-level budget pin: compressed archives need a power of
+        // two chunk size, so decode never sees unbounded windows.
+        wim::test::TestWim spec;
+        spec.flags = flagLzx;
+        spec.chunkSize = 40000;
+        wim::test::TestFile file;
+        file.path = "z.bin";
+        file.data = {std::byte{'z'}};
+        spec.images[0].files.push_back(file);
+        auto bytes = buildWim(spec);
+        auto reader = openBytes(bytes);
+        REQUIRE_FALSE(reader);
+        CHECK(reader.error().kind == ErrorKind::Malformed);
+    }
+    SUBCASE("an oversized chunk window") {
+        auto plain = std::vector<std::byte>(100, std::byte{'x'});
+        auto stored = std::vector<std::vector<std::byte>>{std::vector<std::byte>(50, std::byte{0})};
+        auto spec = lzxSpec("v.bin", plain, stored, 1U << 22);
+        auto bytes = buildWim(spec);
+        auto reader = openBytes(bytes);
+        REQUIRE(reader);
+        std::vector<std::byte> scratch(64);
+        auto streamed =
+            reader->streamEntry(reader->entries()[0], scratch, [](std::span<const std::byte>) {
+                return Result<void>{};
+            });
+        REQUIRE_FALSE(streamed);
+        CHECK(streamed.error().kind == ErrorKind::Unsupported);
+    }
 }
-
-TEST_CASE("wim LZX refuses a zero-size block") {
-    // NOTE: verbatim type, explicit zero size: the first 20 bits carry the
-    // whole header, so bytes 0..3 pin the rejection deterministically.
-    auto stored = asBytes(wim::test::kLzxverbatim_small_c0);
-    stored[0] = std::byte{0x20};
-    stored[1] = std::byte{0x00};
-    stored[2] = std::byte{0x00};
-    stored[3] = std::byte{0x00};
-    auto reader = openLzx("v.bin", asBytes(wim::test::kLzxverbatim_small_plain), {stored});
-    REQUIRE(reader);
-    std::vector<std::byte> scratch(64);
-    auto streamed =
-        reader->streamEntry(reader->entries()[0], scratch, [](std::span<const std::byte>) {
-            return Result<void>{};
-        });
-    REQUIRE_FALSE(streamed);
-    CHECK(streamed.error().kind == ErrorKind::Malformed);
-}
-
-TEST_CASE("wim LZX refuses a block past its chunk") {
-    auto stored = asBytes(wim::test::kLzxverbatim_small_c0);
-    stored[0] = std::byte{0x27};
-    stored[1] = std::byte{0xFF};
-    stored[2] = std::byte{0xFF};
-    stored[3] = std::byte{0x00};
-    auto reader = openLzx("v.bin", asBytes(wim::test::kLzxverbatim_small_plain), {stored});
-    REQUIRE(reader);
-    std::vector<std::byte> scratch(64);
-    auto streamed =
-        reader->streamEntry(reader->entries()[0], scratch, [](std::span<const std::byte>) {
-            return Result<void>{};
-        });
-    REQUIRE_FALSE(streamed);
-    CHECK(streamed.error().kind == ErrorKind::Malformed);
-}
-
-TEST_CASE("wim LZX refuses a damaged Huffman stream") {
-    auto stored = asBytes(wim::test::kLzxverbatim_small_c0);
-    stored[stored.size() / 2] =
-        static_cast<std::byte>(std::to_integer<unsigned>(stored[stored.size() / 2]) ^ 0xFF);
-    auto reader = openLzx("v.bin", asBytes(wim::test::kLzxverbatim_small_plain), {stored});
-    REQUIRE(reader);
-    std::vector<std::byte> scratch(64);
-    auto streamed =
-        reader->streamEntry(reader->entries()[0], scratch, [](std::span<const std::byte>) {
-            return Result<void>{};
-        });
-    REQUIRE_FALSE(streamed);
-    CHECK(streamed.error().kind == ErrorKind::Malformed);
-}
-
-TEST_CASE("wim LZX refuses a chunk that ends early") {
-    auto stored = asBytes(wim::test::kLzxverbatim_small_c0);
-    stored.resize(stored.size() - 10);
-    auto reader = openLzx("v.bin", asBytes(wim::test::kLzxverbatim_small_plain), {stored});
-    REQUIRE(reader);
-    std::vector<std::byte> scratch(64);
-    auto streamed =
-        reader->streamEntry(reader->entries()[0], scratch, [](std::span<const std::byte>) {
-            return Result<void>{};
-        });
-    REQUIRE_FALSE(streamed);
-    CHECK(streamed.error().kind == ErrorKind::Malformed);
-}
-
-TEST_CASE("wim LZX reports truncation past the file end") {
-    TempFile temp{std::span<const std::byte>(wim::test::kLzxverbatim_small_c0)};
-    REQUIRE(temp.ok());
-    auto file = temp.open();
-    REQUIRE(file);
-    auto decoded = wim::decodeLzxChunk(*file, 0, 200, 263, chunk32k, 0);
-    REQUIRE_FALSE(decoded);
-    CHECK(decoded.error().kind == ErrorKind::Truncated);
-}
-
-TEST_CASE("wim reader rejects a ragged chunk size") {
-    // NOTE: header-level budget pin: compressed archives need a power of
-    // two chunk size, so decode never sees unbounded windows.
-    wim::test::TestWim spec;
-    spec.flags = flagLzx;
-    spec.chunkSize = 40000;
-    wim::test::TestFile file;
-    file.path = "z.bin";
-    file.data = {std::byte{'z'}};
-    spec.images[0].files.push_back(file);
-    auto bytes = buildWim(spec);
-    auto reader = openBytes(bytes);
-    REQUIRE_FALSE(reader);
-    CHECK(reader.error().kind == ErrorKind::Malformed);
-}
-
-TEST_CASE("wim LZX refuses an oversized chunk window") {
-    auto plain = std::vector<std::byte>(100, std::byte{'x'});
-    auto stored = std::vector<std::vector<std::byte>>{std::vector<std::byte>(50, std::byte{0})};
-    auto spec = lzxSpec("v.bin", plain, stored, 1U << 22);
-    auto bytes = buildWim(spec);
-    auto reader = openBytes(bytes);
-    REQUIRE(reader);
-    std::vector<std::byte> scratch(64);
-    auto streamed =
-        reader->streamEntry(reader->entries()[0], scratch, [](std::span<const std::byte>) {
-            return Result<void>{};
-        });
-    REQUIRE_FALSE(streamed);
-    CHECK(streamed.error().kind == ErrorKind::Unsupported);
-}
-

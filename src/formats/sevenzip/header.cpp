@@ -25,7 +25,7 @@ constexpr std::uint8_t coderIdSizeMask = 0x0F;
 Result<Coder> readCoder(ByteReader& reader, std::uint64_t offset, const Limits& limits) {
     auto flags = readId(reader);
     if (!flags) {
-        return std::unexpected(flags.error());
+        return tl::unexpected<Error>(flags.error());
     }
     if ((*flags & (coderFlagReserved | coderFlagAltMethods)) != 0) {
         return fail(ErrorKind::Malformed, "7z coder uses reserved flags", offset);
@@ -38,7 +38,7 @@ Result<Coder> readCoder(ByteReader& reader, std::uint64_t offset, const Limits& 
 
     auto id = reader.bytes(static_cast<std::size_t>(idSize));
     if (!id) {
-        return std::unexpected(id.error());
+        return tl::unexpected<Error>(id.error());
     }
 
     Coder coder;
@@ -50,11 +50,11 @@ Result<Coder> readCoder(ByteReader& reader, std::uint64_t offset, const Limits& 
     if (complex) {
         auto inStreams = readNumber(reader);
         if (!inStreams) {
-            return std::unexpected(inStreams.error());
+            return tl::unexpected<Error>(inStreams.error());
         }
         auto outStreams = readNumber(reader);
         if (!outStreams) {
-            return std::unexpected(outStreams.error());
+            return tl::unexpected<Error>(outStreams.error());
         }
         coder.inStreams = *inStreams;
         coder.outStreams = *outStreams;
@@ -63,7 +63,7 @@ Result<Coder> readCoder(ByteReader& reader, std::uint64_t offset, const Limits& 
     if ((*flags & coderFlagAttributes) != 0) {
         auto propsSize = readNumber(reader);
         if (!propsSize) {
-            return std::unexpected(propsSize.error());
+            return tl::unexpected<Error>(propsSize.error());
         }
         if (*propsSize > limits.maxHeaderBytes || *propsSize > reader.remaining()) {
             return fail(ErrorKind::Malformed, "7z coder properties overrun the header", offset);
@@ -71,7 +71,7 @@ Result<Coder> readCoder(ByteReader& reader, std::uint64_t offset, const Limits& 
 
         auto props = reader.bytes(checkedCast<std::size_t>(*propsSize).value_or(0));
         if (!props) {
-            return std::unexpected(props.error());
+            return tl::unexpected<Error>(props.error());
         }
         coder.props.assign(props->begin(), props->end());
     }
@@ -81,7 +81,7 @@ Result<Coder> readCoder(ByteReader& reader, std::uint64_t offset, const Limits& 
 Result<Folder> readFolder(ByteReader& reader, std::uint64_t offset, const Limits& limits) {
     auto numCoders = readNumber(reader);
     if (!numCoders) {
-        return std::unexpected(numCoders.error());
+        return tl::unexpected<Error>(numCoders.error());
     }
     if (*numCoders == 0 || *numCoders > limits.maxEntries) {
         return fail(ErrorKind::Malformed, "7z folder has an impossible coder count", offset);
@@ -92,7 +92,7 @@ Result<Folder> readFolder(ByteReader& reader, std::uint64_t offset, const Limits
     for (std::uint64_t index = 0; index < *numCoders; ++index) {
         auto coder = readCoder(reader, offset, limits);
         if (!coder) {
-            return std::unexpected(coder.error());
+            return tl::unexpected<Error>(coder.error());
         }
 
         auto inTotal = checkedAdd(folder.numInStreams, coder->inStreams);
@@ -117,11 +117,11 @@ Result<Folder> readFolder(ByteReader& reader, std::uint64_t offset, const Limits
     for (std::uint64_t index = 0; index < numBinds; ++index) {
         auto inIndex = readNumber(reader);
         if (!inIndex) {
-            return std::unexpected(inIndex.error());
+            return tl::unexpected<Error>(inIndex.error());
         }
         auto outIndex = readNumber(reader);
         if (!outIndex) {
-            return std::unexpected(outIndex.error());
+            return tl::unexpected<Error>(outIndex.error());
         }
         if (*inIndex >= folder.numInStreams || *outIndex >= folder.numOutStreams) {
             return fail(ErrorKind::Malformed, "7z bind pair references no stream", offset);
@@ -144,7 +144,7 @@ Result<Folder> readFolder(ByteReader& reader, std::uint64_t offset, const Limits
         for (std::uint64_t index = 0; index < packed; ++index) {
             auto stream = readNumber(reader);
             if (!stream) {
-                return std::unexpected(stream.error());
+                return tl::unexpected<Error>(stream.error());
             }
             folder.packedStreams.push_back(*stream);
         }
@@ -174,13 +174,13 @@ Result<void> readPackInfo(ByteReader& reader, Model& model, const Limits& limits
     auto offset = reader.offset();
     auto packPos = readNumber(reader);
     if (!packPos) {
-        return std::unexpected(packPos.error());
+        return tl::unexpected<Error>(packPos.error());
     }
     model.packPos = *packPos;
 
     auto numStreams = readNumber(reader);
     if (!numStreams) {
-        return std::unexpected(numStreams.error());
+        return tl::unexpected<Error>(numStreams.error());
     }
     if (*numStreams > limits.maxEntries) {
         return fail(ErrorKind::LimitExceeded, "7z pack stream count exceeds limit", offset);
@@ -189,28 +189,28 @@ Result<void> readPackInfo(ByteReader& reader, Model& model, const Limits& limits
 
     auto id = readId(reader);
     if (!id) {
-        return std::unexpected(id.error());
+        return tl::unexpected<Error>(id.error());
     }
 
     if (*id == nidSize) {
         for (auto& pack : model.packs) {
             auto size = readNumber(reader);
             if (!size) {
-                return std::unexpected(size.error());
+                return tl::unexpected<Error>(size.error());
             }
             pack.size = *size;
         }
 
         id = readId(reader);
         if (!id) {
-            return std::unexpected(id.error());
+            return tl::unexpected<Error>(id.error());
         }
     }
 
     if (*id == nidCrc) {
         auto digests = readDigests(reader, *numStreams, limits);
         if (!digests) {
-            return std::unexpected(digests.error());
+            return tl::unexpected<Error>(digests.error());
         }
         for (std::size_t index = 0; index < model.packs.size(); ++index) {
             model.packs[index].crc = (*digests)[index];
@@ -218,7 +218,7 @@ Result<void> readPackInfo(ByteReader& reader, Model& model, const Limits& limits
 
         id = readId(reader);
         if (!id) {
-            return std::unexpected(id.error());
+            return tl::unexpected<Error>(id.error());
         }
     }
 
@@ -237,7 +237,7 @@ Result<void> readUnpackInfo(ByteReader& reader, Model& model, const Limits& limi
     auto offset = reader.offset();
     auto numFolders = readNumber(reader);
     if (!numFolders) {
-        return std::unexpected(numFolders.error());
+        return tl::unexpected<Error>(numFolders.error());
     }
     if (*numFolders > limits.maxFolders) {
         return fail(ErrorKind::LimitExceeded, "7z folder count exceeds limit", offset);
@@ -246,7 +246,7 @@ Result<void> readUnpackInfo(ByteReader& reader, Model& model, const Limits& limi
 
     auto external = readId(reader);
     if (!external) {
-        return std::unexpected(external.error());
+        return tl::unexpected<Error>(external.error());
     }
     if (*external != 0) {
         return fail(
@@ -259,7 +259,7 @@ Result<void> readUnpackInfo(ByteReader& reader, Model& model, const Limits& limi
     for (std::uint64_t index = 0; index < *numFolders; ++index) {
         auto folder = readFolder(reader, offset, limits);
         if (!folder) {
-            return std::unexpected(folder.error());
+            return tl::unexpected<Error>(folder.error());
         }
         model.folders.push_back(std::move(*folder));
     }
@@ -277,7 +277,7 @@ Result<void> readUnpackInfo(ByteReader& reader, Model& model, const Limits& limi
         for (std::uint64_t index = 0; index < folder.numOutStreams; ++index) {
             auto size = readNumber(reader);
             if (!size) {
-                return std::unexpected(size.error());
+                return tl::unexpected<Error>(size.error());
             }
             folder.unpackSizes.push_back(*size);
         }
@@ -285,12 +285,12 @@ Result<void> readUnpackInfo(ByteReader& reader, Model& model, const Limits& limi
 
     auto id = readId(reader);
     if (!id) {
-        return std::unexpected(id.error());
+        return tl::unexpected<Error>(id.error());
     }
     if (*id == nidCrc) {
         auto digests = readDigests(reader, *numFolders, limits);
         if (!digests) {
-            return std::unexpected(digests.error());
+            return tl::unexpected<Error>(digests.error());
         }
         for (std::size_t index = 0; index < model.folders.size(); ++index) {
             model.folders[index].crc = (*digests)[index];
@@ -298,7 +298,7 @@ Result<void> readUnpackInfo(ByteReader& reader, Model& model, const Limits& limi
 
         id = readId(reader);
         if (!id) {
-            return std::unexpected(id.error());
+            return tl::unexpected<Error>(id.error());
         }
     }
 
@@ -315,14 +315,14 @@ readSubStreams(ByteReader& reader, const Model& model, const Limits& limits) {
 
     auto id = readId(reader);
     if (!id) {
-        return std::unexpected(id.error());
+        return tl::unexpected<Error>(id.error());
     }
 
     if (*id == nidNumUnpackStream) {
         for (std::size_t index = 0; index < model.folders.size(); ++index) {
             auto count = readNumber(reader);
             if (!count) {
-                return std::unexpected(count.error());
+                return tl::unexpected<Error>(count.error());
             }
             if (*count == 0 || *count > limits.maxEntries) {
                 return fail(
@@ -336,7 +336,7 @@ readSubStreams(ByteReader& reader, const Model& model, const Limits& limits) {
 
         id = readId(reader);
         if (!id) {
-            return std::unexpected(id.error());
+            return tl::unexpected<Error>(id.error());
         }
     }
 
@@ -354,7 +354,7 @@ readSubStreams(ByteReader& reader, const Model& model, const Limits& limits) {
         for (std::size_t folder = 0; folder < model.folders.size(); ++folder) {
             auto output = folderOutputSize(model.folders[folder], reader.offset());
             if (!output) {
-                return std::unexpected(output.error());
+                return tl::unexpected<Error>(output.error());
             }
             std::uint64_t folderSize = *output;
 
@@ -363,7 +363,7 @@ readSubStreams(ByteReader& reader, const Model& model, const Limits& limits) {
             for (std::size_t index = 0; index + 1 < folderStreams.size(); ++index) {
                 auto size = readNumber(reader);
                 if (!size) {
-                    return std::unexpected(size.error());
+                    return tl::unexpected<Error>(size.error());
                 }
 
                 auto next = checkedAdd(prefix, *size);
@@ -390,7 +390,7 @@ readSubStreams(ByteReader& reader, const Model& model, const Limits& limits) {
 
         id = readId(reader);
         if (!id) {
-            return std::unexpected(id.error());
+            return tl::unexpected<Error>(id.error());
         }
     } else {
         for (std::size_t folder = 0; folder < model.folders.size(); ++folder) {
@@ -403,7 +403,7 @@ readSubStreams(ByteReader& reader, const Model& model, const Limits& limits) {
             }
             auto output = folderOutputSize(model.folders[folder], reader.offset());
             if (!output) {
-                return std::unexpected(output.error());
+                return tl::unexpected<Error>(output.error());
             }
             streams[folder].front().size = *output;
         }
@@ -412,7 +412,7 @@ readSubStreams(ByteReader& reader, const Model& model, const Limits& limits) {
     if (*id == nidCrc) {
         auto digests = readDigests(reader, total, limits);
         if (!digests) {
-            return std::unexpected(digests.error());
+            return tl::unexpected<Error>(digests.error());
         }
 
         std::size_t cursor = 0;
@@ -424,7 +424,7 @@ readSubStreams(ByteReader& reader, const Model& model, const Limits& limits) {
 
         id = readId(reader);
         if (!id) {
-            return std::unexpected(id.error());
+            return tl::unexpected<Error>(id.error());
         }
     }
 
@@ -441,7 +441,7 @@ readSubStreams(ByteReader& reader, const Model& model, const Limits& limits) {
 Result<void> readStreamsInfo(ByteReader& reader, Model& model, const Limits& limits) {
     auto id = readId(reader);
     if (!id) {
-        return std::unexpected(id.error());
+        return tl::unexpected<Error>(id.error());
     }
 
     if (*id == nidPackInfo) {
@@ -453,7 +453,7 @@ Result<void> readStreamsInfo(ByteReader& reader, Model& model, const Limits& lim
 
         id = readId(reader);
         if (!id) {
-            return std::unexpected(id.error());
+            return tl::unexpected<Error>(id.error());
         }
     }
 
@@ -468,20 +468,20 @@ Result<void> readStreamsInfo(ByteReader& reader, Model& model, const Limits& lim
 
         id = readId(reader);
         if (!id) {
-            return std::unexpected(id.error());
+            return tl::unexpected<Error>(id.error());
         }
     }
 
     if (*id == nidSubStreams) {
         auto streams = readSubStreams(reader, model, limits);
         if (!streams) {
-            return std::unexpected(streams.error());
+            return tl::unexpected<Error>(streams.error());
         }
         model.substreams = std::move(*streams);
 
         id = readId(reader);
         if (!id) {
-            return std::unexpected(id.error());
+            return tl::unexpected<Error>(id.error());
         }
     }
 
@@ -494,7 +494,7 @@ Result<void> readStreamsInfo(ByteReader& reader, Model& model, const Limits& lim
         for (std::size_t index = 0; index < model.folders.size(); ++index) {
             auto output = folderOutputSize(model.folders[index], reader.offset());
             if (!output) {
-                return std::unexpected(output.error());
+                return tl::unexpected<Error>(output.error());
             }
             model.substreams[index].push_back(
                 SubStream{
@@ -516,25 +516,25 @@ Result<Model> parseStreamsAndFiles(ByteReader& reader, const Limits& limits) {
     Model model;
     auto id = readId(reader);
     if (!id) {
-        return std::unexpected(id.error());
+        return tl::unexpected<Error>(id.error());
     }
 
     if (*id == nidArchiveProperties) {
         auto skipped = skipProperties(reader, reader.offset());
         if (!skipped) {
-            return std::unexpected(skipped.error());
+            return tl::unexpected<Error>(skipped.error());
         }
 
         id = readId(reader);
         if (!id) {
-            return std::unexpected(id.error());
+            return tl::unexpected<Error>(id.error());
         }
     }
 
     if (*id == nidAdditionalStreams) {
         auto additional = readStreamsInfo(reader, model, limits);
         if (!additional) {
-            return std::unexpected(additional.error());
+            return tl::unexpected<Error>(additional.error());
         }
         if (model.hasStreams) {
             return fail(
@@ -546,7 +546,7 @@ Result<Model> parseStreamsAndFiles(ByteReader& reader, const Limits& limits) {
 
         id = readId(reader);
         if (!id) {
-            return std::unexpected(id.error());
+            return tl::unexpected<Error>(id.error());
         }
     }
 
@@ -554,7 +554,7 @@ Result<Model> parseStreamsAndFiles(ByteReader& reader, const Limits& limits) {
         Model main;
         auto streams = readStreamsInfo(reader, main, limits);
         if (!streams) {
-            return std::unexpected(streams.error());
+            return tl::unexpected<Error>(streams.error());
         }
         model.packPos = main.packPos;
         model.packs = std::move(main.packs);
@@ -564,19 +564,19 @@ Result<Model> parseStreamsAndFiles(ByteReader& reader, const Limits& limits) {
 
         id = readId(reader);
         if (!id) {
-            return std::unexpected(id.error());
+            return tl::unexpected<Error>(id.error());
         }
     }
 
     if (*id == nidFilesInfo) {
         auto files = readFilesInfo(reader, model, limits);
         if (!files) {
-            return std::unexpected(files.error());
+            return tl::unexpected<Error>(files.error());
         }
 
         id = readId(reader);
         if (!id) {
-            return std::unexpected(id.error());
+            return tl::unexpected<Error>(id.error());
         }
     }
 
@@ -594,7 +594,7 @@ Result<Model> parseStreamsAndFiles(ByteReader& reader, const Limits& limits) {
 Result<Signature> readSignature(const File& file, const Limits& limits) {
     auto size = file.size();
     if (!size) {
-        return std::unexpected(size.error());
+        return tl::unexpected<Error>(size.error());
     }
     if (*size < signatureSize) {
         return fail(ErrorKind::Malformed, "file too small to be a 7z archive");
@@ -603,7 +603,7 @@ Result<Signature> readSignature(const File& file, const Limits& limits) {
     std::array<std::byte, signatureSize> signature{};
     auto read = file.readExactAt(0, signature);
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
 
     if (!std::ranges::equal(signatureMagic, std::span(signature).first(signatureMagic.size()))) {
@@ -640,7 +640,7 @@ Result<Signature> readSignature(const File& file, const Limits& limits) {
     std::vector<std::byte> bytes(checkedCast<std::size_t>(headerSize).value_or(0));
     auto headerRead = file.readExactAt(*dataStart, bytes);
     if (!headerRead) {
-        return std::unexpected(headerRead.error());
+        return tl::unexpected<Error>(headerRead.error());
     }
     if (Crc32::of(bytes) != headerCrc) {
         return fail(ErrorKind::Integrity, "7z header CRC mismatch");
@@ -662,14 +662,14 @@ parseHeader(std::span<const std::byte> bytes, std::uint64_t baseOffset, const Li
     ByteReader reader(bytes, baseOffset);
     auto first = readId(reader);
     if (!first) {
-        return std::unexpected(first.error());
+        return tl::unexpected<Error>(first.error());
     }
 
     if (*first == nidEncodedHeader) {
         Model outer;
         auto streams = readStreamsInfo(reader, outer, limits);
         if (!streams) {
-            return std::unexpected(streams.error());
+            return tl::unexpected<Error>(streams.error());
         }
         if (!reader.empty()) {
             return fail(

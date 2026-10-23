@@ -47,9 +47,11 @@ struct Store {
     case TagType::String:
     case TagType::StringArray:
     case TagType::I18nString:
-        return std::unexpected(fail(ErrorKind::Malformed, "string tag has no fixed size", at));
+        return tl::unexpected<Error>(
+            fail(ErrorKind::Malformed, "string tag has no fixed size", at)
+        );
     }
-    return std::unexpected(fail(ErrorKind::Malformed, "unknown rpm tag type", at));
+    return tl::unexpected<Error>(fail(ErrorKind::Malformed, "unknown rpm tag type", at));
 }
 
 [[nodiscard]] Result<void>
@@ -104,7 +106,7 @@ hasHeaderMagic(const File& file, std::uint64_t at, std::uint64_t fileSize) {
     std::array<std::byte, 4> probe{};
     auto read = file.readExactAt(at, probe);
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
     return probe[0] == headerMagic[0] && probe[1] == headerMagic[1] && probe[2] == headerMagic[2] &&
         probe[3] == std::byte{headerVersion};
@@ -119,7 +121,7 @@ skipHeaderPadding(const File& file, std::uint64_t at, std::uint64_t limit) {
         std::array<std::byte, 1> probe{};
         auto read = file.readAt(at, probe);
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         if (*read == 0) {
             return at;
@@ -148,7 +150,7 @@ skipHeaderPadding(const File& file, std::uint64_t at, std::uint64_t limit) {
     std::array<std::byte, headerPrefixSize> prefix{};
     auto read = file.readExactAt(at, prefix);
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
     if (!std::equal(prefix.begin(), prefix.begin() + 3, headerMagic.begin())) {
         return fail(ErrorKind::Malformed, "unknown rpm header magic", at);
@@ -167,7 +169,7 @@ skipHeaderPadding(const File& file, std::uint64_t at, std::uint64_t limit) {
         return fail(ErrorKind::LimitExceeded, "rpm header store exceeds limit", at);
     }
 
-    auto indexBytes = checkedMul<std::uint64_t>(count, headerIndexSize);
+    auto indexBytes = checkedMul(count, headerIndexSize);
     if (!indexBytes) {
         return fail(ErrorKind::Malformed, "rpm header index size overflows", at);
     }
@@ -190,7 +192,7 @@ skipHeaderPadding(const File& file, std::uint64_t at, std::uint64_t limit) {
         std::vector<std::byte> raw(*rawBytes);
         auto indexRead = file.readExactAt(*end, raw);
         if (!indexRead) {
-            return std::unexpected(indexRead.error());
+            return tl::unexpected<Error>(indexRead.error());
         }
         store.entries.reserve(count);
         for (std::uint64_t index = 0; index < count; ++index) {
@@ -199,7 +201,7 @@ skipHeaderPadding(const File& file, std::uint64_t at, std::uint64_t limit) {
                 parseIndex(std::span<const std::byte>(raw).subspan(offset, headerIndexSize));
             if (!parsed) {
                 parsed.error().offset = at;
-                return std::unexpected(parsed.error());
+                return tl::unexpected<Error>(parsed.error());
             }
             store.entries.push_back(*parsed);
         }
@@ -209,7 +211,7 @@ skipHeaderPadding(const File& file, std::uint64_t at, std::uint64_t limit) {
     if (storeBytes > 0) {
         auto dataRead = file.readExactAt(*storeStart, store.bytes);
         if (!dataRead) {
-            return std::unexpected(dataRead.error());
+            return tl::unexpected<Error>(dataRead.error());
         }
     }
 
@@ -224,13 +226,13 @@ skipHeaderPadding(const File& file, std::uint64_t at, std::uint64_t limit) {
             }
             auto checked = validateStrings(store, entry, limits);
             if (!checked) {
-                return std::unexpected(checked.error());
+                return tl::unexpected<Error>(checked.error());
             }
             continue;
         }
         auto unit = elementSize(entry.type, at);
         if (!unit) {
-            return std::unexpected(unit.error());
+            return tl::unexpected<Error>(unit.error());
         }
         auto total = checkedMul(*unit, entry.count);
         if (!total) {
@@ -321,7 +323,7 @@ Result<Package> parsePackage(const File& file, std::uint64_t fileSize, const Lim
         if (have > 0) {
             auto read = file.readExactAt(0, std::span(magic).first(have));
             if (!read) {
-                return std::unexpected(read.error());
+                return tl::unexpected<Error>(read.error());
             }
         }
         if (!looksLikeRpm(std::span<const std::byte>(magic).first(have))) {
@@ -333,7 +335,7 @@ Result<Package> parsePackage(const File& file, std::uint64_t fileSize, const Lim
     std::array<std::byte, leadSize> lead{};
     auto leadRead = file.readExactAt(0, lead);
     if (!leadRead) {
-        return std::unexpected(leadRead.error());
+        return tl::unexpected<Error>(leadRead.error());
     }
     if (!looksLikeRpm(lead)) {
         return fail(ErrorKind::Malformed, "not an rpm package");
@@ -353,7 +355,7 @@ Result<Package> parsePackage(const File& file, std::uint64_t fileSize, const Lim
         auto signature =
             parseStore(file, leadSize, fileSize, limits, afterSignature, signaturePadded);
         if (!signature) {
-            return std::unexpected(signature.error());
+            return tl::unexpected<Error>(signature.error());
         }
         if (signature->entries.size() > limits.maxSignatureTags) {
             return fail(ErrorKind::LimitExceeded, "rpm signature count exceeds limit", leadSize);
@@ -370,7 +372,7 @@ Result<Package> parsePackage(const File& file, std::uint64_t fileSize, const Lim
     {
         auto magic = hasHeaderMagic(file, afterSignature, fileSize);
         if (!magic) {
-            return std::unexpected(magic.error());
+            return tl::unexpected<Error>(magic.error());
         }
         if (*magic) {
             mainAt = afterSignature;
@@ -382,39 +384,39 @@ Result<Package> parsePackage(const File& file, std::uint64_t fileSize, const Lim
     {
         auto header = parseStore(file, mainAt, fileSize, limits, headerEnd, headerPadded);
         if (!header) {
-            return std::unexpected(header.error());
+            return tl::unexpected<Error>(header.error());
         }
         auto name = readString(*header, tagName, true);
         if (!name) {
-            return std::unexpected(name.error());
+            return tl::unexpected<Error>(name.error());
         }
         auto version = readString(*header, tagVersion, true);
         if (!version) {
-            return std::unexpected(version.error());
+            return tl::unexpected<Error>(version.error());
         }
         auto release = readString(*header, tagRelease, true);
         if (!release) {
-            return std::unexpected(release.error());
+            return tl::unexpected<Error>(release.error());
         }
         auto arch = readString(*header, tagArch, false);
         if (!arch) {
-            return std::unexpected(arch.error());
+            return tl::unexpected<Error>(arch.error());
         }
         auto os = readString(*header, tagOs, false);
         if (!os) {
-            return std::unexpected(os.error());
+            return tl::unexpected<Error>(os.error());
         }
         auto format = readString(*header, tagPayloadFormat, false);
         if (!format) {
-            return std::unexpected(format.error());
+            return tl::unexpected<Error>(format.error());
         }
         auto compressor = readString(*header, tagPayloadCompressor, false);
         if (!compressor) {
-            return std::unexpected(compressor.error());
+            return tl::unexpected<Error>(compressor.error());
         }
         auto flags = readString(*header, tagPayloadFlags, false);
         if (!flags) {
-            return std::unexpected(flags.error());
+            return tl::unexpected<Error>(flags.error());
         }
         package.name = std::move(*name);
         package.version = std::move(*version);
@@ -432,13 +434,13 @@ Result<Package> parsePackage(const File& file, std::uint64_t fileSize, const Lim
     }
     auto compression = mapCompressor(package.payloadCompressor, afterSignature);
     if (!compression) {
-        return std::unexpected(compression.error());
+        return tl::unexpected<Error>(compression.error());
     }
     package.compression = *compression;
     package.uncompressed = *compression == Compression::None;
     auto payloadStart = skipHeaderPadding(file, headerEnd, std::min(headerPadded, fileSize));
     if (!payloadStart) {
-        return std::unexpected(payloadStart.error());
+        return tl::unexpected<Error>(payloadStart.error());
     }
     package.payloadOffset = *payloadStart;
     if (package.payloadOffset > fileSize) {

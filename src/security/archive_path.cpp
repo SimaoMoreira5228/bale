@@ -211,6 +211,15 @@ Result<void> appendComponent(
         return fail(ErrorKind::UnsafePath, "parent directory component in path");
     }
 
+    // NOTE: separators split components, so a leading '/' cannot survive splitting;
+    // a leading backslash can only arrive here when backslashes are literal, after
+    // dot components were skipped. The raw input's prefix check never saw it, so
+    // check it here instead: without this, "./\x" normalizes to a path that the
+    // same function rejects, and normalization stops being idempotent.
+    if (out.empty() && !component.empty() && isSlashLike(component.front())) {
+        return fail(ErrorKind::UnsafePath, "absolute path");
+    }
+
     if (component.size() > policy.maxComponentBytes) {
         return fail(ErrorKind::UnsafePath, "path component too long");
     }
@@ -261,7 +270,7 @@ Result<ArchivePath> normalizeArchivePath(
 
     auto prefix = checkPrefix(text);
     if (!prefix) {
-        return std::unexpected(prefix.error());
+        return tl::unexpected<Error>(prefix.error());
     }
 
     if (policy.backslash == Backslash::Reject && text.find('\\') != std::string_view::npos) {
@@ -271,7 +280,7 @@ Result<ArchivePath> normalizeArchivePath(
     if (policy.windowsSafe || !policy.allowRawNames) {
         auto utf8 = checkUtf8(text);
         if (!utf8) {
-            return std::unexpected(utf8.error());
+            return tl::unexpected<Error>(utf8.error());
         }
     }
 
@@ -295,7 +304,7 @@ Result<ArchivePath> normalizeArchivePath(
             appendComponent(text.substr(start, end - start), policy, limits, out, result.depth);
         if (!appended) {
             out.clear();
-            return std::unexpected(appended.error());
+            return tl::unexpected<Error>(appended.error());
         }
         start = end + 1;
     }

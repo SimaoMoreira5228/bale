@@ -103,7 +103,7 @@ Result<std::string> readData(Reader& reader, std::size_t scratchSize = 4096) {
         return Result<void>{};
     });
     if (!streamed) {
-        return std::unexpected(streamed.error());
+        return tl::unexpected<Error>(streamed.error());
     }
     return data;
 }

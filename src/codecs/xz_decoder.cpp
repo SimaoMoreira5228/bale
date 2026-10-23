@@ -12,7 +12,7 @@ namespace {
 
 constexpr std::size_t maxStepBytes = std::numeric_limits<std::uint32_t>::max();
 
-std::unexpected<Error> xzFailure(lzma_ret status) {
+tl::unexpected<Error> xzFailure(lzma_ret status) {
     switch (status) {
     case LZMA_MEMLIMIT_ERROR:
         return fail(ErrorKind::LimitExceeded, "xz decoder memory limit exceeded");

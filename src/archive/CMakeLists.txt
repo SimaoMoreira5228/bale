@@ -25,5 +25,5 @@ add_library(bale_archive STATIC
 )
 target_link_libraries(bale_archive
     PUBLIC bale_base bale_checksum bale_format bale_fswalk bale_io bale_security
-    PRIVATE bale_codecs bale_crypto bale_parity bale_warnings
+    PRIVATE bale_codecs bale_crypto bale_parity bale_sodium bale_warnings
 )

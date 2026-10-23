@@ -58,7 +58,7 @@ Result<Header> parseHeader(const File& file, std::uint64_t fileSize) {
     std::array<std::byte, headerDiskSize> head{};
     auto read = file.readExactAt(0, head);
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
     if (!looksLikeWim(head)) {
         return fail(ErrorKind::Malformed, "not a WIM image");
@@ -133,7 +133,7 @@ Result<Header> parseHeader(const File& file, std::uint64_t fileSize) {
         false
     );
     if (!lookup) {
-        return std::unexpected(lookup.error());
+        return tl::unexpected<Error>(lookup.error());
     }
     header.lookup = *lookup;
 
@@ -144,7 +144,7 @@ Result<Header> parseHeader(const File& file, std::uint64_t fileSize) {
         false
     );
     if (!xml) {
-        return std::unexpected(xml.error());
+        return tl::unexpected<Error>(xml.error());
     }
     header.xml = *xml;
 
@@ -155,7 +155,7 @@ Result<Header> parseHeader(const File& file, std::uint64_t fileSize) {
         true
     );
     if (!boot) {
-        return std::unexpected(boot.error());
+        return tl::unexpected<Error>(boot.error());
     }
     header.bootMeta = *boot;
 

@@ -8,6 +8,7 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -278,7 +279,6 @@ TEST_CASE("parity footer descriptor round-trips and zero means absent") {
     descriptor.shardBytes = 65536;
     descriptor.stripeCount = 9;
     descriptor.groupId = 12345;
-    Footer any;
     CHECK(checkParityHeader(testHeader(), descriptor, 3, 0).error().kind == ErrorKind::Integrity);
 
     ParityDescriptor matching;

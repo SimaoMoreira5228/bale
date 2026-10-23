@@ -53,7 +53,7 @@ Result<std::vector<std::byte>> concatPacks(
         auto chunk = std::span(header).subspan(filled, *packBytes);
         auto read = file.readExactAt(position, chunk);
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         if (pack.crc && Crc32::of(chunk) != *pack.crc) {
             return fail(ErrorKind::Integrity, "7z pack CRC-32 mismatch", position);
@@ -81,7 +81,7 @@ Result<std::vector<std::byte>> decodeHeaderFolder(
 
     auto session = FolderSession::start(std::move(file), plan, limits, inflater, bzip2);
     if (!session) {
-        return std::unexpected(session.error());
+        return tl::unexpected<Error>(session.error());
     }
 
     auto headerBytes = checkedCast<std::size_t>(plan.unpackSize);
@@ -94,13 +94,13 @@ Result<std::vector<std::byte>> decodeHeaderFolder(
     std::vector<std::byte> scratch(decodeChunkSize);
     auto started = session->startEntry(0, plan.unpackSize, std::nullopt, scratch);
     if (!started) {
-        return std::unexpected(started.error());
+        return tl::unexpected<Error>(started.error());
     }
 
     while (true) {
         auto chunk = session->nextChunk();
         if (!chunk) {
-            return std::unexpected(chunk.error());
+            return tl::unexpected<Error>(chunk.error());
         }
         if (chunk->empty()) {
             return header;
@@ -117,7 +117,7 @@ decodeHeader(const File& file, Signature signature, const Limits& limits, std::u
 
     auto outer = parseHeader(signature.bytes, signature.headerOffset, limits);
     if (!outer) {
-        return std::unexpected(outer.error());
+        return tl::unexpected<Error>(outer.error());
     }
     if (outer->folders.size() > 1) {
         return fail(
@@ -138,7 +138,7 @@ decodeHeader(const File& file, Signature signature, const Limits& limits, std::u
 
     auto plan = resolveFolder(outer->folders.front(), outer->packs, 0, *packBase, fileSize, limits);
     if (!plan) {
-        return std::unexpected(plan.error());
+        return tl::unexpected<Error>(plan.error());
     }
     if (plan->failed()) {
         return fail(
@@ -153,21 +153,21 @@ decodeHeader(const File& file, Signature signature, const Limits& limits, std::u
     if (plan->codec.codec == Codec::Deflate) {
         auto created = Inflater::create();
         if (!created) {
-            return std::unexpected(created.error());
+            return tl::unexpected<Error>(created.error());
         }
         inflater.emplace(std::move(*created));
     }
     if (plan->codec.codec == Codec::Bzip2) {
         auto created = Bzip2Decoder::create();
         if (!created) {
-            return std::unexpected(created.error());
+            return tl::unexpected<Error>(created.error());
         }
         bzip2.emplace(std::move(*created));
     }
 
     auto packed = file.duplicate();
     if (!packed) {
-        return std::unexpected(packed.error());
+        return tl::unexpected<Error>(packed.error());
     }
     return decodeHeaderFolder(
         std::move(*packed),
@@ -183,22 +183,22 @@ decodeHeader(const File& file, Signature signature, const Limits& limits, std::u
 Result<Reader> Reader::open(File file, const Limits& limits) {
     auto fileSize = file.size();
     if (!fileSize) {
-        return std::unexpected(fileSize.error());
+        return tl::unexpected<Error>(fileSize.error());
     }
 
     auto signature = readSignature(file, limits);
     if (!signature) {
-        return std::unexpected(signature.error());
+        return tl::unexpected<Error>(signature.error());
     }
 
     auto headerBytes = decodeHeader(file, std::move(*signature), limits, *fileSize);
     if (!headerBytes) {
-        return std::unexpected(headerBytes.error());
+        return tl::unexpected<Error>(headerBytes.error());
     }
 
     auto model = parseHeader(*headerBytes, signature->headerOffset, limits);
     if (!model) {
-        return std::unexpected(model.error());
+        return tl::unexpected<Error>(model.error());
     }
 
     auto packBase = checkedAdd(std::uint64_t{signatureSize}, model->packPos);
@@ -335,7 +335,7 @@ Result<FolderSession*> Reader::sessionFor(const Entry& entry) {
 
     auto& stored = plans_[*entry.folder];
     if (!stored) {
-        return std::unexpected(stored.error());
+        return tl::unexpected<Error>(stored.error());
     }
     if (stored->codec.encrypted) {
         return fail(ErrorKind::PasswordRequired, "7z entry is encrypted");
@@ -355,21 +355,21 @@ Result<FolderSession*> Reader::sessionFor(const Entry& entry) {
     if (stored->codec.codec == Codec::Deflate && !inflater_) {
         auto created = Inflater::create();
         if (!created) {
-            return std::unexpected(created.error());
+            return tl::unexpected<Error>(created.error());
         }
         inflater_.emplace(std::move(*created));
     }
     if (stored->codec.codec == Codec::Bzip2 && !bzip2_) {
         auto created = Bzip2Decoder::create();
         if (!created) {
-            return std::unexpected(created.error());
+            return tl::unexpected<Error>(created.error());
         }
         bzip2_.emplace(std::move(*created));
     }
 
     auto packed = file_.duplicate();
     if (!packed) {
-        return std::unexpected(packed.error());
+        return tl::unexpected<Error>(packed.error());
     }
 
     auto session = FolderSession::start(
@@ -380,7 +380,7 @@ Result<FolderSession*> Reader::sessionFor(const Entry& entry) {
         bzip2_ ? &*bzip2_ : nullptr
     );
     if (!session) {
-        return std::unexpected(session.error());
+        return tl::unexpected<Error>(session.error());
     }
 
     active_.emplace(Active{.folder = *entry.folder, .session = std::move(*session)});

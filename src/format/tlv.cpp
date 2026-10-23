@@ -70,7 +70,7 @@ Result<bool> TlvReader::next(TlvField& field) {
     std::uint64_t fieldOffset = base_ + pos_;
     auto key = decodeLeb128(data_.subspan(pos_), fieldOffset);
     if (!key) {
-        return std::unexpected(key.error());
+        return tl::unexpected<Error>(key.error());
     }
 
     std::uint64_t number = key->value >> 1;
@@ -91,7 +91,7 @@ Result<bool> TlvReader::next(TlvField& field) {
     std::size_t lengthPos = pos_ + key->size;
     auto length = decodeLeb128(data_.subspan(lengthPos), base_ + lengthPos);
     if (!length) {
-        return std::unexpected(length.error());
+        return tl::unexpected<Error>(length.error());
     }
 
     std::size_t valuePos = lengthPos + length->size;
@@ -125,7 +125,7 @@ Result<void> skipUnknownField(const TlvField& field) {
 Result<std::uint64_t> decodeTlvUnsigned(const TlvField& field) {
     auto decoded = decodeLeb128(field.value, field.offset);
     if (!decoded) {
-        return std::unexpected(decoded.error());
+        return tl::unexpected<Error>(decoded.error());
     }
     if (decoded->size != field.value.size()) {
         return fail(ErrorKind::Malformed, "trailing bytes after TLV integer", field.offset);
@@ -150,7 +150,7 @@ Result<void> requireCriticality(const TlvField& field, Criticality expected) {
 Result<TlvListReader> TlvListReader::open(const TlvField& field, std::uint64_t maxCount) {
     auto count = decodeLeb128(field.value, field.offset);
     if (!count) {
-        return std::unexpected(count.error());
+        return tl::unexpected<Error>(count.error());
     }
     if (count->value > maxCount) {
         return fail(ErrorKind::LimitExceeded, "TLV list has too many elements", field.offset);
@@ -179,7 +179,7 @@ Result<bool> TlvListReader::next(std::span<const std::byte>& element, std::uint6
 
     auto length = decodeLeb128(data_.subspan(pos_), base_ + pos_);
     if (!length) {
-        return std::unexpected(length.error());
+        return tl::unexpected<Error>(length.error());
     }
 
     std::size_t elementPos = pos_ + length->size;

@@ -48,7 +48,7 @@ class Reader {
     template <ChunkSink Sink>
     [[nodiscard]] Result<void> streamData(std::span<std::byte> scratch, Sink&& sink) {
         if (failure_) {
-            return std::unexpected(*failure_);
+            return tl::unexpected<Error>(*failure_);
         }
         if (scratch.empty() && dataLeft_ != 0) {
             return fail(ErrorKind::LimitExceeded, "scratch buffer is empty");

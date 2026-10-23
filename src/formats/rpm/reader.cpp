@@ -19,8 +19,8 @@ constexpr std::size_t stageChunkSize = std::size_t{64} * 1024;
     auto directory = std::filesystem::temp_directory_path(error);
     if (error) {
         auto failure = fail(ErrorKind::Io, "cannot locate the temporary directory");
-        failure.error().systemCode = error.value();
-        return std::unexpected(failure.error());
+        failure.value().systemCode = error.value();
+        return tl::unexpected<Error>(failure.value());
     }
 
     std::random_device seed;
@@ -33,7 +33,7 @@ constexpr std::size_t stageChunkSize = std::size_t{64} * 1024;
             return file;
         }
         if (file.error().kind != ErrorKind::AlreadyExists) {
-            return std::unexpected(file.error());
+            return tl::unexpected<Error>(file.error());
         }
     }
     return fail(ErrorKind::Io, "cannot stage the rpm payload");
@@ -48,14 +48,14 @@ copySlice(const File& source, std::uint64_t offset, std::uint64_t bytes, File& t
         auto want = static_cast<std::size_t>(std::min<std::uint64_t>(left, chunk.size()));
         auto count = source.readAt(position, std::span(chunk).first(want));
         if (!count) {
-            return std::unexpected(count.error());
+            return tl::unexpected<Error>(count.error());
         }
         if (*count == 0) {
             return fail(ErrorKind::Truncated, "rpm archive ends inside the payload", position);
         }
         auto appended = target.append(std::span<const std::byte>(chunk.data(), *count));
         if (!appended) {
-            return std::unexpected(appended.error());
+            return tl::unexpected<Error>(appended.error());
         }
         position += *count;
         left -= *count;
@@ -71,7 +71,7 @@ decompressInto(CompressedStream& stream, File& target, std::uint64_t at) {
     });
     if (!sunk) {
         sunk.error().offset = at;
-        return std::unexpected(sunk.error());
+        return tl::unexpected<Error>(sunk.error());
     }
     return {};
 }
@@ -107,19 +107,19 @@ void Reader::Staged::release() {
 Result<Reader> Reader::open(File file, const Limits& limits) {
     auto fileSize = file.size();
     if (!fileSize) {
-        return std::unexpected(fileSize.error());
+        return tl::unexpected<Error>(fileSize.error());
     }
 
     auto package = parsePackage(file, *fileSize, limits);
     if (!package) {
-        return std::unexpected(package.error());
+        return tl::unexpected<Error>(package.error());
     }
 
     Staged staged;
     std::filesystem::path stagedPath;
     auto stagedFile = stageFile(stagedPath);
     if (!stagedFile) {
-        return std::unexpected(stagedFile.error());
+        return tl::unexpected<Error>(stagedFile.error());
     }
     staged.path = std::move(stagedPath);
     staged.armed = true;
@@ -128,14 +128,14 @@ Result<Reader> Reader::open(File file, const Limits& limits) {
     if (package->uncompressed) {
         auto copied = copySlice(file, package->payloadOffset, package->payloadBytes, payloadFile);
         if (!copied) {
-            return std::unexpected(copied.error());
+            return tl::unexpected<Error>(copied.error());
         }
     } else {
         Staged compressedStaged;
         std::filesystem::path compressedPath;
         auto compressedHandle = stageFile(compressedPath);
         if (!compressedHandle) {
-            return std::unexpected(compressedHandle.error());
+            return tl::unexpected<Error>(compressedHandle.error());
         }
         compressedStaged.path = std::move(compressedPath);
         compressedStaged.armed = true;
@@ -143,25 +143,25 @@ Result<Reader> Reader::open(File file, const Limits& limits) {
         auto copied =
             copySlice(file, package->payloadOffset, package->payloadBytes, compressedFile);
         if (!copied) {
-            return std::unexpected(copied.error());
+            return tl::unexpected<Error>(copied.error());
         }
 
         DecompressLimits decompress = limits.decompress;
         auto stream =
             CompressedStream::open(std::move(compressedFile), package->compression, decompress);
         if (!stream) {
-            return std::unexpected(stream.error());
+            return tl::unexpected<Error>(stream.error());
         }
         auto expanded = decompressInto(*stream, payloadFile, package->payloadOffset);
         if (!expanded) {
-            return std::unexpected(expanded.error());
+            return tl::unexpected<Error>(expanded.error());
         }
         compressedStaged.release();
     }
 
     auto cpio = cpio::Reader::open(std::move(payloadFile), limits.cpio);
     if (!cpio) {
-        return std::unexpected(cpio.error());
+        return tl::unexpected<Error>(cpio.error());
     }
 
     Reader reader(std::move(*package), limits);

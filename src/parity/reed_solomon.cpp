@@ -95,7 +95,7 @@ constexpr std::array<std::uint8_t, 256> logTable = makeLogTable(expTable);
         }
         auto inverted = gf::inverse(at(column, column));
         if (!inverted) {
-            return std::unexpected(inverted.error());
+            return tl::unexpected<Error>(inverted.error());
         }
         const std::uint8_t scale = *inverted;
         for (std::uint32_t scan = 0; scan < order; ++scan) {
@@ -214,7 +214,7 @@ Result<void> ReedSolomon::encode(
     }
     auto length = shardLength(data);
     if (!length) {
-        return std::unexpected(length.error());
+        return tl::unexpected<Error>(length.error());
     }
     for (const auto& shard : parity) {
         if (shard.size() != *length) {
@@ -249,7 +249,7 @@ Result<bool> ReedSolomon::verify(
     }
     auto length = shardLength(data);
     if (!length) {
-        return std::unexpected(length.error());
+        return tl::unexpected<Error>(length.error());
     }
     for (const auto& shard : parity) {
         if (shard.size() != *length) {
@@ -296,7 +296,7 @@ Result<void> ReedSolomon::repair(
     }
     auto need = scratchBytes(data_, parity_);
     if (!need) {
-        return std::unexpected(need.error());
+        return tl::unexpected<Error>(need.error());
     }
     if (scratch.size() < *need) {
         return fail(ErrorKind::LimitExceeded, "parity scratch is too small");
@@ -376,7 +376,7 @@ Result<void> ReedSolomon::repair(
         }
     }
     if (auto inverted = invertMatrix(scratch.first(half * 2), data_); !inverted) {
-        return std::unexpected(inverted.error());
+        return tl::unexpected<Error>(inverted.error());
     }
 
     for (std::uint32_t column = 0; column < data_; ++column) {

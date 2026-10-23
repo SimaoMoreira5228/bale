@@ -21,7 +21,7 @@ Result<std::uint16_t> readU16(const File& file, std::uint64_t at) {
     std::array<std::byte, 2> bytes{};
     auto read = file.readExactAt(at, bytes);
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
     return loadLe<std::uint16_t>(bytes.data());
 }
@@ -30,7 +30,7 @@ Result<std::uint32_t> readU32(const File& file, std::uint64_t at) {
     std::array<std::byte, 4> bytes{};
     auto read = file.readExactAt(at, bytes);
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
     return loadLe<std::uint32_t>(bytes.data());
 }
@@ -51,7 +51,7 @@ Result<std::string> readLabel(
     std::string label(static_cast<std::size_t>(cap), '\0');
     auto read = file.readExactAt(pos, std::as_writable_bytes(std::span(label)));
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
 
     auto end = label.find('\0');
@@ -123,7 +123,7 @@ Result<Model> parseCabinet(const File& file, std::uint64_t fileSize, const Limit
     std::array<std::byte, headerBaseSize> head{};
     auto headRead = file.readExactAt(0, head);
     if (!headRead) {
-        return std::unexpected(headRead.error());
+        return tl::unexpected<Error>(headRead.error());
     }
     if (!looksLikeCab(head)) {
         return fail(ErrorKind::Malformed, "not a cabinet archive");
@@ -161,12 +161,12 @@ Result<Model> parseCabinet(const File& file, std::uint64_t fileSize, const Limit
 
         auto cabinetReserve = readU16(file, position);
         if (!cabinetReserve) {
-            return std::unexpected(cabinetReserve.error());
+            return tl::unexpected<Error>(cabinetReserve.error());
         }
         std::array<std::byte, 2> sizes{};
         auto sizeRead = file.readExactAt(position + 2, sizes);
         if (!sizeRead) {
-            return std::unexpected(sizeRead.error());
+            return tl::unexpected<Error>(sizeRead.error());
         }
         folderReserve = std::to_integer<std::uint8_t>(sizes[0]);
         dataReserve = std::to_integer<std::uint8_t>(sizes[1]);
@@ -186,21 +186,21 @@ Result<Model> parseCabinet(const File& file, std::uint64_t fileSize, const Limit
     if (hasPrev) {
         auto prev = readLabel(file, position, image, limits, "cabinet set label is missing");
         if (!prev) {
-            return std::unexpected(prev.error());
+            return tl::unexpected<Error>(prev.error());
         }
         auto disk = readLabel(file, position, image, limits, "cabinet set label is missing");
         if (!disk) {
-            return std::unexpected(disk.error());
+            return tl::unexpected<Error>(disk.error());
         }
     }
     if (hasNext) {
         auto next = readLabel(file, position, image, limits, "cabinet set label is missing");
         if (!next) {
-            return std::unexpected(next.error());
+            return tl::unexpected<Error>(next.error());
         }
         auto disk = readLabel(file, position, image, limits, "cabinet set label is missing");
         if (!disk) {
-            return std::unexpected(disk.error());
+            return tl::unexpected<Error>(disk.error());
         }
     }
 
@@ -227,15 +227,15 @@ Result<Model> parseCabinet(const File& file, std::uint64_t fileSize, const Limit
 
         auto start = readU32(file, *at);
         if (!start) {
-            return std::unexpected(start.error());
+            return tl::unexpected<Error>(start.error());
         }
         auto blocks = readU16(file, *at + 4);
         if (!blocks) {
-            return std::unexpected(blocks.error());
+            return tl::unexpected<Error>(blocks.error());
         }
         auto type = readU16(file, *at + 6);
         if (!type) {
-            return std::unexpected(type.error());
+            return tl::unexpected<Error>(type.error());
         }
 
         auto method = static_cast<std::uint16_t>(*type & 0x000F);
@@ -287,7 +287,7 @@ Result<Model> parseCabinet(const File& file, std::uint64_t fileSize, const Limit
             std::array<std::byte, blockRecordSize> record{};
             auto recordRead = file.readExactAt(cursor, record);
             if (!recordRead) {
-                return std::unexpected(recordRead.error());
+                return tl::unexpected<Error>(recordRead.error());
             }
 
             std::uint32_t checksum = loadLe<std::uint32_t>(record.data());
@@ -345,7 +345,7 @@ Result<Model> parseCabinet(const File& file, std::uint64_t fileSize, const Limit
         std::array<std::byte, fileRecordSize> record{};
         auto recordRead = file.readExactAt(position, record);
         if (!recordRead) {
-            return std::unexpected(recordRead.error());
+            return tl::unexpected<Error>(recordRead.error());
         }
 
         std::uint64_t size = loadLe<std::uint32_t>(record.data());
@@ -358,7 +358,7 @@ Result<Model> parseCabinet(const File& file, std::uint64_t fileSize, const Limit
         auto nameAt = *end;
         auto name = readLabel(file, nameAt, image, limits, "cabinet file name is missing");
         if (!name) {
-            return std::unexpected(name.error());
+            return tl::unexpected<Error>(name.error());
         }
         if (name->empty()) {
             return fail(ErrorKind::Malformed, "cabinet file name is empty", position);

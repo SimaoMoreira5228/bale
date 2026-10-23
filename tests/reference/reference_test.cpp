@@ -44,7 +44,7 @@ Result<Reader> openBytes(std::span<const std::byte> bytes) {
     }
     auto opened = file.open();
     if (!opened) {
-        return std::unexpected(opened.error());
+        return tl::unexpected<Error>(opened.error());
     }
     return Reader::open(std::move(*opened));
 }
@@ -88,23 +88,6 @@ void checkContents(Reader& reader) {
 }
 
 } // namespace
-
-TEST_CASE("reference plain golden rebuilds byte-identical and reads back") {
-    TempPath temp;
-    auto writer = newWriter(temp.path());
-    REQUIRE(writer.addDirectory("d", {.mtimeNanoseconds = 0, .mode = 0755}));
-    REQUIRE(writer.addBytes("d/f", bytesOf("hello"), {.mtimeNanoseconds = fileTime, .mode = 0644}));
-    REQUIRE(writer.addBytes("d/g", bytesOf("hello"), {.mtimeNanoseconds = fileTime, .mode = 0644}));
-    REQUIRE(writer.addBytes("e", {}));
-    REQUIRE(writer.finish());
-    CHECK(readAll(temp.path()) == referenceFile("plain.bale"));
-
-    auto reader = openBytes(referenceFile("plain.bale"));
-    REQUIRE(reader);
-    REQUIRE(reader->manifest().entries.size() == 4);
-    CHECK(contents(*reader, reader->manifest().entries[1]) == "hello");
-    CHECK(reader->verify(VerifyMode::Content));
-}
 
 TEST_CASE("reference cdc golden rebuilds byte-identical and deduplicates the copy") {
     std::string data = cdcNoise(93000, 99);

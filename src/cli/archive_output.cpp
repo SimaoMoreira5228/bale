@@ -199,7 +199,7 @@ Result<ArchiveOutput> ArchiveOutput::create(File file, const OutputOptions& opti
     case OutputFormat::Bale: {
         auto writer = archive::Writer::create(std::move(file), options.native);
         if (!writer) {
-            return std::unexpected(writer.error());
+            return tl::unexpected<Error>(writer.error());
         }
         return ArchiveOutput(Sink(std::move(*writer)), options.format, false);
     }
@@ -208,7 +208,7 @@ Result<ArchiveOutput> ArchiveOutput::create(File file, const OutputOptions& opti
         zipOptions.level = options.level.value_or(zip::defaultDeflateLevel);
         auto writer = zip::Writer::create(std::move(file), zipOptions);
         if (!writer) {
-            return std::unexpected(writer.error());
+            return tl::unexpected<Error>(writer.error());
         }
         return ArchiveOutput(Sink(std::move(*writer)), options.format, options.native.durable);
     }
@@ -221,7 +221,7 @@ Result<ArchiveOutput> ArchiveOutput::create(File file, const OutputOptions& opti
             options.level
         );
         if (!output) {
-            return std::unexpected(output.error());
+            return tl::unexpected<Error>(output.error());
         }
         return ArchiveOutput(
             Sink(tar::Writer(std::move(*output))),
@@ -236,7 +236,7 @@ Result<ArchiveOutput> ArchiveOutput::create(File file, const OutputOptions& opti
         sevenZipOptions.solid = options.sevenZipSolid;
         auto writer = sevenzip::Writer::create(std::move(file), sevenZipOptions);
         if (!writer) {
-            return std::unexpected(writer.error());
+            return tl::unexpected<Error>(writer.error());
         }
         return ArchiveOutput(Sink(std::move(*writer)), options.format, options.native.durable);
     }
@@ -375,7 +375,7 @@ Result<void> ArchiveOutput::addFile(
         auto want = static_cast<std::size_t>(std::min<std::uint64_t>(size - offset, copyChunkSize));
         auto count = source.readAt(offset, std::span(scratch_).first(want));
         if (!count) {
-            return std::unexpected(count.error());
+            return tl::unexpected<Error>(count.error());
         }
         if (*count == 0) {
             return fail(ErrorKind::Io, "file shrank while being archived");
@@ -390,7 +390,7 @@ Result<void> ArchiveOutput::addFile(
 
     auto extra = source.readAt(size, std::span(scratch_).first(1));
     if (!extra) {
-        return std::unexpected(extra.error());
+        return tl::unexpected<Error>(extra.error());
     }
     if (*extra != 0) {
         return fail(ErrorKind::Io, "file grew while being archived");
@@ -402,7 +402,7 @@ Result<OutputSummary> ArchiveOutput::finish() {
     if (auto* native = std::get_if<archive::Writer>(&sink_)) {
         auto summary = native->finish();
         if (!summary) {
-            return std::unexpected(summary.error());
+            return tl::unexpected<Error>(summary.error());
         }
         return OutputSummary{
             .entries = summary->entries,
@@ -424,7 +424,7 @@ Result<OutputSummary> ArchiveOutput::finish() {
         sink_
     );
     if (!size) {
-        return std::unexpected(size.error());
+        return tl::unexpected<Error>(size.error());
     }
     return OutputSummary{
         .entries = entries,

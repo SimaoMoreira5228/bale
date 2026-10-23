@@ -16,6 +16,7 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -125,41 +126,42 @@ void checkContentIntact(const std::filesystem::path& path) {
 
 }
 
-TEST_CASE("single damaged bytes repair and verify cleanly") {
-    bale::test::TempPath temp;
-    {
-        std::error_code ignored;
-        std::filesystem::create_directories(temp.path(), ignored);
+TEST_CASE("erasures within one stripe budget repair and verify cleanly") {
+    SUBCASE("single damaged byte") {
+        bale::test::TempPath temp;
+        {
+            std::error_code ignored;
+            std::filesystem::create_directories(temp.path(), ignored);
+        }
+        auto path = writeParityArchive(temp, "single.bale", 4, 2);
+        flipByte(path, 200);
+        {
+            auto reader = Reader::open(*File::openRead(path));
+            REQUIRE(reader);
+            CHECK_FALSE(reader->verify(VerifyMode::Content));
+        }
+        auto outcome = runRepair(path);
+        REQUIRE(outcome.generations.size() == 1);
+        CHECK(outcome.generations[0].repaired);
+        checkContentIntact(path);
     }
-    auto path = writeParityArchive(temp, "single.bale", 4, 2);
-    auto pristine = readAll(path);
-    flipByte(path, 200);
-    {
-        auto reader = Reader::open(*File::openRead(path));
-        REQUIRE(reader);
-        CHECK_FALSE(reader->verify(VerifyMode::Content));
-    }
-    auto outcome = runRepair(path);
-    REQUIRE(outcome.generations.size() == 1);
-    CHECK(outcome.generations[0].repaired);
-    checkContentIntact(path);
-}
 
-TEST_CASE("multiple erasures within one stripe budget repair") {
-    bale::test::TempPath temp;
-    {
-        std::error_code ignored;
-        std::filesystem::create_directories(temp.path(), ignored);
+    SUBCASE("two erasures sharing stripe 0") {
+        bale::test::TempPath temp;
+        {
+            std::error_code ignored;
+            std::filesystem::create_directories(temp.path(), ignored);
+        }
+        auto path = writeParityArchive(temp, "multi.bale", 4, 2);
+        // NOTE: S=1K, k=4: stripe 0 covers stream [0,4K); the first data payload
+        // NOTE: starts at file offset 112, so two flips there share stripe 0.
+        flipByte(path, 200);
+        flipByte(path, 1300);
+        auto outcome = runRepair(path);
+        REQUIRE(outcome.generations.size() == 1);
+        CHECK(outcome.generations[0].repaired);
+        checkContentIntact(path);
     }
-    auto path = writeParityArchive(temp, "multi.bale", 4, 2);
-    // NOTE: S=1K, k=4: stripe 0 covers stream [0,4K); the first data payload
-    // NOTE: starts at file offset 112, so two flips there share stripe 0.
-    flipByte(path, 200);
-    flipByte(path, 1300);
-    auto outcome = runRepair(path);
-    REQUIRE(outcome.generations.size() == 1);
-    CHECK(outcome.generations[0].repaired);
-    checkContentIntact(path);
 }
 
 TEST_CASE("erasures past the budget refuse with the file untouched") {

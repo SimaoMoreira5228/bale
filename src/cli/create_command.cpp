@@ -29,7 +29,7 @@ Result<archive::ParityConfig> resolveParity(const CreateOptions& options) {
         config.shardBytes = *options.parityShardSize;
     }
     if (auto valid = archive::validateParityConfig(config); !valid) {
-        return std::unexpected(valid.error());
+        return tl::unexpected<Error>(valid.error());
     }
     return config;
 }
@@ -38,7 +38,7 @@ Result<void> addTree(ArchiveOutput& output, TreeWalker& walker) {
     while (true) {
         auto next = walker.next();
         if (!next) {
-            return std::unexpected(next.error());
+            return tl::unexpected<Error>(next.error());
         }
         if (*next == nullptr) {
             return {};
@@ -444,7 +444,7 @@ ExitCode createArchiveFromPath(std::string_view input) {
         archive::WriterOptions writerOptions;
         auto writer = archive::Writer::create(std::move(*file), writerOptions);
         if (!writer) {
-            return std::unexpected(writer.error());
+            return tl::unexpected<Error>(writer.error());
         }
 
         Result<void> added;
@@ -453,13 +453,13 @@ ExitCode createArchiveFromPath(std::string_view input) {
         } else {
             auto sourceFile = File::openRegularNoFollow(source);
             if (!sourceFile) {
-                return std::unexpected(sourceFile.error());
+                return tl::unexpected<Error>(sourceFile.error());
             }
             auto name = pathToUtf8(source.filename());
             added = writer->addFile(name, *sourceFile);
         }
         if (!added) {
-            return std::unexpected(added.error());
+            return tl::unexpected<Error>(added.error());
         }
         return writer->finish();
     }();

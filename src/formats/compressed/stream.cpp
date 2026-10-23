@@ -15,7 +15,7 @@ CompressedStream::open(File file, Compression compression, const DecompressLimit
 
         auto stream = gzip::Stream::open(std::move(file), gzipLimits);
         if (!stream) {
-            return std::unexpected(stream.error());
+            return tl::unexpected<Error>(stream.error());
         }
         return CompressedStream(Codec(std::move(*stream)));
     }
@@ -26,7 +26,7 @@ CompressedStream::open(File file, Compression compression, const DecompressLimit
 
         auto stream = zstd::Stream::open(std::move(file), zstdLimits);
         if (!stream) {
-            return std::unexpected(stream.error());
+            return tl::unexpected<Error>(stream.error());
         }
         return CompressedStream(Codec(std::move(*stream)));
     }
@@ -37,7 +37,7 @@ CompressedStream::open(File file, Compression compression, const DecompressLimit
 
         auto stream = xz::Stream::open(std::move(file), xzLimits);
         if (!stream) {
-            return std::unexpected(stream.error());
+            return tl::unexpected<Error>(stream.error());
         }
         return CompressedStream(Codec(std::move(*stream)));
     }
@@ -48,7 +48,7 @@ CompressedStream::open(File file, Compression compression, const DecompressLimit
 
         auto stream = bzip2::Stream::open(std::move(file), bzip2Limits);
         if (!stream) {
-            return std::unexpected(stream.error());
+            return tl::unexpected<Error>(stream.error());
         }
         return CompressedStream(Codec(std::move(*stream)));
     }

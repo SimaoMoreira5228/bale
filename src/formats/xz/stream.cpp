@@ -7,7 +7,8 @@
 namespace bale::xz {
 
 bool looksLikeXz(std::span<const std::byte> head) {
-    return std::ranges::starts_with(head, streamMagic);
+    return head.size() >= streamMagic.size() &&
+        std::ranges::equal(streamMagic, head.first(streamMagic.size()));
 }
 
 Result<Stream> Stream::open(File file, const Limits& limits) {
@@ -17,17 +18,17 @@ Result<Stream> Stream::open(File file, const Limits& limits) {
 
     auto decoder = XzDecoder::create({.memLimitBytes = limits.memLimitBytes});
     if (!decoder) {
-        return std::unexpected(decoder.error());
+        return tl::unexpected<Error>(decoder.error());
     }
 
     auto input = FileInput::open(std::move(file), std::max(limits.chunkBytes, streamMagic.size()));
     if (!input) {
-        return std::unexpected(input.error());
+        return tl::unexpected<Error>(input.error());
     }
 
     auto filled = input->fill(streamMagic.size());
     if (!filled) {
-        return std::unexpected(filled.error());
+        return tl::unexpected<Error>(filled.error());
     }
 
     auto head = input->pending();
@@ -42,7 +43,7 @@ Result<Stream> Stream::open(File file, const Limits& limits) {
 
 Result<std::size_t> Stream::read(std::span<std::byte> out) {
     if (failure_) {
-        return std::unexpected(*failure_);
+        return tl::unexpected<Error>(*failure_);
     }
     if (out.empty()) {
         return fail(ErrorKind::LimitExceeded, "xz read buffer is empty");
@@ -60,7 +61,7 @@ Result<std::size_t> Stream::decode(std::span<std::byte> out) {
         if (decoder_.streamEnded()) {
             auto another = beginStream();
             if (!another) {
-                return std::unexpected(another.error());
+                return tl::unexpected<Error>(another.error());
             }
             if (!*another) {
                 return 0;
@@ -72,7 +73,7 @@ Result<std::size_t> Stream::decode(std::span<std::byte> out) {
         if (input_.pending().empty()) {
             auto filled = input_.fill(1);
             if (!filled) {
-                return std::unexpected(filled.error());
+                return tl::unexpected<Error>(filled.error());
             }
         }
 
@@ -86,7 +87,7 @@ Result<std::size_t> Stream::decode(std::span<std::byte> out) {
         if (!step) {
             auto error = step.error();
             error.offset = offset;
-            return std::unexpected(error);
+            return tl::unexpected<Error>(error);
         }
 
         input_.consume(step->consumed);
@@ -117,7 +118,7 @@ Result<bool> Stream::beginStream() {
         if (input_.pending().empty()) {
             auto filled = input_.fill(1);
             if (!filled) {
-                return std::unexpected(filled.error());
+                return tl::unexpected<Error>(filled.error());
             }
             if (input_.exhausted()) {
                 return false;
@@ -132,12 +133,12 @@ Result<bool> Stream::beginStream() {
 
     auto filled = input_.fill(streamMagic.size());
     if (!filled) {
-        return std::unexpected(filled.error());
+        return tl::unexpected<Error>(filled.error());
     }
 
     auto head = input_.pending();
     if (head.size() < streamMagic.size()) {
-        if (!std::ranges::starts_with(streamMagic, head)) {
+        if (!std::ranges::equal(head, std::span(streamMagic).first(head.size()))) {
             return fail(ErrorKind::Malformed, "trailing data after xz stream", input_.offset());
         }
         return fail(ErrorKind::Truncated, "xz stream truncated", input_.offset());
@@ -148,7 +149,7 @@ Result<bool> Stream::beginStream() {
 
     auto reset = decoder_.reset();
     if (!reset) {
-        return std::unexpected(reset.error());
+        return tl::unexpected<Error>(reset.error());
     }
     return true;
 }

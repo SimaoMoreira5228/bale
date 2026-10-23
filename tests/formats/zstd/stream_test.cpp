@@ -49,7 +49,7 @@ Result<std::string> decode(const Bytes& bytes, const zstd::Limits& limits = {}) 
 
     auto stream = zstd::Stream::open(std::move(*file), limits);
     if (!stream) {
-        return std::unexpected(stream.error());
+        return tl::unexpected<Error>(stream.error());
     }
 
     std::string output;
@@ -57,7 +57,7 @@ Result<std::string> decode(const Bytes& bytes, const zstd::Limits& limits = {}) 
     while (true) {
         auto count = stream->read(buffer);
         if (!count) {
-            return std::unexpected(count.error());
+            return tl::unexpected<Error>(count.error());
         }
         if (*count == 0) {
             CHECK(stream->outputBytes() == output.size());

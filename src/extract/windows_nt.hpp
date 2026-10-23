@@ -61,9 +61,9 @@ struct Opened {
     bool created = false;
 };
 
-[[nodiscard]] std::unexpected<Error> systemFailure(ErrorKind kind, std::string_view what);
+[[nodiscard]] tl::unexpected<Error> systemFailure(ErrorKind kind, std::string_view what);
 
-[[nodiscard]] std::unexpected<Error>
+[[nodiscard]] tl::unexpected<Error>
 statusFailure(ErrorKind kind, std::string_view what, NTSTATUS status);
 
 [[nodiscard]] inline bool isSuccess(NTSTATUS status) {

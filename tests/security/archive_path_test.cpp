@@ -80,6 +80,8 @@ const std::array rejected{
     Rejected{"/etc/passwd"sv, portable, ErrorKind::UnsafePath, "absolute path"},
     Rejected{"/etc/passwd"sv, posixRaw, ErrorKind::UnsafePath, "absolute path"},
     Rejected{"\\x"sv, posixRaw, ErrorKind::UnsafePath, "absolute path"},
+    Rejected{"./\\x"sv, posixRaw, ErrorKind::UnsafePath, "absolute path"},
+    Rejected{"./\\CON"sv, posixRaw, ErrorKind::UnsafePath, "absolute path"},
     Rejected{"//etc/passwd"sv, portable, ErrorKind::UnsafePath, "UNC or device path"},
     Rejected{"/\\x"sv, posixRaw, ErrorKind::UnsafePath, "UNC or device path"},
     Rejected{"\\\\server\\share"sv, portable, ErrorKind::UnsafePath, "UNC or device path"},
@@ -226,6 +228,26 @@ TEST_CASE("normalizeArchivePath canonicalizes tolerated spellings") {
         CHECK(result->path == entry.path);
         CHECK(result->depth == entry.depth);
         CHECK(result->directory == entry.directory);
+    }
+}
+
+// NOTE: a fuzzer found normalize("./\X") accepted while normalize("\X")
+// rejected the result. Every accepted path must be a fixed point: the path
+// and depth the second pass computes must match the first. The directory
+// flag is deliberately excluded, like in the fuzzer: it records the input
+// trailing slash, not canonical content, so re-normalizing the canonical
+// form may legitimately clear it.
+TEST_CASE("normalizeArchivePath output is a fixed point of normalization") {
+    std::string out;
+    std::string again;
+    for (const auto& entry : accepted) {
+        CAPTURE(entry.input);
+        auto first = normalize(entry.input, entry.policy, out);
+        REQUIRE(first);
+        auto second = normalize(first->path, entry.policy, again);
+        REQUIRE(second);
+        CHECK(second->path == first->path);
+        CHECK(second->depth == first->depth);
     }
 }
 

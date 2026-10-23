@@ -73,7 +73,7 @@ Result<bool> isIsoImage(const File& file, std::uint64_t fileSize) {
     auto read = file.readExactAt(systemSectors * sectorSize, probe);
     if (!read) {
         if (read.error().kind == ErrorKind::Io) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         return false;
     }
@@ -111,7 +111,7 @@ std::optional<std::uint32_t> bothLe32(std::span<const std::byte> bytes) {
 }
 
 Result<std::uint64_t> sectorOffset(std::uint32_t sector, std::uint64_t at) {
-    auto offset = checkedMul<std::uint64_t>(sector, sectorSize);
+    auto offset = checkedMul(sector, sectorSize);
     if (!offset) {
         return fail(ErrorKind::Malformed, "ISO sector address overflows", at);
     }

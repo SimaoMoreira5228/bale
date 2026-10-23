@@ -14,7 +14,7 @@ constexpr std::size_t discardBytes = std::size_t{32} << 10;
 Result<Source> Source::open(File file) {
     auto size = file.size();
     if (!size) {
-        return std::unexpected(size.error());
+        return tl::unexpected<Error>(size.error());
     }
 
     return Source(
@@ -54,7 +54,7 @@ Result<std::size_t> Source::pull(std::span<std::byte> out) {
         static_cast<std::size_t>(std::min<std::uint64_t>(out.size(), seekable->size - position_));
     auto read = seekable->file.readExactAt(position_, out.first(count));
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
 
     position_ += count;
@@ -66,7 +66,7 @@ Result<std::size_t> Source::readFull(std::span<std::byte> out) {
     while (filled < out.size()) {
         auto count = pull(out.subspan(filled));
         if (!count) {
-            return std::unexpected(count.error());
+            return tl::unexpected<Error>(count.error());
         }
         if (*count == 0) {
             break;
@@ -91,7 +91,7 @@ Result<void> Source::skip(std::uint64_t count) {
         );
         auto read = pull(chunk);
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         if (*read == 0) {
             return fail(ErrorKind::Truncated, "tar archive ends inside entry data", position_);
@@ -109,7 +109,7 @@ Result<void> Source::finish() {
     while (true) {
         auto read = pull(discard_);
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         if (*read == 0) {
             return {};

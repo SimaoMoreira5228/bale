@@ -19,11 +19,11 @@ Result<std::uint64_t> Reader::checkParityTrailerRecord(
 ) {
     std::array<std::byte, recordPrefixSize> prefix{};
     if (auto read = file_.readExactAt(position, prefix); !read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
     auto header = decodeRecordPrefix(prefix, limits, position);
     if (!header) {
-        return std::unexpected(header.error());
+        return tl::unexpected<Error>(header.error());
     }
     if (header->type != RecordType::Parity) {
         return fail(ErrorKind::Malformed, "trailer record is not a parity record", position);
@@ -34,25 +34,25 @@ Result<std::uint64_t> Reader::checkParityTrailerRecord(
     }
     auto size = recordSize(header->payloadLength);
     if (!size) {
-        return std::unexpected(size.error());
+        return tl::unexpected<Error>(size.error());
     }
     if (!fitsWithin(position, *size, footerOffset)) {
         return fail(ErrorKind::Malformed, "parity record extends past the footer", position);
     }
     scratch.resize(static_cast<std::size_t>(*size));
     if (auto read = file_.readExactAt(position, scratch); !read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
     auto record = decodeRecord(scratch, limits, position);
     if (!record) {
-        return std::unexpected(record.error());
+        return tl::unexpected<Error>(record.error());
     }
     auto parsed = decodeParityRecord(record->payload, position + recordPrefixSize);
     if (!parsed) {
-        return std::unexpected(parsed.error());
+        return tl::unexpected<Error>(parsed.error());
     }
     if (auto checked = checkParityHeader(*parsed, expectedParity, generation, position); !checked) {
-        return std::unexpected(checked.error());
+        return tl::unexpected<Error>(checked.error());
     }
     return *size;
 }
@@ -97,7 +97,7 @@ Result<void> Reader::checkTrailerRecords(
         }
         std::array<std::byte, recordPrefixSize> prefix{};
         if (auto read = file_.readExactAt(position, prefix); !read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         auto peekType = loadLe<std::uint16_t>(prefix.data() + 4);
         if (peekType == static_cast<std::uint16_t>(RecordType::Parity)) {
@@ -111,18 +111,18 @@ Result<void> Reader::checkTrailerRecords(
                 recordBytes
             );
             if (!checked) {
-                return std::unexpected(checked.error());
+                return tl::unexpected<Error>(checked.error());
             }
             position += *checked;
             continue;
         }
         auto header = decodeRecordPrefix(prefix, limits, position);
         if (!header) {
-            return std::unexpected(header.error());
+            return tl::unexpected<Error>(header.error());
         }
         auto size = recordSize(header->payloadLength);
         if (!size) {
-            return std::unexpected(size.error());
+            return tl::unexpected<Error>(size.error());
         }
         if (!fitsWithin(position, *size, footerOffset)) {
             return fail(ErrorKind::Malformed, "record extends past the footer", position);
@@ -135,15 +135,15 @@ Result<void> Reader::checkTrailerRecords(
         }
         recordBytes.resize(static_cast<std::size_t>(*size));
         if (auto read = file_.readExactAt(position, recordBytes); !read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         auto record = decodeRecord(recordBytes, limits, position);
         if (!record) {
-            return std::unexpected(record.error());
+            return tl::unexpected<Error>(record.error());
         }
         auto kind = peekExtensionKind(record->payload, position + recordPrefixSize);
         if (!kind) {
-            return std::unexpected(kind.error());
+            return tl::unexpected<Error>(kind.error());
         }
         // NOTE: the commit trailer carries signatures and nothing else; an unknown
         // NOTE: Extension here is rejected so stray bytes cannot hide behind the new gap.
@@ -160,7 +160,7 @@ Result<void> Reader::checkTrailerRecords(
         ++trailerSignatures;
         auto signature = decodeSignature(record->payload, position + recordPrefixSize);
         if (!signature) {
-            return std::unexpected(signature.error());
+            return tl::unexpected<Error>(signature.error());
         }
         if (store) {
             signatures_.push_back(*signature);
@@ -189,7 +189,7 @@ Reader::verifySignatures(std::span<const std::array<std::byte, signerIdSize>> ke
                 return {};
             }
             if (checked.error().kind != ErrorKind::Integrity) {
-                return std::unexpected(checked.error());
+                return tl::unexpected<Error>(checked.error());
             }
         }
     }

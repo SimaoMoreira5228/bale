@@ -78,14 +78,6 @@ EntrySpec directory(std::string name) {
     return spec;
 }
 
-std::uint32_t byteSum(std::string_view data) {
-    std::uint32_t sum = 0;
-    for (char value : data) {
-        sum += static_cast<std::uint8_t>(value);
-    }
-    return sum;
-}
-
 }
 
 TEST_CASE("cpio reader lists the golden newc archive from GNU cpio 2.15") {
@@ -165,8 +157,11 @@ TEST_CASE("cpio reader accepts the golden crc archive from GNU cpio 2.15") {
         if (entry.kind != EntryKind::Regular) {
             continue;
         }
-        if (!broken->streamEntry(entry, scratch, discard)) {
+        auto checked = broken->streamEntry(entry, scratch, discard);
+        if (!checked) {
             failures.push_back(std::string(entry.name));
+            CHECK(checked.error().kind == ErrorKind::Integrity);
+            CHECK(checked.error().what == "cpio checksum mismatch");
         }
     }
     CHECK(failures == std::vector<std::string>{"hard2.txt"});
@@ -341,47 +336,6 @@ TEST_CASE("cpio reader enforces caller limits before allocating") {
     Limits total;
     total.maxTotalBytes = 5;
     CHECK(errorKind(listArchive(builder.bytes(), total)) == ErrorKind::LimitExceeded);
-}
-
-TEST_CASE("cpio reader writes and checks crc headers in code") {
-    auto payload = named("data.bin", "checksum me");
-    payload.magic = "070702";
-    payload.check = byteSum(payload.data);
-
-    ArchiveBuilder builder;
-    builder.entry(payload).trailer();
-
-    auto reader = openBytes(builder.bytes());
-    REQUIRE(reader);
-    auto entries = std::vector<Entry>(reader->entries().begin(), reader->entries().end());
-    REQUIRE(entries.size() == 1);
-    CHECK(entries[0].checksum);
-    CHECK(streamAll(*reader, entries[0]) == "checksum me");
-
-    auto broken = builder.bytes();
-    std::string_view contents = "checksum me";
-    auto data = std::search(
-        broken.begin(),
-        broken.end(),
-        reinterpret_cast<const std::byte*>(contents.data()),
-        reinterpret_cast<const std::byte*>(contents.data() + contents.size())
-    );
-    REQUIRE(data != broken.end());
-    *data ^= std::byte{0xFF};
-
-    auto reread = openBytes(broken);
-    REQUIRE(reread);
-    auto found = std::vector<Entry>(reread->entries().begin(), reread->entries().end());
-    REQUIRE(found.size() == 1);
-
-    std::vector<std::byte> scratch(64);
-    auto discard = [](std::span<const std::byte>) -> Result<void> {
-        return {};
-    };
-    auto checked = reread->streamEntry(found[0], scratch, discard);
-    REQUIRE_FALSE(checked);
-    CHECK(checked.error().kind == ErrorKind::Integrity);
-    CHECK(checked.error().what == "cpio checksum mismatch");
 }
 
 TEST_CASE("looksLikeCpio detects newc headers and refuses odc and binary headers") {

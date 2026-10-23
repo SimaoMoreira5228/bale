@@ -29,7 +29,7 @@ constexpr std::size_t sniffChunkBytes = std::size_t{4} << 10;
 Result<Container> sniffCompressed(const File& file, Compression compression) {
     auto copy = file.duplicate();
     if (!copy) {
-        return std::unexpected(copy.error());
+        return tl::unexpected<Error>(copy.error());
     }
 
     DecompressLimits limits{
@@ -39,7 +39,7 @@ Result<Container> sniffCompressed(const File& file, Compression compression) {
     auto stream = CompressedStream::open(std::move(*copy), compression, limits);
     if (!stream) {
         if (stream.error().kind == ErrorKind::Io) {
-            return std::unexpected(stream.error());
+            return tl::unexpected<Error>(stream.error());
         }
         return Container::SingleFile;
     }
@@ -50,7 +50,7 @@ Result<Container> sniffCompressed(const File& file, Compression compression) {
         auto count = stream->read(std::span(block).subspan(filled));
         if (!count) {
             if (count.error().kind == ErrorKind::Io) {
-                return std::unexpected(count.error());
+                return tl::unexpected<Error>(count.error());
             }
             return Container::SingleFile;
         }
@@ -65,7 +65,7 @@ Result<Container> sniffCompressed(const File& file, Compression compression) {
 Result<ArchiveFormat> compressed(const File& file, Compression compression) {
     auto container = sniffCompressed(file, compression);
     if (!container) {
-        return std::unexpected(container.error());
+        return tl::unexpected<Error>(container.error());
     }
 
     return ArchiveFormat{
@@ -133,18 +133,19 @@ std::string_view name(ArchiveFormat format) {
 Result<ArchiveFormat> detectFormat(const File& file) {
     auto size = file.size();
     if (!size) {
-        return std::unexpected(size.error());
+        return tl::unexpected<Error>(size.error());
     }
 
     std::array<std::byte, tar::blockSize> head{};
     auto headSize = static_cast<std::size_t>(std::min<std::uint64_t>(*size, head.size()));
     auto headRead = file.readExactAt(0, std::span(head).first(headSize));
     if (!headRead) {
-        return std::unexpected(headRead.error());
+        return tl::unexpected<Error>(headRead.error());
     }
     auto headBytes = std::span<const std::byte>(head).first(headSize);
 
-    if (std::ranges::starts_with(headBytes, superblockMagic)) {
+    if (headBytes.size() >= superblockMagic.size() &&
+        std::ranges::equal(superblockMagic, headBytes.first(superblockMagic.size()))) {
         return ArchiveFormat{.container = Container::Bale};
     }
     if (zip::looksLikeZip(headBytes, {})) {
@@ -173,7 +174,7 @@ Result<ArchiveFormat> detectFormat(const File& file) {
         auto probeRead = file.readExactAt(iso::systemSectors * iso::sectorSize, probe);
         if (!probeRead) {
             if (probeRead.error().kind == ErrorKind::Io) {
-                return std::unexpected(probeRead.error());
+                return tl::unexpected<Error>(probeRead.error());
             }
         } else if (iso::looksLikePrimaryDescriptor(probe)) {
             return ArchiveFormat{.container = Container::Iso};
@@ -199,7 +200,7 @@ Result<ArchiveFormat> detectFormat(const File& file) {
     std::vector<std::byte> tail(tailSize);
     auto tailRead = file.readExactAt(*size - tailSize, tail);
     if (!tailRead) {
-        return std::unexpected(tailRead.error());
+        return tl::unexpected<Error>(tailRead.error());
     }
     if (zip::looksLikeZip(headBytes, tail)) {
         return ArchiveFormat{.container = Container::Zip};

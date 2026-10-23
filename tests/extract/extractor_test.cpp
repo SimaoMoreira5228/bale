@@ -164,7 +164,11 @@ std::string linkTarget(const fs::path& path) {
 std::int64_t mtimeOf(const fs::path& path) {
     struct stat status{};
     REQUIRE(::lstat(path.c_str(), &status) == 0);
+#ifdef __APPLE__
+    return std::int64_t{status.st_mtimespec.tv_sec} * 1'000'000'000 + status.st_mtimespec.tv_nsec;
+#else
     return std::int64_t{status.st_mtim.tv_sec} * 1'000'000'000 + status.st_mtim.tv_nsec;
+#endif
 }
 
 std::uint32_t modeOf(const fs::path& path) {
@@ -189,12 +193,12 @@ Result<EntryResult> extractFile(
 ) {
     auto pending = extractor.beginFile(at(path), metadata);
     if (!pending) {
-        return std::unexpected(pending.error());
+        return tl::unexpected<Error>(pending.error());
     }
 
     auto written = pending->write(bytes(content));
     if (!written) {
-        return std::unexpected(written.error());
+        return tl::unexpected<Error>(written.error());
     }
     return pending->commit();
 }
@@ -420,6 +424,10 @@ TEST_CASE("Extractor keeps contained symlink targets inside the root") {
     }
 
     CHECK(listing(tree.root() / "dir") == std::vector<std::string>{"deep", "detour", "sibling"});
+#ifdef _WIN32
+    REQUIRE(fs::remove(tree.root() / "self"));
+    REQUIRE(fs::remove(tree.root() / "dir/deep/up"));
+#endif
 }
 
 TEST_CASE("Extractor applies the overwrite policy atomically at commit") {
@@ -633,8 +641,14 @@ TEST_CASE("Extractor reports case-fold collisions when the target ignores case")
     auto sensitive = openExtractor(tree, [&](ExtractPolicy& policy) {
         policy.caseInsensitive = false;
     });
-    REQUIRE(extractFile(sensitive, "Docs/README.TXT", "second"));
-    CHECK(readFile(tree.root() / "Docs/Readme.txt") == "first");
+    if (existsNoFollow(tree.root() / "Docs" / "README.TXT")) {
+        auto physicalCollision = sensitive.beginFile(at("Docs/README.TXT"));
+        REQUIRE_FALSE(physicalCollision);
+        CHECK(physicalCollision.error().kind == ErrorKind::AlreadyExists);
+    } else {
+        REQUIRE(extractFile(sensitive, "Docs/README.TXT", "second"));
+        CHECK(readFile(tree.root() / "Docs/Readme.txt") == "first");
+    }
 #endif
 }
 

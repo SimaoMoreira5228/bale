@@ -208,7 +208,7 @@ parseRecord(std::span<const std::byte> data, std::size_t at, std::uint64_t baseO
         auto chunk = std::span(data).subspan(at, static_cast<std::size_t>(extent.length));
         auto read = file.readExactAt(extent.offset, chunk);
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         at += static_cast<std::size_t>(extent.length);
     }
@@ -239,7 +239,7 @@ Result<std::vector<Node>> walkTree(
 ) {
     auto rootStart = sectorOffset(rootExtent, Error::noOffset);
     if (!rootStart) {
-        return std::unexpected(rootStart.error());
+        return tl::unexpected<Error>(rootStart.error());
     }
 
     std::vector<Node> nodes;
@@ -262,7 +262,7 @@ Result<std::vector<Node>> walkTree(
         }
         auto loaded = readExtents(file, fileSize, current.extents, limits);
         if (!loaded) {
-            return std::unexpected(loaded.error());
+            return tl::unexpected<Error>(loaded.error());
         }
         std::vector<std::byte> data = std::move(*loaded);
 
@@ -278,7 +278,7 @@ Result<std::vector<Node>> walkTree(
             }
             auto parsed = parseRecord(data, at, base);
             if (!parsed) {
-                return std::unexpected(parsed.error());
+                return tl::unexpected<Error>(parsed.error());
             }
             auto recordOffset = base + static_cast<std::uint64_t>(at);
             at += recordLength;
@@ -287,7 +287,7 @@ Result<std::vector<Node>> walkTree(
             auto susp =
                 parseSystemUse(parsed->systemUse, file, fileSize, limits, state, recordOffset, 0);
             if (!susp) {
-                return std::unexpected(susp.error());
+                return tl::unexpected<Error>(susp.error());
             }
             if (state.sawRockRidge) {
                 sawRockRidge = true;
@@ -324,7 +324,7 @@ Result<std::vector<Node>> walkTree(
                     recordOffset
                 );
                 if (!decoded) {
-                    return std::unexpected(decoded.error());
+                    return tl::unexpected<Error>(decoded.error());
                 }
                 name = std::move(*decoded);
             } else {
@@ -416,7 +416,7 @@ Result<std::vector<Node>> walkTree(
 
             auto dataStart = sectorOffset(parsed->extent, recordOffset);
             if (!dataStart) {
-                return std::unexpected(dataStart.error());
+                return tl::unexpected<Error>(dataStart.error());
             }
             auto dataEnd = checkedAdd(*dataStart, parsed->size);
             if (!dataEnd) {

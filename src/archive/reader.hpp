@@ -119,7 +119,7 @@ class Reader {
             for (const auto& key : manifest_.chunksOf(entry)) {
                 auto chunk = loadChunk(key);
                 if (!chunk) {
-                    return std::unexpected(chunk.error());
+                    return tl::unexpected<Error>(chunk.error());
                 }
                 auto sunk = sink(*chunk);
                 if (!sunk) {
@@ -134,7 +134,7 @@ class Reader {
         for (std::size_t index = 0; index < plains.size(); ++index) {
             auto chunk = loadEncryptedExtent(objects[index], plains[index]);
             if (!chunk) {
-                return std::unexpected(chunk.error());
+                return tl::unexpected<Error>(chunk.error());
             }
             auto sunk = sink(*chunk);
             if (!sunk) {

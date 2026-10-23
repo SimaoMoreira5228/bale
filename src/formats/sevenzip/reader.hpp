@@ -55,20 +55,20 @@ class Reader {
 
         auto session = sessionFor(entry);
         if (!session) {
-            return std::unexpected(session.error());
+            return tl::unexpected<Error>(session.error());
         }
 
         auto started = (*session)->startEntry(entry.offset, entry.size, entry.crc, scratch);
         if (!started) {
             active_.reset();
-            return std::unexpected(started.error());
+            return tl::unexpected<Error>(started.error());
         }
 
         while (true) {
             auto chunk = (*session)->nextChunk();
             if (!chunk) {
                 active_.reset();
-                return std::unexpected(chunk.error());
+                return tl::unexpected<Error>(chunk.error());
             }
             if (chunk->empty()) {
                 return {};
@@ -77,7 +77,7 @@ class Reader {
             auto sunk = sink(*chunk);
             if (!sunk) {
                 active_.reset();
-                return std::unexpected(sunk.error());
+                return tl::unexpected<Error>(sunk.error());
             }
         }
     }

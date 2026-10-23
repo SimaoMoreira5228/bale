@@ -180,14 +180,14 @@ Result<Writer> Writer::create(File file, const WriterOptions& options) {
     std::vector<std::byte> placeholder(signatureSize, std::byte{0});
     auto written = file.append(placeholder);
     if (!written) {
-        return std::unexpected(written.error());
+        return tl::unexpected<Error>(written.error());
     }
     return Writer(std::move(file), options);
 }
 
 Result<void> Writer::check() const {
     if (failure_) {
-        return std::unexpected(*failure_);
+        return tl::unexpected<Error>(*failure_);
     }
     if (finished_) {
         return fail(ErrorKind::Malformed, "7z writer already finished");
@@ -199,7 +199,7 @@ Result<void> Writer::poison(const Error& error) {
     if (!failure_) {
         failure_ = error;
     }
-    return std::unexpected(*failure_);
+    return tl::unexpected<Error>(*failure_);
 }
 
 Result<void> Writer::put(std::span<const std::byte> data) {
@@ -644,25 +644,25 @@ Result<std::vector<std::byte>> Writer::buildHeader() const {
 Result<std::uint64_t> Writer::finish(bool durable) {
     auto usable = check();
     if (!usable) {
-        return std::unexpected(usable.error());
+        return tl::unexpected<Error>(usable.error());
     }
     auto closed = closeEntry();
     if (!closed) {
-        return std::unexpected(closed.error());
+        return tl::unexpected<Error>(closed.error());
     }
     if (streamEncoder_) {
         auto finished = finishFolder(folders_[streamFolder_]);
         if (!finished) {
-            return std::unexpected(finished.error());
+            return tl::unexpected<Error>(finished.error());
         }
     }
 
     auto header = buildHeader();
     if (!header) {
-        return std::unexpected(header.error());
+        return tl::unexpected<Error>(header.error());
     }
     if (header->size() > options_.limits.maxHeaderBytes) {
-        return std::unexpected(
+        return tl::unexpected<Error>(
             poison(Error{.kind = ErrorKind::LimitExceeded, .what = "7z header exceeds limit"})
                 .error()
         );
@@ -671,7 +671,7 @@ Result<std::uint64_t> Writer::finish(bool durable) {
     auto packSize = position_ - signatureSize;
     auto stored = put(*header);
     if (!stored) {
-        return std::unexpected(stored.error());
+        return tl::unexpected<Error>(stored.error());
     }
 
     std::array<std::byte, signatureSize> signature{};
@@ -686,7 +686,7 @@ Result<std::uint64_t> Writer::finish(bool durable) {
     storeLe(signature.data() + 12, packSize);
     auto headerSize = checkedCast<std::uint64_t>(header->size());
     if (!headerSize) {
-        return std::unexpected(
+        return tl::unexpected<Error>(
             poison(Error{.kind = ErrorKind::LimitExceeded, .what = "7z header exceeds limit"})
                 .error()
         );
@@ -696,13 +696,13 @@ Result<std::uint64_t> Writer::finish(bool durable) {
     storeLe(signature.data() + 8, Crc32::of(std::span(signature).subspan(12, 20)));
     auto patched = file_.writeAt(0, signature);
     if (!patched) {
-        return std::unexpected(poison(patched.error()).error());
+        return tl::unexpected<Error>(poison(patched.error()).error());
     }
 
     if (durable) {
         auto synced = file_.sync();
         if (!synced) {
-            return std::unexpected(poison(synced.error()).error());
+            return tl::unexpected<Error>(poison(synced.error()).error());
         }
     }
     finished_ = true;

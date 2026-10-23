@@ -29,7 +29,7 @@ Result<WriteSummary> Writer::compact(
     }
     auto verified = source.verify(VerifyMode::Structure);
     if (!verified) {
-        return std::unexpected(verified.error());
+        return tl::unexpected<Error>(verified.error());
     }
     // NOTE: compaction rewrites every offset, so the old commit digest dies with the old
     // NOTE: layout and carried signatures would verify nothing. Refuse rather than emit a
@@ -94,12 +94,12 @@ Result<WriteSummary> Writer::compact(
     }
     auto created = create(std::move(file), options);
     if (!created) {
-        return std::unexpected(created.error());
+        return tl::unexpected<Error>(created.error());
     }
     Writer writer = std::move(*created);
     for (auto& seed : signSeeds) {
         if (auto added = writer.addSignSeed(std::move(seed)); !added) {
-            return std::unexpected(added.error());
+            return tl::unexpected<Error>(added.error());
         }
     }
     writer.inheritedWriter_ = source.manifest_.writer;
@@ -112,7 +112,7 @@ Result<WriteSummary> Writer::compact(
     for (const ManifestEntry& entry : source.manifest_.entries) {
         auto pending = writer.beginEntry(entry.path, entry.kind);
         if (!pending) {
-            return std::unexpected(pending.error());
+            return tl::unexpected<Error>(pending.error());
         }
 
         auto target = writer.storeName(entry.target);
@@ -135,7 +135,7 @@ Result<WriteSummary> Writer::compact(
         }
         const IndexEntry& entry = source.index_[position];
         if (auto chunk = source.loadChunk(entry.key); !chunk) {
-            return std::unexpected(chunk.error());
+            return tl::unexpected<Error>(chunk.error());
         }
 
         auto header = decodeRecordPrefix(
@@ -144,7 +144,7 @@ Result<WriteSummary> Writer::compact(
             entry.recordOffset
         );
         if (!header) {
-            return std::unexpected(header.error());
+            return tl::unexpected<Error>(header.error());
         }
         if (header->type != RecordType::Data || header->codec != entry.codec ||
             header->payloadLength + recordFramingSize != entry.recordLength) {
@@ -160,7 +160,7 @@ Result<WriteSummary> Writer::compact(
         auto copied =
             writer.writeRecord(RecordType::Data, payload, {}, header->codec, header->decodedLength);
         if (!copied) {
-            return std::unexpected(copied.error());
+            return tl::unexpected<Error>(copied.error());
         }
 
         writer.index_.push_back(
