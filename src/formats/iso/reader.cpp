@@ -19,26 +19,26 @@ constexpr std::uint32_t bootFileMode = 0100444;
 Result<Reader> Reader::open(File file, const Limits& limits) {
     auto size = file.size();
     if (!size) {
-        return std::unexpected(size.error());
+        return tl::unexpected<Error>(size.error());
     }
 
     auto image = isIsoImage(file, *size);
     if (!image) {
-        return std::unexpected(image.error());
+        return tl::unexpected<Error>(image.error());
     }
     if (!*image) {
         return fail(ErrorKind::Malformed, "not an ISO 9660 image");
     }
     auto volume = parseVolumes(file, *size, limits);
     if (!volume) {
-        return std::unexpected(volume.error());
+        return tl::unexpected<Error>(volume.error());
     }
 
     bool sawRockRidge = false;
     auto nodes =
         walkTree(file, *size, volume->rootExtent, volume->rootSize, false, limits, sawRockRidge);
     if (!nodes) {
-        return std::unexpected(nodes.error());
+        return tl::unexpected<Error>(nodes.error());
     }
 
     // NOTE: Rock Ridge names win over Joliet because they preserve case,
@@ -55,7 +55,7 @@ Result<Reader> Reader::open(File file, const Limits& limits) {
             sawRockRidge
         );
         if (!joliet) {
-            return std::unexpected(joliet.error());
+            return tl::unexpected<Error>(joliet.error());
         }
         nodes = std::move(joliet);
     }
@@ -63,7 +63,7 @@ Result<Reader> Reader::open(File file, const Limits& limits) {
     if (volume->bootCatalog) {
         auto images = parseBootCatalog(file, *size, *volume->bootCatalog, limits);
         if (!images) {
-            return std::unexpected(images.error());
+            return tl::unexpected<Error>(images.error());
         }
         std::unordered_set<std::string_view> taken;
         if (!images->empty()) {
@@ -81,7 +81,7 @@ Result<Reader> Reader::open(File file, const Limits& limits) {
             }
             auto start = sectorOffset(boot.extent, Error::noOffset);
             if (!start) {
-                return std::unexpected(start.error());
+                return tl::unexpected<Error>(start.error());
             }
             Node node;
             node.path = std::move(name);
@@ -95,7 +95,7 @@ Result<Reader> Reader::open(File file, const Limits& limits) {
     Reader reader(std::move(file), limits);
     auto added = reader.addNodes(std::move(*nodes));
     if (!added) {
-        return std::unexpected(added.error());
+        return tl::unexpected<Error>(added.error());
     }
     return reader;
 }

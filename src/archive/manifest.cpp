@@ -175,12 +175,12 @@ Result<void> readChunkList(
 ) {
     auto list = TlvListReader::open(field, std::numeric_limits<std::uint32_t>::max());
     if (!list) {
-        return std::unexpected(list.error());
+        return tl::unexpected<Error>(list.error());
     }
     if (list->count() == 0) {
         return fail(ErrorKind::Malformed, "explicit empty chunk list", field.offset);
     }
-    auto total = checkedAdd<std::uint64_t>(chunks.size(), list->count());
+    auto total = checkedAdd(chunks.size(), list->count());
     if (!total || *total > std::numeric_limits<std::uint32_t>::max()) {
         return fail(ErrorKind::LimitExceeded, "too many chunk references", field.offset);
     }
@@ -199,7 +199,7 @@ Result<void> readChunkList(
     while (true) {
         auto more = list->next(element, elementOffset);
         if (!more) {
-            return std::unexpected(more.error());
+            return tl::unexpected<Error>(more.error());
         }
         if (!*more) {
             break;
@@ -213,7 +213,7 @@ Result<void> readChunkList(
             while (true) {
                 auto next = probe.next(probeField);
                 if (!next) {
-                    return std::unexpected(next.error());
+                    return tl::unexpected<Error>(next.error());
                 }
                 if (!*next) {
                     break;
@@ -259,7 +259,7 @@ Result<void> readChunkList(
             while (true) {
                 auto next = reader.next(extentField);
                 if (!next) {
-                    return std::unexpected(next.error());
+                    return tl::unexpected<Error>(next.error());
                 }
                 if (!*next) {
                     break;
@@ -267,7 +267,7 @@ Result<void> readChunkList(
                 if (extentField.number == 10) {
                     auto critical = requireCriticality(extentField, Criticality::Critical);
                     if (!critical) {
-                        return std::unexpected(critical.error());
+                        return tl::unexpected<Error>(critical.error());
                     }
                     if (extentField.value.size() != 32) {
                         return fail(
@@ -282,19 +282,19 @@ Result<void> readChunkList(
                 }
                 auto accepted = keyFields.accept(extentField);
                 if (!accepted) {
-                    return std::unexpected(accepted.error());
+                    return tl::unexpected<Error>(accepted.error());
                 }
                 if (*accepted) {
                     continue;
                 }
                 auto skipped = skipUnknownField(extentField);
                 if (!skipped) {
-                    return std::unexpected(skipped.error());
+                    return tl::unexpected<Error>(skipped.error());
                 }
             }
             auto key = keyFields.finish(elementOffset);
             if (!key) {
-                return std::unexpected(key.error());
+                return tl::unexpected<Error>(key.error());
             }
             if (!hasObject) {
                 return fail(
@@ -317,7 +317,7 @@ Result<void> readChunkList(
         } else {
             auto key = decodeChunkKey(element, elementOffset);
             if (!key) {
-                return std::unexpected(key.error());
+                return tl::unexpected<Error>(key.error());
             }
             auto next = checkedAdd(sum, key->length);
             if (!next || *next > declaredLength) {
@@ -355,7 +355,7 @@ Result<RawEntry> readEntryFields(
     while (true) {
         auto more = reader.next(field);
         if (!more) {
-            return std::unexpected(more.error());
+            return tl::unexpected<Error>(more.error());
         }
         if (!*more) {
             return raw;
@@ -364,14 +364,14 @@ Result<RawEntry> readEntryFields(
         if (!isKnownEntryField(field.number)) {
             auto skipped = skipUnknownField(field);
             if (!skipped) {
-                return std::unexpected(skipped.error());
+                return tl::unexpected<Error>(skipped.error());
             }
             continue;
         }
 
         auto critical = requireCriticality(field, criticalityOf(field.number));
         if (!critical) {
-            return std::unexpected(critical.error());
+            return tl::unexpected<Error>(critical.error());
         }
 
         switch (field.number) {
@@ -382,7 +382,7 @@ Result<RawEntry> readEntryFields(
         case kindField: {
             auto kind = decodeTlvUnsigned(field);
             if (!kind) {
-                return std::unexpected(kind.error());
+                return tl::unexpected<Error>(kind.error());
             }
             raw.kind = *kind;
             raw.hasKind = true;
@@ -391,7 +391,7 @@ Result<RawEntry> readEntryFields(
         case lengthField: {
             auto length = decodeTlvUnsigned(field);
             if (!length) {
-                return std::unexpected(length.error());
+                return tl::unexpected<Error>(length.error());
             }
             raw.length = *length;
             raw.hasLength = true;
@@ -403,7 +403,7 @@ Result<RawEntry> readEntryFields(
             }
             auto read = readChunkList(field, raw.length, raw.chunkCount, chunks, objectIds);
             if (!read) {
-                return std::unexpected(read.error());
+                return tl::unexpected<Error>(read.error());
             }
             raw.hasChunks = true;
             break;
@@ -411,7 +411,7 @@ Result<RawEntry> readEntryFields(
         case mtimeField: {
             auto mtime = decodeTlvSigned64(field);
             if (!mtime) {
-                return std::unexpected(mtime.error());
+                return tl::unexpected<Error>(mtime.error());
             }
             raw.mtime = *mtime;
             break;
@@ -419,7 +419,7 @@ Result<RawEntry> readEntryFields(
         case modeField: {
             auto mode = decodeTlvUnsigned(field);
             if (!mode) {
-                return std::unexpected(mode.error());
+                return tl::unexpected<Error>(mode.error());
             }
             raw.mode = *mode;
             break;
@@ -493,7 +493,7 @@ Result<ManifestEntry> decodeEntry(
     std::size_t firstChunk = chunks.size();
     auto raw = readEntryFields(data, offset, chunks, objectIds);
     if (!raw) {
-        return std::unexpected(raw.error());
+        return tl::unexpected<Error>(raw.error());
     }
     if (!raw->hasPath || !raw->hasKind) {
         return fail(ErrorKind::Malformed, "manifest entry without path or kind", offset);
@@ -505,12 +505,12 @@ Result<ManifestEntry> decodeEntry(
 
     auto kinds = checkKindFields(*raw, offset);
     if (!kinds) {
-        return std::unexpected(kinds.error());
+        return tl::unexpected<Error>(kinds.error());
     }
 
     auto path = checkedPath(raw->path, limits, scratch, offset);
     if (!path) {
-        return std::unexpected(path.error());
+        return tl::unexpected<Error>(path.error());
     }
 
     ManifestEntry entry;
@@ -537,7 +537,7 @@ Result<ManifestEntry> decodeEntry(
     if (raw->hasHardLink) {
         auto target = checkedPath(raw->hardLink, limits, scratch, offset);
         if (!target) {
-            return std::unexpected(target.error());
+            return tl::unexpected<Error>(target.error());
         }
         if (*target >= entry.path) {
             return fail(ErrorKind::Malformed, "hard link target does not precede the link", offset);
@@ -576,7 +576,7 @@ Result<void> checkTree(std::span<const ManifestEntry> entries, std::uint64_t off
 Result<void> decodeEntries(const TlvField& field, const Limits& limits, Manifest& out) {
     auto list = TlvListReader::open(field, limits.maxEntries);
     if (!list) {
-        return std::unexpected(list.error());
+        return tl::unexpected<Error>(list.error());
     }
     out.entries.reserve(static_cast<std::size_t>(list->count()));
 
@@ -586,7 +586,7 @@ Result<void> decodeEntries(const TlvField& field, const Limits& limits, Manifest
     while (true) {
         auto more = list->next(element, elementOffset);
         if (!more) {
-            return std::unexpected(more.error());
+            return tl::unexpected<Error>(more.error());
         }
         if (!*more) {
             break;
@@ -595,7 +595,7 @@ Result<void> decodeEntries(const TlvField& field, const Limits& limits, Manifest
         auto entry =
             decodeEntry(element, elementOffset, limits, scratch, out.chunks, out.objectIds);
         if (!entry) {
-            return std::unexpected(entry.error());
+            return tl::unexpected<Error>(entry.error());
         }
         if (!out.entries.empty() && entry->path <= out.entries.back().path) {
             return fail(
@@ -663,7 +663,7 @@ Result<void> decodeManifest(
     while (true) {
         auto more = reader.next(field);
         if (!more) {
-            return std::unexpected(more.error());
+            return tl::unexpected<Error>(more.error());
         }
         if (!*more) {
             break;
@@ -687,7 +687,7 @@ Result<void> decodeManifest(
         if (field.number == versionField) {
             auto version = decodeTlvUnsigned(field);
             if (!version) {
-                return std::unexpected(version.error());
+                return tl::unexpected<Error>(version.error());
             }
             if (*version != manifestSchemaVersion) {
                 return fail(
@@ -729,7 +729,7 @@ Result<void> decodeManifest(
 
         auto metadata = decodeWriterMetadata(field);
         if (!metadata) {
-            return std::unexpected(metadata.error());
+            return tl::unexpected<Error>(metadata.error());
         }
         out.writer = *metadata;
     }
@@ -743,7 +743,7 @@ Result<void> decodeManifest(
 Result<void> validateEntryPath(std::string_view path, const Limits& limits, std::string& scratch) {
     auto normalized = normalizeArchivePath(bytesOf(path), manifestPathPolicy, limits, scratch);
     if (!normalized) {
-        return std::unexpected(normalized.error());
+        return tl::unexpected<Error>(normalized.error());
     }
     if (normalized->path != path) {
         return fail(ErrorKind::UnsafePath, "manifest path is not canonical");

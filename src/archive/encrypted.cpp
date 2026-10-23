@@ -119,7 +119,7 @@ Result<Keyslot> decodeKeyslot(std::span<const std::byte> payload, std::uint64_t 
     while (true) {
         auto more = reader.next(field);
         if (!more) {
-            return std::unexpected(more.error());
+            return tl::unexpected<Error>(more.error());
         }
         if (!*more) {
             break;
@@ -127,7 +127,7 @@ Result<Keyslot> decodeKeyslot(std::span<const std::byte> payload, std::uint64_t 
         if (field.number > extSealedField) {
             auto skipped = skipUnknownField(field);
             if (!skipped) {
-                return std::unexpected(skipped.error());
+                return tl::unexpected<Error>(skipped.error());
             }
             continue;
         }
@@ -141,19 +141,19 @@ Result<Keyslot> decodeKeyslot(std::span<const std::byte> payload, std::uint64_t 
         if (!known) {
             auto skipped = skipUnknownField(field);
             if (!skipped) {
-                return std::unexpected(skipped.error());
+                return tl::unexpected<Error>(skipped.error());
             }
             continue;
         }
         auto critical = requireCriticality(field, Criticality::Critical);
         if (!critical) {
-            return std::unexpected(critical.error());
+            return tl::unexpected<Error>(critical.error());
         }
         switch (field.number) {
         case extKindField: {
             auto value = decodeTlvUnsigned(field);
             if (!value) {
-                return std::unexpected(value.error());
+                return tl::unexpected<Error>(value.error());
             }
             if (*value != keyslotExtensionKind) {
                 return fail(ErrorKind::Unsupported, "unknown extension kind", field.offset);
@@ -164,7 +164,7 @@ Result<Keyslot> decodeKeyslot(std::span<const std::byte> payload, std::uint64_t 
         case extVersionField: {
             auto value = decodeTlvUnsigned(field);
             if (!value) {
-                return std::unexpected(value.error());
+                return tl::unexpected<Error>(value.error());
             }
             if (*value != keyslotVersion) {
                 return fail(ErrorKind::Unsupported, "unsupported keyslot version", field.offset);
@@ -175,7 +175,7 @@ Result<Keyslot> decodeKeyslot(std::span<const std::byte> payload, std::uint64_t 
         case extEpochField: {
             auto value = decodeTlvUnsigned(field);
             if (!value) {
-                return std::unexpected(value.error());
+                return tl::unexpected<Error>(value.error());
             }
             if (*value == 0) {
                 return fail(ErrorKind::Malformed, "keyslot epoch is zero", field.offset);
@@ -187,7 +187,7 @@ Result<Keyslot> decodeKeyslot(std::span<const std::byte> payload, std::uint64_t 
         case extSlotKindField: {
             auto value = decodeTlvUnsigned(field);
             if (!value) {
-                return std::unexpected(value.error());
+                return tl::unexpected<Error>(value.error());
             }
             if (*value != static_cast<std::uint64_t>(SlotKind::Password) &&
                 *value != static_cast<std::uint64_t>(SlotKind::Recipient)) {
@@ -207,7 +207,7 @@ Result<Keyslot> decodeKeyslot(std::span<const std::byte> payload, std::uint64_t 
         case extOpsField: {
             auto value = decodeTlvUnsigned(field);
             if (!value) {
-                return std::unexpected(value.error());
+                return tl::unexpected<Error>(value.error());
             }
             if (*value == 0) {
                 return fail(ErrorKind::Malformed, "keyslot opslimit is zero", field.offset);
@@ -227,7 +227,7 @@ Result<Keyslot> decodeKeyslot(std::span<const std::byte> payload, std::uint64_t 
         case extMemField: {
             auto value = decodeTlvUnsigned(field);
             if (!value) {
-                return std::unexpected(value.error());
+                return tl::unexpected<Error>(value.error());
             }
             if (*value == 0) {
                 return fail(ErrorKind::Malformed, "keyslot memlimit is zero", field.offset);
@@ -322,7 +322,7 @@ decodeEncryptedExtent(std::span<const std::byte> data, std::uint64_t offset) {
     while (true) {
         auto more = reader.next(field);
         if (!more) {
-            return std::unexpected(more.error());
+            return tl::unexpected<Error>(more.error());
         }
         if (!*more) {
             break;
@@ -330,7 +330,7 @@ decodeEncryptedExtent(std::span<const std::byte> data, std::uint64_t offset) {
         if (field.number == 10) {
             auto critical = requireCriticality(field, Criticality::Critical);
             if (!critical) {
-                return std::unexpected(critical.error());
+                return tl::unexpected<Error>(critical.error());
             }
             if (field.value.size() != encryptedObjectIdSize) {
                 return fail(ErrorKind::Malformed, "object id has a bad size", field.offset);
@@ -341,19 +341,19 @@ decodeEncryptedExtent(std::span<const std::byte> data, std::uint64_t offset) {
         }
         auto accepted = keyFields.accept(field);
         if (!accepted) {
-            return std::unexpected(accepted.error());
+            return tl::unexpected<Error>(accepted.error());
         }
         if (*accepted) {
             continue;
         }
         auto skipped = skipUnknownField(field);
         if (!skipped) {
-            return std::unexpected(skipped.error());
+            return tl::unexpected<Error>(skipped.error());
         }
     }
     auto key = keyFields.finish(offset);
     if (!key) {
-        return std::unexpected(key.error());
+        return tl::unexpected<Error>(key.error());
     }
     if (!hasObject) {
         return fail(ErrorKind::Malformed, "encrypted extent missing object id", offset);
@@ -424,13 +424,13 @@ std::vector<std::byte> commitAad(std::span<const std::byte, 16> archiveId, std::
 Result<ObjectId> makeObjectId() {
     auto nonce = crypto::makeNonce();
     if (!nonce) {
-        return std::unexpected(nonce.error());
+        return tl::unexpected<Error>(nonce.error());
     }
     // NOTE: 32 random bytes from two 24-byte nonces would leak structure; instead build from
     // NOTE: libsodium directly through two independent keys is overkill. Use makeKey randomness.
     auto key = crypto::makeKey();
     if (!key) {
-        return std::unexpected(key.error());
+        return tl::unexpected<Error>(key.error());
     }
     ObjectId id{};
     std::ranges::copy(key->bytes(), id.begin());
@@ -458,7 +458,7 @@ collectDataKeys(File& file, std::uint64_t fileSize, ReaderUnlock& unlock, const 
         if (fileSize - position >= footerSize) {
             auto peek = file.readExactAt(position, std::span<std::byte>(footerBytes));
             if (!peek) {
-                return std::unexpected(peek.error());
+                return tl::unexpected<Error>(peek.error());
             }
             if (std::ranges::equal(std::span(footerBytes).first(footerMagic.size()), footerMagic)) {
                 auto footer = decodeFooter(footerBytes, position);
@@ -473,7 +473,7 @@ collectDataKeys(File& file, std::uint64_t fileSize, ReaderUnlock& unlock, const 
         }
         auto read = file.readExactAt(position, std::span<std::byte>(prefix));
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         auto header = decodeRecordPrefix(prefix, recordLimits, position);
         if (!header) {
@@ -493,11 +493,11 @@ collectDataKeys(File& file, std::uint64_t fileSize, ReaderUnlock& unlock, const 
         recordBuffer.resize(static_cast<std::size_t>(*size));
         auto full = file.readExactAt(position, recordBuffer);
         if (!full) {
-            return std::unexpected(full.error());
+            return tl::unexpected<Error>(full.error());
         }
         auto record = decodeRecord(recordBuffer, recordLimits, position);
         if (!record) {
-            return std::unexpected(record.error());
+            return tl::unexpected<Error>(record.error());
         }
         // NOTE: SIGNATURE records share the Extension type; they carry no key material and
         // NOTE: are verified against the commit digest later, so the keyslot scan skips them.
@@ -508,7 +508,7 @@ collectDataKeys(File& file, std::uint64_t fileSize, ReaderUnlock& unlock, const 
         }
         auto slot = decodeKeyslot(record->payload, position + recordPrefixSize);
         if (!slot) {
-            return std::unexpected(slot.error());
+            return tl::unexpected<Error>(slot.error());
         }
         // NOTE: count every keyslot record so a hostile archive cannot force unbounded KDF
         // work; decodeKeyslot already rejected over-cap params, so reaching unwrap is bounded.
@@ -535,7 +535,7 @@ collectDataKeys(File& file, std::uint64_t fileSize, ReaderUnlock& unlock, const 
                 key = std::move(*back);
                 unlocked = true;
             } else if (back.error().kind != ErrorKind::Integrity) {
-                return std::unexpected(back.error());
+                return tl::unexpected<Error>(back.error());
             }
         } else if (slot->kind == SlotKind::Recipient) {
             for (const auto& recipient : unlock.recipients) {
@@ -554,7 +554,7 @@ collectDataKeys(File& file, std::uint64_t fileSize, ReaderUnlock& unlock, const 
                     unlocked = true;
                     break;
                 } else if (back.error().kind != ErrorKind::Integrity) {
-                    return std::unexpected(back.error());
+                    return tl::unexpected<Error>(back.error());
                 }
             }
         }

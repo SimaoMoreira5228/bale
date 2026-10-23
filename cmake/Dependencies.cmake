@@ -8,6 +8,7 @@ add_library(bale_zlib_ng INTERFACE)
 add_library(bale_zstd INTERFACE)
 add_library(bale_lz4 INTERFACE)
 add_library(bale_blake3 INTERFACE)
+add_library(bale_expected INTERFACE)
 add_library(bale_lzma INTERFACE)
 add_library(bale_bz2 INTERFACE)
 add_library(bale_brotli INTERFACE)
@@ -64,6 +65,13 @@ if(BALE_USE_SYSTEM_CODECS)
         target_link_libraries(bale_blake3 INTERFACE PkgConfig::BALE_SYSTEM_BLAKE3)
     else()
         message(FATAL_ERROR "BALE_USE_SYSTEM_CODECS: BLAKE3 not found")
+    endif()
+
+    find_package(tl-expected 1.2 CONFIG QUIET)
+    if(TARGET tl::expected)
+        target_link_libraries(bale_expected INTERFACE tl::expected)
+    else()
+        message(FATAL_ERROR "BALE_USE_SYSTEM_CODECS: tl-expected not found")
     endif()
 
     find_package(LibLZMA QUIET)
@@ -130,6 +138,15 @@ FetchContent_Declare(blake3
     SOURCE_SUBDIR c
     SYSTEM
 )
+# NOTE: tl::expected is CC0 public domain (see the header), a single header with no
+# sources to build. The std::expected in libstdc++ is unavailable under Clang, which
+# does not advertise a completed concepts implementation that libstdc++ requires, so
+# the portable standard-library type cannot be relied on. This pins the same API.
+FetchContent_Declare(tl_expected
+    URL https://github.com/TartanLlama/expected/archive/refs/tags/v1.3.1.tar.gz
+    URL_HASH SHA256=9a04f4f472fbb5c30bf60402f1ca626c4a76987f867978d0b8a35d7ab3fb8fe7
+    SYSTEM
+)
 FetchContent_Declare(xz
     URL https://github.com/tukaani-project/xz/releases/download/v5.8.4/xz-5.8.4.tar.gz
     URL_HASH SHA256=0014c7886930454fe8bd4228665b51af55eeae560ea135c9c4cd33f55b2591d9
@@ -188,6 +205,10 @@ block(SCOPE_FOR VARIABLES)
     set(BLAKE3_EXAMPLES OFF)
     set(BLAKE3_TESTING OFF)
 
+    # NOTE: header-only; nothing to build. Tests and packaging stay out.
+    set(EXPECTED_BUILD_TESTS OFF)
+    set(EXPECTED_BUILD_PACKAGE OFF)
+
     # NOTE: only the decoder library is needed; the command line tools, scripts,
     # translated messages and API docs stay out of the build.
     set(XZ_TOOL_XZ OFF)
@@ -208,7 +229,7 @@ block(SCOPE_FOR VARIABLES)
     set(BROTLI_BUILD_TOOLS OFF)
     set(BROTLI_DISABLE_TESTS ON)
 
-    FetchContent_MakeAvailable(zlib_ng zstd lz4 blake3 xz brotli)
+    FetchContent_MakeAvailable(zlib_ng zstd lz4 blake3 xz brotli tl_expected)
 endblock()
 
 # NOTE: bzip2 ships no CMake build, so bale verifies the tarball by hash and compiles
@@ -237,6 +258,7 @@ target_link_libraries(bale_zlib_ng INTERFACE zlib-ng::zlib)
 target_link_libraries(bale_zstd INTERFACE libzstd_static)
 target_link_libraries(bale_lz4 INTERFACE lz4_static)
 target_link_libraries(bale_blake3 INTERFACE BLAKE3::blake3)
+target_link_libraries(bale_expected INTERFACE tl::expected)
 # NOTE: liblzma's CMake target does not expose its API headers, so bale adds them
 # explicitly instead of picking up whatever lzma.h the system happens to provide.
 FetchContent_GetProperties(xz SOURCE_DIR XZ_SOURCE_DIR)

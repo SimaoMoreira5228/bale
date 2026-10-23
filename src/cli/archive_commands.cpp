@@ -1068,12 +1068,12 @@ ExitCode reportFailure(std::string_view context, const Error& error) {
 Result<OpenedArchive> openArchive(std::string_view argument) {
     auto file = File::openRead(pathFromUtf8(argument));
     if (!file) {
-        return std::unexpected(file.error());
+        return tl::unexpected<Error>(file.error());
     }
 
     auto format = detectFormat(*file);
     if (!format) {
-        return std::unexpected(format.error());
+        return tl::unexpected<Error>(format.error());
     }
     if (format->container == Container::Unknown) {
         return fail(ErrorKind::Unsupported, "unrecognized archive format");
@@ -1092,7 +1092,7 @@ Result<tar::Source> openTarSource(File file, Compression compression) {
 
     auto stream = CompressedStream::open(std::move(file), compression);
     if (!stream) {
-        return std::unexpected(stream.error());
+        return tl::unexpected<Error>(stream.error());
     }
     return tar::Source(std::move(*stream));
 }

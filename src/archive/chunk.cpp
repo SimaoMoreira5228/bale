@@ -36,7 +36,7 @@ Result<bool> ChunkKeyFields::accept(const TlvField& field) {
 
     auto critical = requireCriticality(field, Criticality::Critical);
     if (!critical) {
-        return std::unexpected(critical.error());
+        return tl::unexpected<Error>(critical.error());
     }
 
     if (field.number == keyDigestField) {
@@ -50,7 +50,7 @@ Result<bool> ChunkKeyFields::accept(const TlvField& field) {
 
     auto value = decodeTlvUnsigned(field);
     if (!value) {
-        return std::unexpected(value.error());
+        return tl::unexpected<Error>(value.error());
     }
 
     if (field.number == keyAlgorithmField) {
@@ -92,7 +92,7 @@ Result<ChunkKey> decodeChunkKey(std::span<const std::byte> data, std::uint64_t o
     while (true) {
         auto more = reader.next(field);
         if (!more) {
-            return std::unexpected(more.error());
+            return tl::unexpected<Error>(more.error());
         }
         if (!*more) {
             return fields.finish(offset);
@@ -100,7 +100,7 @@ Result<ChunkKey> decodeChunkKey(std::span<const std::byte> data, std::uint64_t o
 
         auto accepted = fields.accept(field);
         if (!accepted) {
-            return std::unexpected(accepted.error());
+            return tl::unexpected<Error>(accepted.error());
         }
         if (*accepted) {
             continue;
@@ -108,7 +108,7 @@ Result<ChunkKey> decodeChunkKey(std::span<const std::byte> data, std::uint64_t o
 
         auto skipped = skipUnknownField(field);
         if (!skipped) {
-            return std::unexpected(skipped.error());
+            return tl::unexpected<Error>(skipped.error());
         }
     }
 }
@@ -134,7 +134,7 @@ Result<void> encodeDataDescriptor(const ChunkKey& key, std::vector<std::byte>& o
 Result<DataPayload> decodeDataPayload(std::span<const std::byte> payload, std::uint64_t offset) {
     auto size = decodeLeb128(payload, offset);
     if (!size) {
-        return std::unexpected(size.error());
+        return tl::unexpected<Error>(size.error());
     }
     if (size->value > maxDataDescriptorSize) {
         return fail(ErrorKind::LimitExceeded, "data descriptor too large", offset);
@@ -146,7 +146,7 @@ Result<DataPayload> decodeDataPayload(std::span<const std::byte> payload, std::u
     auto descriptorSize = static_cast<std::size_t>(size->value);
     auto key = decodeChunkKey(payload.subspan(size->size, descriptorSize), offset + size->size);
     if (!key) {
-        return std::unexpected(key.error());
+        return tl::unexpected<Error>(key.error());
     }
     if (key->algorithm != HashAlgorithm::Blake3) {
         return fail(ErrorKind::Unsupported, "unknown chunk hash algorithm", offset);

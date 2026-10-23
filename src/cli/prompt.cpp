@@ -71,7 +71,7 @@ Result<crypto::SecretBytes> readPosixPassword(std::string_view prompt) {
     auto made = crypto::SecretBytes::make(line.size());
     if (!made) {
         sodium_memzero(line.data(), line.size());
-        return std::unexpected(made.error());
+        return tl::unexpected<Error>(made.error());
     }
     crypto::SecretBytes out(std::move(*made));
     std::ranges::copy(std::as_bytes(std::span(line)), out.mut().begin());
@@ -165,7 +165,7 @@ Result<crypto::SecretBytes> readWindowsPassword(std::string_view prompt) {
     auto made = crypto::SecretBytes::make(utf8.size());
     if (!made) {
         sodium_memzero(utf8.data(), utf8.size());
-        return std::unexpected(made.error());
+        return tl::unexpected<Error>(made.error());
     }
     crypto::SecretBytes out(std::move(*made));
     std::ranges::copy(std::as_bytes(std::span(utf8)), out.mut().begin());

@@ -21,7 +21,7 @@ constexpr std::uint8_t lzma1LiteralContext = 3;
 constexpr std::uint8_t lzma1LiteralPosition = 0;
 constexpr std::uint8_t lzma1PositionBits = 2;
 
-std::unexpected<Error> lzmaEncodeFailure(lzma_ret status) {
+tl::unexpected<Error> lzmaEncodeFailure(lzma_ret status) {
     switch (status) {
     case LZMA_MEM_ERROR:
         return fail(ErrorKind::LimitExceeded, "7z lzma encoder allocation failed");
@@ -88,7 +88,7 @@ Result<FolderEncoder> FolderEncoder::create(Codec codec, int level, std::vector<
     if (codec == Codec::Deflate) {
         auto encoder = DeflateEncoder::create(level);
         if (!encoder) {
-            return std::unexpected(encoder.error());
+            return tl::unexpected<Error>(encoder.error());
         }
         auto state = std::make_unique<State>();
         state->deflate.emplace(std::move(*encoder));
@@ -169,7 +169,7 @@ Result<void> supplyDeflate(
     while (true) {
         auto step = state.deflate->stream(data, state.output, flush);
         if (!step) {
-            return std::unexpected(step.error());
+            return tl::unexpected<Error>(step.error());
         }
         data = data.subspan(step->consumed);
         if (step->produced != 0) {

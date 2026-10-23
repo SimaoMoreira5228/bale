@@ -290,12 +290,12 @@ Result<void> encodeHeaders(const WriteEntry& entry, HeaderBuffers& buffers) {
 
 Result<void> Writer::poison(const Error& error) {
     failure_ = error;
-    return std::unexpected(error);
+    return tl::unexpected<Error>(error);
 }
 
 Result<void> Writer::check() const {
     if (failure_) {
-        return std::unexpected(*failure_);
+        return tl::unexpected<Error>(*failure_);
     }
     if (finished_) {
         return fail(ErrorKind::Malformed, "tar archive already finished");
@@ -469,42 +469,42 @@ Result<void> Writer::write(std::span<const std::byte> data) {
 Result<std::uint64_t> Writer::finish(bool durable) {
     auto usable = check();
     if (!usable) {
-        return std::unexpected(usable.error());
+        return tl::unexpected<Error>(usable.error());
     }
 
     auto closed = closeEntry();
     if (!closed) {
-        return std::unexpected(closed.error());
+        return tl::unexpected<Error>(closed.error());
     }
 
     auto committed = commitLast();
     if (!committed) {
-        return std::unexpected(committed.error());
+        return tl::unexpected<Error>(committed.error());
     }
     auto flushed = flushReady();
     if (!flushed) {
-        return std::unexpected(flushed.error());
+        return tl::unexpected<Error>(flushed.error());
     }
     if (!pending_.empty()) {
-        return std::unexpected(poison(
-                                   Error{
-                                       .kind = ErrorKind::Malformed,
-                                       .what = "hard link target is not a regular entry"
-                                   }
+        return tl::unexpected<Error>(poison(
+                                         Error{
+                                             .kind = ErrorKind::Malformed,
+                                             .what = "hard link target is not a regular entry"
+                                         }
         )
-                                   .error());
+                                         .error());
     }
 
     for (int count = 0; count < 2; ++count) {
         auto written = emit(zeroBlock);
         if (!written) {
-            return std::unexpected(written.error());
+            return tl::unexpected<Error>(written.error());
         }
     }
     while (position_ % recordSize != 0) {
         auto written = emit(zeroBlock);
         if (!written) {
-            return std::unexpected(written.error());
+            return tl::unexpected<Error>(written.error());
         }
     }
 

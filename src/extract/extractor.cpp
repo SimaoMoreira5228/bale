@@ -163,7 +163,7 @@ Result<Extractor::EntryPath> Extractor::splitPath(std::string_view path) {
 
         auto checked = checkComponent(component);
         if (!checked) {
-            return std::unexpected(checked.error());
+            return tl::unexpected<Error>(checked.error());
         }
 
         if (slash == std::string_view::npos) {
@@ -179,7 +179,7 @@ Result<Extractor::EntryPath> Extractor::splitPath(std::string_view path) {
 Result<Extractor::EntryPath> Extractor::beginEntry(const ArchivePath& path) {
     auto charged = budget_.chargeEntry();
     if (!charged) {
-        return std::unexpected(charged.error());
+        return tl::unexpected<Error>(charged.error());
     }
 
     auto split = splitPath(path.path);
@@ -294,7 +294,7 @@ Result<EntryResult>
 Extractor::skipOrRefuseSpecialFile(const ArchivePath& path, SpecialFileKind kind) {
     auto entry = beginEntry(path);
     if (!entry) {
-        return std::unexpected(entry.error());
+        return tl::unexpected<Error>(entry.error());
     }
 
     if (policy_.specialFiles == SpecialFilePolicy::Refuse) {

@@ -74,7 +74,7 @@ Result<void> copyStreamRange(
         }
         auto read = file.readExactAt(*rangeStart, out.subspan(filled, take));
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         filled += take;
         position = *segmentEnd;
@@ -93,7 +93,7 @@ Result<ParityDescriptor> Writer::emitParity(
     const RecordSpan& commitRecord
 ) {
     auto failed = [this](const Error& error) {
-        return std::unexpected(poison(error).error());
+        return tl::unexpected<Error>(poison(error).error());
     };
     if (auto flushed = flushOutput(); !flushed) {
         return failed(flushed.error());
@@ -303,7 +303,7 @@ Result<ParityDescriptor> Writer::emitParity(
             }
             if (auto written = writeRecord(RecordType::Parity, encoded, {}, CodecId::Raw, 0, flags);
                 !written) {
-                return std::unexpected(written.error());
+                return tl::unexpected<Error>(written.error());
             }
         }
     }

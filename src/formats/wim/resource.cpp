@@ -99,7 +99,7 @@ Result<Resource> Resource::open(
     resource.compressed_ = compressed;
     auto parsed = resource.parseChunks(context, capBytes);
     if (!parsed) {
-        return std::unexpected(parsed.error());
+        return tl::unexpected<Error>(parsed.error());
     }
     return resource;
 }
@@ -112,7 +112,7 @@ Result<void> Resource::parseChunks(const ResourceContext& context, std::uint64_t
         std::array<std::byte, altTableHeaderSize> header{};
         auto read = file_->readExactAt(ref_.offset, header);
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         std::uint64_t usize = loadLe<std::uint64_t>(header.data());
         std::uint32_t chunk = loadLe<std::uint32_t>(header.data() + 8);
@@ -128,7 +128,7 @@ Result<void> Resource::parseChunks(const ResourceContext& context, std::uint64_t
         }
         auto format = formatFromValue(formatValue, ref_.offset + 12);
         if (!format) {
-            return std::unexpected(format.error());
+            return tl::unexpected<Error>(format.error());
         }
         format_ = *format;
         uncompressed_ = usize;
@@ -165,7 +165,7 @@ Result<void> Resource::parseChunks(const ResourceContext& context, std::uint64_t
 
     auto first = chunkStoredSize(0);
     if (!first) {
-        return std::unexpected(first.error());
+        return tl::unexpected<Error>(first.error());
     }
     return {};
 }
@@ -183,7 +183,7 @@ Result<std::uint64_t> Resource::chunkFileOffset(std::uint64_t chunk) const {
             std::array<std::byte, 8> raw{};
             auto read = file_->readExactAt(*entry, raw);
             if (!read) {
-                return std::unexpected(read.error());
+                return tl::unexpected<Error>(read.error());
             }
             auto body = checkedAdd(tableBase_ + tableBytes_, loadLe<std::uint64_t>(raw.data()));
             if (!body) {
@@ -194,7 +194,7 @@ Result<std::uint64_t> Resource::chunkFileOffset(std::uint64_t chunk) const {
         std::array<std::byte, 4> raw{};
         auto read = file_->readExactAt(*entry, raw);
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         auto body = checkedAdd(
             tableBase_ + tableBytes_,
@@ -218,7 +218,7 @@ Result<std::uint64_t> Resource::chunkFileOffset(std::uint64_t chunk) const {
         want -= want % 4;
         auto got = file_->readExactAt(at, std::span(page).first(want));
         if (!got) {
-            return std::unexpected(got.error());
+            return tl::unexpected<Error>(got.error());
         }
         for (std::size_t index = 0; index < want; index += 4) {
             auto size = loadLe<std::uint32_t>(page.data() + index);
@@ -241,13 +241,13 @@ Result<std::uint64_t> Resource::chunkFileOffset(std::uint64_t chunk) const {
 Result<std::uint64_t> Resource::chunkStoredSize(std::uint64_t chunk) const {
     auto start = chunkFileOffset(chunk);
     if (!start) {
-        return std::unexpected(start.error());
+        return tl::unexpected<Error>(start.error());
     }
     std::uint64_t bound = 0;
     if (!solid_ && chunk + 1 < chunkCount_) {
         auto next = chunkFileOffset(chunk + 1);
         if (!next) {
-            return std::unexpected(next.error());
+            return tl::unexpected<Error>(next.error());
         }
         if (*next < *start) {
             return fail(ErrorKind::Malformed, "WIM chunk table is not ordered", ref_.offset);
@@ -277,7 +277,7 @@ Result<std::uint64_t> Resource::chunkStoredSize(std::uint64_t chunk) const {
 Result<void> Resource::refuseChunk(std::uint64_t chunk) const {
     auto start = chunkFileOffset(chunk);
     if (!start) {
-        return std::unexpected(start.error());
+        return tl::unexpected<Error>(start.error());
     }
     return refuseFormat(format_, *start);
 }

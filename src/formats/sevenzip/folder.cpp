@@ -95,7 +95,7 @@ std::string codecHex(std::span<const std::uint8_t> id) {
     return text;
 }
 
-std::unexpected<Error> lzmaFailure(lzma_ret status) {
+tl::unexpected<Error> lzmaFailure(lzma_ret status) {
     switch (status) {
     case LZMA_MEMLIMIT_ERROR:
         return fail(ErrorKind::LimitExceeded, "7z lzma decoder memory limit exceeded");
@@ -451,7 +451,7 @@ Result<FolderSession> FolderSession::start(
 
     auto prepared = session.prepareDecoder();
     if (!prepared) {
-        return std::unexpected(prepared.error());
+        return tl::unexpected<Error>(prepared.error());
     }
     return session;
 }
@@ -472,7 +472,7 @@ Result<void> FolderSession::prepareDecoder() {
             return fail(ErrorKind::LimitExceeded, "7z deflate decoder is missing");
         }
         if (auto reset = inflater_->reset(); !reset) {
-            return std::unexpected(reset.error());
+            return tl::unexpected<Error>(reset.error());
         }
         decoder_.emplace<Inflater*>(inflater_);
         return {};
@@ -481,7 +481,7 @@ Result<void> FolderSession::prepareDecoder() {
             return fail(ErrorKind::LimitExceeded, "7z bzip2 decoder is missing");
         }
         if (auto reset = bzip2_->reset(); !reset) {
-            return std::unexpected(reset.error());
+            return tl::unexpected<Error>(reset.error());
         }
         decoder_.emplace<Bzip2Decoder*>(bzip2_);
         return {};
@@ -489,7 +489,7 @@ Result<void> FolderSession::prepareDecoder() {
     case Codec::Lzma2: {
         auto decoder = RawLzma::create(plan_.codec.codec, plan_.codec.props, memLimit_);
         if (!decoder) {
-            return std::unexpected(decoder.error());
+            return tl::unexpected<Error>(decoder.error());
         }
         decoder_.emplace<RawLzma>(std::move(*decoder));
         return {};
@@ -579,7 +579,7 @@ Result<void> FolderSession::fillInput() {
     auto room = input_.first(static_cast<std::size_t>(want));
     auto read = file_.readExactAt(packPosition_, room);
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
     pending_ = room;
     return {};
@@ -660,7 +660,7 @@ Result<std::span<const std::byte>> FolderSession::nextCopy() {
         if (entryLeft_ == 0) {
             auto finished = finishEntry();
             if (!finished) {
-                return std::unexpected(finished.error());
+                return tl::unexpected<Error>(finished.error());
             }
             return std::span<const std::byte>{};
         }
@@ -699,19 +699,19 @@ Result<std::span<const std::byte>> FolderSession::nextCopy() {
         auto chunk = input_.first(static_cast<std::size_t>(want));
         auto read = file_.readExactAt(packPosition_, chunk);
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         pending_ = chunk;
 
         auto consumed = noteConsumed(chunk.size());
         if (!consumed) {
             pending_ = {};
-            return std::unexpected(consumed.error());
+            return tl::unexpected<Error>(consumed.error());
         }
 
         auto part = deliver(chunk);
         if (!part) {
-            return std::unexpected(part.error());
+            return tl::unexpected<Error>(part.error());
         }
         if (!part->empty()) {
             return *part;
@@ -724,7 +724,7 @@ Result<std::span<const std::byte>> FolderSession::nextCoded() {
         if (entryLeft_ == 0) {
             auto finished = finishEntry();
             if (!finished) {
-                return std::unexpected(finished.error());
+                return tl::unexpected<Error>(finished.error());
             }
             return std::span<const std::byte>{};
         }
@@ -732,7 +732,7 @@ Result<std::span<const std::byte>> FolderSession::nextCoded() {
         if (pending_.empty()) {
             auto filled = fillInput();
             if (!filled) {
-                return std::unexpected(filled.error());
+                return tl::unexpected<Error>(filled.error());
             }
         }
 
@@ -757,13 +757,13 @@ Result<std::span<const std::byte>> FolderSession::nextCoded() {
             auto error = result.error();
             error.offset = packPosition_;
             pending_ = {};
-            return std::unexpected(error);
+            return tl::unexpected<Error>(error);
         }
 
         auto consumed = noteConsumed(result->consumed);
         if (!consumed) {
             pending_ = {};
-            return std::unexpected(consumed.error());
+            return tl::unexpected<Error>(consumed.error());
         }
 
         if (result->produced == 0) {
@@ -785,7 +785,7 @@ Result<std::span<const std::byte>> FolderSession::nextCoded() {
 
         auto part = deliver(window.first(result->produced));
         if (!part) {
-            return std::unexpected(part.error());
+            return tl::unexpected<Error>(part.error());
         }
         if (!part->empty()) {
             return *part;
@@ -798,7 +798,7 @@ Result<std::span<const std::byte>> FolderSession::nextFiltered() {
         if (entryLeft_ == 0) {
             auto finished = finishEntry();
             if (!finished) {
-                return std::unexpected(finished.error());
+                return tl::unexpected<Error>(finished.error());
             }
             return std::span<const std::byte>{};
         }
@@ -806,7 +806,7 @@ Result<std::span<const std::byte>> FolderSession::nextFiltered() {
         if (pending_.empty()) {
             auto filled = fillInput();
             if (!filled) {
-                return std::unexpected(filled.error());
+                return tl::unexpected<Error>(filled.error());
             }
         }
 
@@ -823,19 +823,19 @@ Result<std::span<const std::byte>> FolderSession::nextFiltered() {
                 auto error = step.error();
                 error.offset = packPosition_;
                 pending_ = {};
-                return std::unexpected(error);
+                return tl::unexpected<Error>(error);
             }
 
             auto consumed = noteConsumed(step->consumed);
             if (!consumed) {
                 pending_ = {};
-                return std::unexpected(consumed.error());
+                return tl::unexpected<Error>(consumed.error());
             }
 
             if (step->produced > 0) {
                 auto part = deliver(window.first(step->produced));
                 if (!part) {
-                    return std::unexpected(part.error());
+                    return tl::unexpected<Error>(part.error());
                 }
                 if (!part->empty()) {
                     return *part;
@@ -847,14 +847,14 @@ Result<std::span<const std::byte>> FolderSession::nextFiltered() {
         if (pending_.empty() && packPosition_ >= packDataEnd_) {
             auto flushed = bcj_.flush(window);
             if (!flushed) {
-                return std::unexpected(flushed.error());
+                return tl::unexpected<Error>(flushed.error());
             }
             if (*flushed == 0) {
                 return fail(ErrorKind::Truncated, "7z data stream truncated", packPosition_);
             }
             auto part = deliver(window.first(*flushed));
             if (!part) {
-                return std::unexpected(part.error());
+                return tl::unexpected<Error>(part.error());
             }
             if (!part->empty()) {
                 return *part;

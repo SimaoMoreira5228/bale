@@ -89,7 +89,7 @@ Result<void> Reader::findCommit() {
     }
 
     if (nearest) {
-        return std::unexpected(*nearest);
+        return tl::unexpected<Error>(*nearest);
     }
     return fail(ErrorKind::Truncated, "no footer found: the archive is incomplete or truncated");
 }
@@ -97,7 +97,7 @@ Result<void> Reader::findCommit() {
 Result<void> Reader::tryFooter(std::span<const std::byte> bytes, std::uint64_t offset) {
     auto footer = decodeFooter(bytes, offset);
     if (!footer) {
-        return std::unexpected(footer.error());
+        return tl::unexpected<Error>(footer.error());
     }
     if (footer->commitOffset + footer->commitLength > offset) {
         return fail(ErrorKind::Malformed, "footer does not directly follow its commit", offset);
@@ -111,7 +111,7 @@ Result<void> Reader::tryFooter(std::span<const std::byte> bytes, std::uint64_t o
         buffer_
     );
     if (!record) {
-        return std::unexpected(record.error());
+        return tl::unexpected<Error>(record.error());
     }
     if (record->header.codec != CodecId::Raw) {
         return fail(ErrorKind::Malformed, "commit record is not stored raw", footer->commitOffset);
@@ -124,7 +124,7 @@ Result<void> Reader::tryFooter(std::span<const std::byte> bytes, std::uint64_t o
 
     auto commit = decodeCommit(record->payload, footer->commitOffset + recordPrefixSize);
     if (!commit) {
-        return std::unexpected(commit.error());
+        return tl::unexpected<Error>(commit.error());
     }
     if (commit->generation != footer->generation) {
         return fail(ErrorKind::Malformed, "footer and commit disagree on generation", offset);
@@ -157,11 +157,11 @@ Result<void> Reader::tryFooter(std::span<const std::byte> bytes, std::uint64_t o
         std::array<std::byte, footerSize> parentBytes{};
         auto parentRead = file_.readExactAt(parentCommit.previousFooterOffset, parentBytes);
         if (!parentRead) {
-            return std::unexpected(parentRead.error());
+            return tl::unexpected<Error>(parentRead.error());
         }
         auto decodedFooter = decodeFooter(parentBytes, parentCommit.previousFooterOffset);
         if (!decodedFooter) {
-            return std::unexpected(decodedFooter.error());
+            return tl::unexpected<Error>(decodedFooter.error());
         }
         if (decodedFooter->generation + 1 != parentCommit.generation ||
             decodedFooter->commitDigest != parentCommit.previous) {
@@ -189,7 +189,7 @@ Result<void> Reader::tryFooter(std::span<const std::byte> bytes, std::uint64_t o
                 decodedFooter->generation
             );
             !trailer) {
-            return std::unexpected(trailer.error());
+            return tl::unexpected<Error>(trailer.error());
         }
 
         auto parentRecord = readRecord(
@@ -200,7 +200,7 @@ Result<void> Reader::tryFooter(std::span<const std::byte> bytes, std::uint64_t o
             buffer_
         );
         if (!parentRecord) {
-            return std::unexpected(parentRecord.error());
+            return tl::unexpected<Error>(parentRecord.error());
         }
         if (parentRecord->header.codec != CodecId::Raw) {
             return fail(
@@ -213,7 +213,7 @@ Result<void> Reader::tryFooter(std::span<const std::byte> bytes, std::uint64_t o
         auto decodedCommit =
             decodeCommit(parentRecord->payload, decodedFooter->commitOffset + recordPrefixSize);
         if (!decodedCommit) {
-            return std::unexpected(decodedCommit.error());
+            return tl::unexpected<Error>(decodedCommit.error());
         }
         Blake3Digest parentDigest = Blake3::of(HashDomain::Commit, parentRecord->payload);
         if (parentDigest != decodedFooter->commitDigest ||
@@ -253,7 +253,7 @@ Result<void> Reader::tryFooter(std::span<const std::byte> bytes, std::uint64_t o
                 buffer_
             );
             if (!metadataRecord) {
-                return std::unexpected(metadataRecord.error());
+                return tl::unexpected<Error>(metadataRecord.error());
             }
             if (metadataRecord->header.codec != CodecId::Raw ||
                 Blake3::of(domain, metadataRecord->payload) != reference.digest) {

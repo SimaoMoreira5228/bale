@@ -27,21 +27,21 @@ CompressedOutput::create(File file, Compression compression, std::optional<int> 
         int chosen = level.value_or(defaultGzipLevel);
         auto encoder = DeflateEncoder::create(chosen);
         if (!encoder) {
-            return std::unexpected(encoder.error());
+            return tl::unexpected<Error>(encoder.error());
         }
 
         CompressedOutput output(std::move(file), Encoder(std::move(*encoder)), outputBufferSize);
         auto header = gzip::encodeHeader(chosen);
         auto written = output.put(header);
         if (!written) {
-            return std::unexpected(written.error());
+            return tl::unexpected<Error>(written.error());
         }
         return output;
     }
     case Compression::Zstd: {
         auto encoder = ZstdEncoder::create(level.value_or(defaultZstdOutputLevel), true);
         if (!encoder) {
-            return std::unexpected(encoder.error());
+            return tl::unexpected<Error>(encoder.error());
         }
         return CompressedOutput(std::move(file), Encoder(std::move(*encoder)), outputBufferSize);
     }
@@ -54,7 +54,7 @@ CompressedOutput::create(File file, Compression compression, std::optional<int> 
 
 Result<void> CompressedOutput::poison(const Error& error) {
     failure_ = error;
-    return std::unexpected(error);
+    return tl::unexpected<Error>(error);
 }
 
 Result<void> CompressedOutput::flush() {
@@ -127,13 +127,13 @@ Result<void> CompressedOutput::encode(std::span<const std::byte> data, EncodeFlu
 
 Result<void> CompressedOutput::write(std::span<const std::byte> data) {
     if (failure_) {
-        return std::unexpected(*failure_);
+        return tl::unexpected<Error>(*failure_);
     }
     if (finished_) {
         return fail(ErrorKind::Malformed, "output already finished");
     }
 
-    auto total = checkedAdd<std::uint64_t>(inputBytes_, data.size());
+    auto total = checkedAdd(inputBytes_, data.size());
     if (!total) {
         return poison(Error{.kind = ErrorKind::LimitExceeded, .what = "output size overflows"});
     }
@@ -153,7 +153,7 @@ Result<void> CompressedOutput::write(std::span<const std::byte> data) {
 
 Result<std::uint64_t> CompressedOutput::finish(bool durable) {
     if (failure_) {
-        return std::unexpected(*failure_);
+        return tl::unexpected<Error>(*failure_);
     }
     if (finished_) {
         return fail(ErrorKind::Malformed, "output already finished");
@@ -162,25 +162,25 @@ Result<std::uint64_t> CompressedOutput::finish(bool durable) {
     if (!std::holds_alternative<std::monostate>(encoder_)) {
         auto ended = encode({}, EncodeFlush::Finish);
         if (!ended) {
-            return std::unexpected(ended.error());
+            return tl::unexpected<Error>(ended.error());
         }
     }
     if (std::holds_alternative<DeflateEncoder>(encoder_)) {
         auto trailer = gzip::encodeTrailer(crc_.value(), inputBytes_);
         auto written = put(trailer);
         if (!written) {
-            return std::unexpected(written.error());
+            return tl::unexpected<Error>(written.error());
         }
     }
 
     auto flushed = flush();
     if (!flushed) {
-        return std::unexpected(flushed.error());
+        return tl::unexpected<Error>(flushed.error());
     }
     if (durable) {
         auto synced = file_.sync();
         if (!synced) {
-            return std::unexpected(poison(synced.error()).error());
+            return tl::unexpected<Error>(poison(synced.error()).error());
         }
     }
 

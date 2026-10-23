@@ -109,7 +109,7 @@ collectFooters(File& file, std::uint64_t fileSize) {
         }
         block.resize(static_cast<std::size_t>(end - start));
         if (auto read = file.readExactAt(start, block); !read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         if (block.size() >= footerSize) {
             for (std::size_t at = block.size() - footerSize;; --at) {
@@ -162,7 +162,7 @@ findGenerationStart(File& file, const Footer& footer, std::uint64_t footerOffset
         }
         block.resize(static_cast<std::size_t>(end - start));
         if (auto read = file.readExactAt(start, block); !read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         if (block.size() >= footerSize) {
             for (std::size_t at = block.size() - footerSize;; --at) {
@@ -231,7 +231,7 @@ class GenerationRepairer {
                 return note(checked.error());
             }
             if (auto repaired = repairStripes(); !repaired) {
-                return std::unexpected(repaired.error());
+                return tl::unexpected<Error>(repaired.error());
             }
             if (commitTrusted_ || stopped_) {
                 break;
@@ -245,11 +245,11 @@ class GenerationRepairer {
         }
         if (!stopped_) {
             if (auto applied = applyJournal(); !applied) {
-                return std::unexpected(applied.error());
+                return tl::unexpected<Error>(applied.error());
             }
         }
         if (auto synced = file_.sync(); !synced) {
-            return std::unexpected(synced.error());
+            return tl::unexpected<Error>(synced.error());
         }
         return report_;
     }
@@ -274,7 +274,7 @@ class GenerationRepairer {
         }
         if (journalBytes_ + bytes.size() > maxRepairJournalBytes) {
             if (auto applied = applyJournal(); !applied) {
-                return std::unexpected(applied.error());
+                return tl::unexpected<Error>(applied.error());
             }
         }
         journal_.push_back(
@@ -290,7 +290,7 @@ class GenerationRepairer {
     Result<bool> readThrough(std::uint64_t offset, std::span<std::byte> out) {
         if (auto read = file_.readExactAt(offset, out); !read) {
             if (read.error().kind == ErrorKind::Io) {
-                return std::unexpected(read.error());
+                return tl::unexpected<Error>(read.error());
             }
             return false;
         }
@@ -315,7 +315,7 @@ class GenerationRepairer {
             if (auto wrote = file_.writeAt(op.offset, op.bytes); !wrote) {
                 journal_.clear();
                 journalBytes_ = 0;
-                return std::unexpected(wrote.error());
+                return tl::unexpected<Error>(wrote.error());
             }
             report_.repaired = true;
         }
@@ -339,7 +339,7 @@ class GenerationRepairer {
         }
         auto size = fileSize();
         if (!size) {
-            return std::unexpected(size.error());
+            return tl::unexpected<Error>(size.error());
         }
         if (descriptor.stripeCount > *size) {
             return fail(ErrorKind::Integrity, "parity stripe count exceeds the file size");
@@ -352,7 +352,7 @@ class GenerationRepairer {
         if (!cachedSize_) {
             auto size = file_.size();
             if (!size) {
-                return std::unexpected(size.error());
+                return tl::unexpected<Error>(size.error());
             }
             cachedSize_ = *size;
         }
@@ -362,7 +362,7 @@ class GenerationRepairer {
     Result<void> buildMap() {
         auto scan = scanGeneration(file_, genStart_, footerOffset_, scanPayloadCap);
         if (!scan) {
-            return std::unexpected(scan.error());
+            return tl::unexpected<Error>(scan.error());
         }
         scan_ = std::move(*scan);
         for (const auto& record : scan_.records) {
@@ -375,7 +375,7 @@ class GenerationRepairer {
             if (record.type == RecordType::Data) {
                 auto payload = payloadExtent(record.offset, record.length);
                 if (!payload) {
-                    return std::unexpected(payload.error());
+                    return tl::unexpected<Error>(payload.error());
                 }
                 data_.push_back(
                     DataSpan{
@@ -391,7 +391,7 @@ class GenerationRepairer {
                 record.extensionKind == keyslotExtensionKind) {
                 auto payload = payloadExtent(record.offset, record.length);
                 if (!payload) {
-                    return std::unexpected(payload.error());
+                    return tl::unexpected<Error>(payload.error());
                 }
                 keyslots_.push_back(*payload);
             }
@@ -512,7 +512,7 @@ class GenerationRepairer {
         };
         std::vector<std::byte> bytes(static_cast<std::size_t>(footer_.commitLength));
         if (auto read = file_.readExactAt(footer_.commitOffset, bytes); !read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         auto decoded = decodeRecord(bytes, commitLimits, footer_.commitOffset);
         if (!decoded) {
@@ -547,7 +547,7 @@ class GenerationRepairer {
             );
             if (!opened) {
                 if (opened.error().kind != ErrorKind::Integrity) {
-                    return std::unexpected(opened.error());
+                    return tl::unexpected<Error>(opened.error());
                 }
                 continue;
             }
@@ -591,7 +591,7 @@ class GenerationRepairer {
                             std::vector<std::byte>& bytes) -> Result<Record> {
             bytes.resize(static_cast<std::size_t>(reference.length));
             if (auto read = file_.readExactAt(reference.offset, bytes); !read) {
-                return std::unexpected(read.error());
+                return tl::unexpected<Error>(read.error());
             }
             auto record = decodeRecord(bytes, metaLimits, reference.offset);
             if (!record || record->header.type != type) {
@@ -630,7 +630,7 @@ class GenerationRepairer {
                     aad
                 );
                 if (!opened) {
-                    return std::unexpected(opened.error());
+                    return tl::unexpected<Error>(opened.error());
                 }
                 plain.assign(opened->begin(), opened->end());
                 wipeBuffer(*opened);
@@ -641,7 +641,7 @@ class GenerationRepairer {
                 if (opened.error().kind == ErrorKind::Integrity) {
                     return {};
                 }
-                return std::unexpected(opened.error());
+                return tl::unexpected<Error>(opened.error());
             }
             if (auto opened =
                     openMeta(manifestPayload, manifestAad(id, commit.epoch), plainManifest);
@@ -649,7 +649,7 @@ class GenerationRepairer {
                 if (opened.error().kind == ErrorKind::Integrity) {
                     return {};
                 }
-                return std::unexpected(opened.error());
+                return tl::unexpected<Error>(opened.error());
             }
             indexPayload = plainIndex;
             manifestPayload = plainManifest;
@@ -830,7 +830,7 @@ class GenerationRepairer {
         auto stripes =
             stripeCountFor(streamLength_, footer_.parity.dataShards, footer_.parity.shardBytes);
         if (!stripes) {
-            return std::unexpected(stripes.error());
+            return tl::unexpected<Error>(stripes.error());
         }
         if (*stripes != footer_.parity.stripeCount) {
             return fail(ErrorKind::Integrity, "stripe stream length disagrees with its footer");
@@ -849,12 +849,12 @@ class GenerationRepairer {
         const auto& descriptor = footer_.parity;
         auto coder = parity::ReedSolomon::make(descriptor.dataShards, descriptor.parityShards);
         if (!coder) {
-            return std::unexpected(coder.error());
+            return tl::unexpected<Error>(coder.error());
         }
         auto scratchSize =
             parity::ReedSolomon::scratchBytes(descriptor.dataShards, descriptor.parityShards);
         if (!scratchSize) {
-            return std::unexpected(scratchSize.error());
+            return tl::unexpected<Error>(scratchSize.error());
         }
         std::vector<std::byte> scratch(*scratchSize);
         std::uint32_t total = descriptor.dataShards + descriptor.parityShards;
@@ -899,7 +899,7 @@ class GenerationRepairer {
                 return stop(verified.error());
             }
             if (auto written = writeStripe(stripe, *stripeStart, shards, missing); !written) {
-                return std::unexpected(written.error());
+                return tl::unexpected<Error>(written.error());
             }
             auto stripeEnd = checkedAdd(*stripeStart, stripeBytes_);
             if (!stripeEnd) {
@@ -924,7 +924,7 @@ class GenerationRepairer {
 
     Result<void> stop(const Error& error) {
         if (error.kind == ErrorKind::Io) {
-            return std::unexpected(error);
+            return tl::unexpected<Error>(error);
         }
         if (report_.note.empty()) {
             report_.note = std::string(error.what);
@@ -970,7 +970,7 @@ class GenerationRepairer {
             }
             auto shardRead = readStripeShard(*shardOffset, shards[shard]);
             if (!shardRead) {
-                return std::unexpected(shardRead.error());
+                return tl::unexpected<Error>(shardRead.error());
             }
             if (!*shardRead) {
                 missing.push_back(shard);
@@ -982,7 +982,7 @@ class GenerationRepairer {
             } else {
                 auto gated = recordGate(*shardOffset, recordBuffer);
                 if (!gated) {
-                    return std::unexpected(gated.error());
+                    return tl::unexpected<Error>(gated.error());
                 }
                 present = *gated;
             }
@@ -1005,7 +1005,7 @@ class GenerationRepairer {
             }
             auto present = readThrough(found->payload.offset, shards[shard]);
             if (!present) {
-                return std::unexpected(present.error());
+                return tl::unexpected<Error>(present.error());
             }
             if (!*present) {
                 missing.push_back(shard);
@@ -1049,7 +1049,7 @@ class GenerationRepairer {
             }
             auto chunk = readThrough(*rangeStart, out.subspan(filled, take));
             if (!chunk) {
-                return std::unexpected(chunk.error());
+                return tl::unexpected<Error>(chunk.error());
             }
             if (!*chunk) {
                 return false;
@@ -1072,7 +1072,7 @@ class GenerationRepairer {
         recordBuffer.resize(static_cast<std::size_t>(owner->recordLength));
         auto recordRead = readThrough(owner->recordOffset, recordBuffer);
         if (!recordRead) {
-            return std::unexpected(recordRead.error());
+            return tl::unexpected<Error>(recordRead.error());
         }
         if (!*recordRead) {
             return false;
@@ -1166,7 +1166,7 @@ class GenerationRepairer {
             }
             auto scattered = scatterShard(*shardOffset, shards[shard]);
             if (!scattered) {
-                return std::unexpected(scattered.error());
+                return tl::unexpected<Error>(scattered.error());
             }
             if (!*scattered) {
                 return fail(ErrorKind::Integrity, "repaired shard has nowhere to go");
@@ -1185,18 +1185,18 @@ class GenerationRepairer {
             }
             if (found == nullptr) {
                 if (auto orphaned = rebuildOrphan(stripe, shard, shards[shard]); !orphaned) {
-                    return std::unexpected(orphaned.error());
+                    return tl::unexpected<Error>(orphaned.error());
                 }
                 continue;
             }
             if (auto staged = journalWrite(found->payload.offset, shards[shard]); !staged) {
-                return std::unexpected(staged.error());
+                return tl::unexpected<Error>(staged.error());
             }
             touchedRecords_.insert(found->recordOffset);
             ++report_.repairedRecords;
         }
         if (auto fixed = fixTouchedRecords(); !fixed) {
-            return std::unexpected(fixed.error());
+            return tl::unexpected<Error>(fixed.error());
         }
         report_.repaired = true;
         return {};
@@ -1230,7 +1230,7 @@ class GenerationRepairer {
                         )
                     );
                     !staged) {
-                    return std::unexpected(staged.error());
+                    return tl::unexpected<Error>(staged.error());
                 }
                 touchedRecords_.insert(segment.recordOffset);
                 touchedSegments_.insert(index);
@@ -1288,14 +1288,14 @@ class GenerationRepairer {
         header.streamLength = streamLength_;
         header.crc.assign(total, 0);
         if (auto tabled = fillTable(header); !tabled) {
-            return std::unexpected(tabled.error());
+            return tl::unexpected<Error>(tabled.error());
         }
         std::vector<std::byte> payload;
         if (!encodeParityRecord(header, shard, payload)) {
             return {};
         }
         if (auto staged = journalWrite(slot + recordPrefixSize, payload); !staged) {
-            return std::unexpected(staged.error());
+            return tl::unexpected<Error>(staged.error());
         }
         touchedRecords_.insert(slot);
         orphans_.erase(slot);
@@ -1313,7 +1313,7 @@ class GenerationRepairer {
                     stripeStart + static_cast<std::uint64_t>(shard) * header.shardBytes;
                 auto shardRead = readStripeShard(streamOffset, bytes);
                 if (!shardRead) {
-                    return std::unexpected(shardRead.error());
+                    return tl::unexpected<Error>(shardRead.error());
                 }
                 if (!*shardRead) {
                     return false;
@@ -1325,7 +1325,7 @@ class GenerationRepairer {
                         ref.header.shardIndex == shard) {
                         auto refRead = readThrough(ref.payload.offset, bytes);
                         if (!refRead) {
-                            return std::unexpected(refRead.error());
+                            return tl::unexpected<Error>(refRead.error());
                         }
                         if (!*refRead) {
                             return false;
@@ -1375,7 +1375,7 @@ class GenerationRepairer {
             bytes.resize(static_cast<std::size_t>(recordLength));
             auto recordRead = readThrough(recordOffset, bytes);
             if (!recordRead) {
-                return std::unexpected(recordRead.error());
+                return tl::unexpected<Error>(recordRead.error());
             }
             if (!*recordRead) {
                 return fail(ErrorKind::Integrity, "touched record unreadable for reseal");
@@ -1389,10 +1389,10 @@ class GenerationRepairer {
             if (auto staged =
                     journalWrite(recordOffset + recordPrefixSize + payloadLength, trailer);
                 !staged) {
-                return std::unexpected(staged.error());
+                return tl::unexpected<Error>(staged.error());
             }
             if (auto prefixFixed = fixPrefixCrc(recordOffset, recordLength, bytes); !prefixFixed) {
-                return std::unexpected(prefixFixed.error());
+                return tl::unexpected<Error>(prefixFixed.error());
             }
         }
         touchedRecords_.clear();
@@ -1429,7 +1429,7 @@ class GenerationRepairer {
             std::array<std::byte, 4> encoded{};
             storeLe(encoded.data(), correct);
             if (auto staged = journalWrite(recordOffset + 36, encoded); !staged) {
-                return std::unexpected(staged.error());
+                return tl::unexpected<Error>(staged.error());
             }
         }
         return {};
@@ -1454,7 +1454,7 @@ class GenerationRepairer {
             }
             if (auto checked = validateSegmentPayload(segments_[index], decoder, recordBuffer);
                 !checked) {
-                return std::unexpected(checked.error());
+                return tl::unexpected<Error>(checked.error());
             }
             validated_.insert(index);
         }
@@ -1473,7 +1473,7 @@ class GenerationRepairer {
         recordBuffer.resize(static_cast<std::size_t>(segment.recordLength));
         auto recordRead = readThrough(segment.recordOffset, recordBuffer);
         if (!recordRead) {
-            return std::unexpected(recordRead.error());
+            return tl::unexpected<Error>(recordRead.error());
         }
         if (!*recordRead) {
             return fail(ErrorKind::Integrity, "owning record unreadable for validation");
@@ -1509,7 +1509,7 @@ class GenerationRepairer {
         if (!encrypted_) {
             auto data = decodeDataPayload(payload, payloadOffset);
             if (!data) {
-                return std::unexpected(data.error());
+                return tl::unexpected<Error>(data.error());
             }
             if (data->key.length > maxChunkSize) {
                 return fail(ErrorKind::LimitExceeded, "chunk exceeds the supported size");
@@ -1522,7 +1522,7 @@ class GenerationRepairer {
                 std::ranges::copy(data->encoded, decoded.begin());
             } else {
                 if (auto out = decoder.decode(codec, data->encoded, decoded); !out) {
-                    return std::unexpected(out.error());
+                    return tl::unexpected<Error>(out.error());
                 }
             }
             bool matches = chunkKeyOf(decoded).digest == data->key.digest;
@@ -1534,7 +1534,7 @@ class GenerationRepairer {
         }
         auto extent = decodeEncryptedExtent(payload, payloadOffset);
         if (!extent) {
-            return std::unexpected(extent.error());
+            return tl::unexpected<Error>(extent.error());
         }
         if (keys_ == nullptr) {
             return fail(ErrorKind::PasswordRequired, "encrypted repair needs keys");
@@ -1557,7 +1557,7 @@ class GenerationRepairer {
             auto opened = crypto::open(key.bytes(), nonce, boxed, aad);
             if (!opened) {
                 if (opened.error().kind != ErrorKind::Integrity) {
-                    return std::unexpected(opened.error());
+                    return tl::unexpected<Error>(opened.error());
                 }
                 continue;
             }
@@ -1580,7 +1580,7 @@ class GenerationRepairer {
                     continue;
                 }
                 wipeBuffer(decoded);
-                return std::unexpected(decodedOk.error());
+                return tl::unexpected<Error>(decodedOk.error());
             }
             bool matches = chunkKeyOf(decoded).digest == extent->plain.digest;
             wipeBuffer(decoded);
@@ -1623,7 +1623,7 @@ class GenerationRepairer {
                 );
                 if (!attempt) {
                     if (attempt.error().kind != ErrorKind::Integrity) {
-                        return std::unexpected(attempt.error());
+                        return tl::unexpected<Error>(attempt.error());
                     }
                     continue;
                 }
@@ -1689,7 +1689,7 @@ class GenerationRepairer {
             );
             if (!opened) {
                 if (opened.error().kind != ErrorKind::Integrity) {
-                    return std::unexpected(opened.error());
+                    return tl::unexpected<Error>(opened.error());
                 }
                 continue;
             }
@@ -1726,7 +1726,7 @@ class GenerationRepairer {
         std::vector<std::byte> bytes(static_cast<std::size_t>(commitLength));
         auto commitRead = readThrough(commitOffset, bytes);
         if (!commitRead) {
-            return std::unexpected(commitRead.error());
+            return tl::unexpected<Error>(commitRead.error());
         }
         if (!*commitRead) {
             return fail(ErrorKind::Integrity, "recovered commit record still damaged");
@@ -1764,7 +1764,7 @@ class GenerationRepairer {
             );
             if (!opened) {
                 if (opened.error().kind != ErrorKind::Integrity) {
-                    return std::unexpected(opened.error());
+                    return tl::unexpected<Error>(opened.error());
                 }
                 continue;
             }
@@ -1830,7 +1830,7 @@ Result<RepairOutcome> repairParityGenerations(
     }
     auto footers = collectFooters(file, fileSize);
     if (!footers) {
-        return std::unexpected(footers.error());
+        return tl::unexpected<Error>(footers.error());
     }
     for (auto iterator = footers->rbegin(); iterator != footers->rend(); ++iterator) {
         const auto& [footer, footerOffset] = *iterator;
@@ -1840,7 +1840,7 @@ Result<RepairOutcome> repairParityGenerations(
         GenerationRepairer repairer(file, superblock, limits, keys, footer, footerOffset);
         auto report = repairer.run();
         if (!report) {
-            return std::unexpected(report.error());
+            return tl::unexpected<Error>(report.error());
         }
         outcome.changed = outcome.changed || report->repaired;
         outcome.generations.push_back(*report);

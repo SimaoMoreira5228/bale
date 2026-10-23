@@ -47,9 +47,9 @@ struct NodeInfo {
     std::uint64_t links = 1;
 };
 
-std::unexpected<Error> systemError(std::string_view what, const std::error_code& code) {
+tl::unexpected<Error> systemError(std::string_view what, const std::error_code& code) {
     auto failure = fail(ErrorKind::Io, what);
-    failure.error().systemCode = code.value();
+    failure.value().systemCode = code.value();
     return failure;
 }
 
@@ -171,7 +171,7 @@ Result<NodeInfo> inspect(const fs::path& path) {
 Result<TreeWalker> TreeWalker::open(const fs::path& root, const WalkOptions& options) {
     auto info = inspect(root);
     if (!info) {
-        return std::unexpected(info.error());
+        return tl::unexpected<Error>(info.error());
     }
     if (info->type != NodeType::Directory) {
         return fail(ErrorKind::Unsupported, "tree root is not a directory");
@@ -189,7 +189,7 @@ Result<TreeWalker> TreeWalker::open(const fs::path& root, const WalkOptions& opt
 
     auto listed = walker.descend(root);
     if (!listed) {
-        return std::unexpected(listed.error());
+        return tl::unexpected<Error>(listed.error());
     }
     return walker;
 }
@@ -231,7 +231,7 @@ Result<const WalkEntry*> TreeWalker::next() {
         fs::path directory = parent.children[parent.next - 1].path;
         auto listed = descend(directory);
         if (!listed) {
-            return std::unexpected(listed.error());
+            return tl::unexpected<Error>(listed.error());
         }
     }
 
@@ -253,7 +253,7 @@ Result<const WalkEntry*> TreeWalker::next() {
 
         auto produced = visit(child);
         if (!produced) {
-            return std::unexpected(produced.error());
+            return tl::unexpected<Error>(produced.error());
         }
         if (*produced) {
             return &entry_;
@@ -292,7 +292,7 @@ Result<bool> TreeWalker::visit(const Child& child) {
 
     auto info = inspect(child.path);
     if (!info) {
-        return std::unexpected(info.error());
+        return tl::unexpected<Error>(info.error());
     }
 
     bool excluded = false;
@@ -357,11 +357,11 @@ Result<bool> TreeWalker::visit(const Child& child) {
         if (file.error().kind == ErrorKind::Unsupported) {
             return skip("changed type while being archived");
         }
-        return std::unexpected(file.error());
+        return tl::unexpected<Error>(file.error());
     }
     auto size = file->size();
     if (!size) {
-        return std::unexpected(size.error());
+        return tl::unexpected<Error>(size.error());
     }
 
     file_.emplace(std::move(*file));

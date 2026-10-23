@@ -13,23 +13,23 @@ Result<Stream> Stream::open(File file, const Limits& limits) {
 
     auto headerLimit = maxHeaderSize(limits);
     if (!headerLimit) {
-        return std::unexpected(headerLimit.error());
+        return tl::unexpected<Error>(headerLimit.error());
     }
 
     auto inflater = Inflater::create();
     if (!inflater) {
-        return std::unexpected(inflater.error());
+        return tl::unexpected<Error>(inflater.error());
     }
 
     auto input = FileInput::open(std::move(file), std::max(limits.chunkBytes, *headerLimit));
     if (!input) {
-        return std::unexpected(input.error());
+        return tl::unexpected<Error>(input.error());
     }
 
     Stream stream(std::move(*input), limits, *headerLimit, std::move(*inflater));
     auto first = stream.beginMember();
     if (!first) {
-        return std::unexpected(first.error());
+        return tl::unexpected<Error>(first.error());
     }
 
     auto raw = stream.input_.pending().first(first->size);
@@ -38,7 +38,7 @@ Result<Stream> Stream::open(File file, const Limits& limits) {
 
     auto header = parseHeader(stream.firstHeader_, limits);
     if (!header) {
-        return std::unexpected(header.error());
+        return tl::unexpected<Error>(header.error());
     }
     stream.header_ = *header;
     return stream;
@@ -46,7 +46,7 @@ Result<Stream> Stream::open(File file, const Limits& limits) {
 
 Result<std::size_t> Stream::read(std::span<std::byte> out) {
     if (failure_) {
-        return std::unexpected(*failure_);
+        return tl::unexpected<Error>(*failure_);
     }
     if (out.empty()) {
         return fail(ErrorKind::LimitExceeded, "gzip read buffer is empty");
@@ -64,7 +64,7 @@ Result<std::size_t> Stream::decode(std::span<std::byte> out) {
         if (memberEnded_) {
             auto another = finishMember();
             if (!another) {
-                return std::unexpected(another.error());
+                return tl::unexpected<Error>(another.error());
             }
             if (!*another) {
                 done_ = true;
@@ -77,7 +77,7 @@ Result<std::size_t> Stream::decode(std::span<std::byte> out) {
         if (input_.pending().empty()) {
             auto filled = input_.fill(1);
             if (!filled) {
-                return std::unexpected(filled.error());
+                return tl::unexpected<Error>(filled.error());
             }
         }
 
@@ -89,7 +89,7 @@ Result<std::size_t> Stream::decode(std::span<std::byte> out) {
         if (!step) {
             auto error = step.error();
             error.offset = memberStart_;
-            return std::unexpected(error);
+            return tl::unexpected<Error>(error);
         }
 
         input_.consume(step->consumed);
@@ -122,17 +122,17 @@ Result<Header> Stream::beginMember() {
     memberStart_ = input_.offset();
     auto filled = input_.fill(headerLimit_);
     if (!filled) {
-        return std::unexpected(filled.error());
+        return tl::unexpected<Error>(filled.error());
     }
 
     auto header = parseHeader(input_.pending(), limits_, memberStart_);
     if (!header) {
-        return std::unexpected(header.error());
+        return tl::unexpected<Error>(header.error());
     }
 
     auto reset = inflater_.reset();
     if (!reset) {
-        return std::unexpected(reset.error());
+        return tl::unexpected<Error>(reset.error());
     }
 
     memberBytes_ = 0;
@@ -144,7 +144,7 @@ Result<Header> Stream::beginMember() {
 Result<bool> Stream::finishMember() {
     auto filled = input_.fill(trailerSize);
     if (!filled) {
-        return std::unexpected(filled.error());
+        return tl::unexpected<Error>(filled.error());
     }
 
     auto end = input_.offset();
@@ -162,7 +162,7 @@ Result<bool> Stream::finishMember() {
 
     auto more = input_.fill(1);
     if (!more) {
-        return std::unexpected(more.error());
+        return tl::unexpected<Error>(more.error());
     }
     if (input_.exhausted()) {
         return false;
@@ -172,7 +172,7 @@ Result<bool> Stream::finishMember() {
     if (lead == std::byte{0}) {
         auto padding = checkPadding();
         if (!padding) {
-            return std::unexpected(padding.error());
+            return tl::unexpected<Error>(padding.error());
         }
         return false;
     }
@@ -182,7 +182,7 @@ Result<bool> Stream::finishMember() {
 
     auto header = beginMember();
     if (!header) {
-        return std::unexpected(header.error());
+        return tl::unexpected<Error>(header.error());
     }
     input_.consume(header->size);
     return true;

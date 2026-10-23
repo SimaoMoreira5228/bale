@@ -11,7 +11,8 @@ constexpr std::size_t headerSize = 4;
 }
 
 bool looksLikeBzip2(std::span<const std::byte> head) {
-    if (head.size() < headerSize || !std::ranges::starts_with(head, streamMagic)) {
+    if (head.size() < headerSize ||
+        !std::ranges::equal(streamMagic, head.first(streamMagic.size()))) {
         return false;
     }
 
@@ -26,17 +27,17 @@ Result<Stream> Stream::open(File file, const Limits& limits) {
 
     auto decoder = Bzip2Decoder::create();
     if (!decoder) {
-        return std::unexpected(decoder.error());
+        return tl::unexpected<Error>(decoder.error());
     }
 
     auto input = FileInput::open(std::move(file), std::max(limits.chunkBytes, headerSize));
     if (!input) {
-        return std::unexpected(input.error());
+        return tl::unexpected<Error>(input.error());
     }
 
     auto filled = input->fill(headerSize);
     if (!filled) {
-        return std::unexpected(filled.error());
+        return tl::unexpected<Error>(filled.error());
     }
 
     auto head = input->pending();
@@ -51,7 +52,7 @@ Result<Stream> Stream::open(File file, const Limits& limits) {
 
 Result<std::size_t> Stream::read(std::span<std::byte> out) {
     if (failure_) {
-        return std::unexpected(*failure_);
+        return tl::unexpected<Error>(*failure_);
     }
     if (out.empty()) {
         return fail(ErrorKind::LimitExceeded, "bzip2 read buffer is empty");
@@ -69,7 +70,7 @@ Result<std::size_t> Stream::decode(std::span<std::byte> out) {
         if (decoder_.streamEnded()) {
             auto another = beginStream();
             if (!another) {
-                return std::unexpected(another.error());
+                return tl::unexpected<Error>(another.error());
             }
             if (!*another) {
                 return 0;
@@ -81,7 +82,7 @@ Result<std::size_t> Stream::decode(std::span<std::byte> out) {
         if (input_.pending().empty()) {
             auto filled = input_.fill(1);
             if (!filled) {
-                return std::unexpected(filled.error());
+                return tl::unexpected<Error>(filled.error());
             }
             if (input_.exhausted()) {
                 return fail(ErrorKind::Truncated, "bzip2 stream truncated", input_.offset());
@@ -97,7 +98,7 @@ Result<std::size_t> Stream::decode(std::span<std::byte> out) {
         if (!step) {
             auto error = step.error();
             error.offset = offset;
-            return std::unexpected(error);
+            return tl::unexpected<Error>(error);
         }
 
         input_.consume(step->consumed);
@@ -123,7 +124,7 @@ Result<bool> Stream::beginStream() {
         if (input_.pending().empty()) {
             auto filled = input_.fill(1);
             if (!filled) {
-                return std::unexpected(filled.error());
+                return tl::unexpected<Error>(filled.error());
             }
             if (input_.exhausted()) {
                 return false;
@@ -138,14 +139,15 @@ Result<bool> Stream::beginStream() {
 
     auto filled = input_.fill(headerSize);
     if (!filled) {
-        return std::unexpected(filled.error());
+        return tl::unexpected<Error>(filled.error());
     }
 
     auto head = input_.pending();
     if (head.size() < headerSize) {
         bool prefix = head.size() <= streamMagic.size()
-            ? std::ranges::starts_with(streamMagic, head)
-            : std::ranges::starts_with(head, streamMagic);
+            ? std::ranges::equal(head, std::span(streamMagic).first(head.size()))
+            : head.size() >= streamMagic.size() &&
+                std::ranges::equal(streamMagic, head.first(streamMagic.size()));
         if (!prefix) {
             return fail(ErrorKind::Malformed, "trailing data after bzip2 stream", input_.offset());
         }
@@ -157,7 +159,7 @@ Result<bool> Stream::beginStream() {
 
     auto reset = decoder_.reset();
     if (!reset) {
-        return std::unexpected(reset.error());
+        return tl::unexpected<Error>(reset.error());
     }
     return true;
 }

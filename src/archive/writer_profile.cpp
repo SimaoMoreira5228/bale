@@ -236,7 +236,7 @@ Result<WriterMetadata> decodeWriterMetadata(const TlvField& field) {
     while (true) {
         auto more = reader.next(nested);
         if (!more) {
-            return std::unexpected(more.error());
+            return tl::unexpected<Error>(more.error());
         }
         if (!*more) {
             break;
@@ -247,14 +247,14 @@ Result<WriterMetadata> decodeWriterMetadata(const TlvField& field) {
         if (!known) {
             auto skipped = skipUnknownField(nested);
             if (!skipped) {
-                return std::unexpected(skipped.error());
+                return tl::unexpected<Error>(skipped.error());
             }
             continue;
         }
 
         auto criticality = requireCriticality(nested, Criticality::Noncritical);
         if (!criticality) {
-            return std::unexpected(criticality.error());
+            return tl::unexpected<Error>(criticality.error());
         }
 
         if (nested.number == nameField) {
@@ -267,7 +267,7 @@ Result<WriterMetadata> decodeWriterMetadata(const TlvField& field) {
         if (nested.number == levelField) {
             auto level = decodeTlvSigned64(nested);
             if (!level) {
-                return std::unexpected(level.error());
+                return tl::unexpected<Error>(level.error());
             }
             metadata.level = *level;
             continue;
@@ -275,7 +275,7 @@ Result<WriterMetadata> decodeWriterMetadata(const TlvField& field) {
 
         auto value = decodeTlvUnsigned(nested);
         if (!value) {
-            return std::unexpected(value.error());
+            return tl::unexpected<Error>(value.error());
         }
         switch (nested.number) {
         case presetField:

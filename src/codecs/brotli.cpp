@@ -14,11 +14,11 @@ namespace bale {
 
 namespace {
 
-std::unexpected<Error> brotliEncodeFailure() {
+tl::unexpected<Error> brotliEncodeFailure() {
     return fail(ErrorKind::LimitExceeded, "brotli output buffer is too small");
 }
 
-std::unexpected<Error> brotliDecodeFailure(BrotliDecoderErrorCode code) {
+tl::unexpected<Error> brotliDecodeFailure(BrotliDecoderErrorCode code) {
     switch (code) {
     case BROTLI_DECODER_ERROR_ALLOC_CONTEXT_MODES:
     case BROTLI_DECODER_ERROR_ALLOC_TREE_GROUPS:

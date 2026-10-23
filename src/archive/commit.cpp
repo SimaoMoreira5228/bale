@@ -110,7 +110,7 @@ Result<Commit> decodeCommit(std::span<const std::byte> payload, std::uint64_t of
     while (true) {
         auto more = reader.next(field);
         if (!more) {
-            return std::unexpected(more.error());
+            return tl::unexpected<Error>(more.error());
         }
         if (!*more) {
             break;
@@ -119,14 +119,14 @@ Result<Commit> decodeCommit(std::span<const std::byte> payload, std::uint64_t of
         if (field.number == previousFooterField) {
             auto critical = requireCriticality(field, Criticality::Noncritical);
             if (!critical) {
-                return std::unexpected(critical.error());
+                return tl::unexpected<Error>(critical.error());
             }
             if (hasPreviousFooter) {
                 return fail(ErrorKind::Malformed, "duplicate previous footer field", field.offset);
             }
             auto value = decodeTlvUnsigned(field);
             if (!value) {
-                return std::unexpected(value.error());
+                return tl::unexpected<Error>(value.error());
             }
             commit.previousFooterOffset = *value;
             hasPreviousFooter = true;
@@ -135,14 +135,14 @@ Result<Commit> decodeCommit(std::span<const std::byte> payload, std::uint64_t of
         if (field.number == 13) {
             auto critical = requireCriticality(field, Criticality::Critical);
             if (!critical) {
-                return std::unexpected(critical.error());
+                return tl::unexpected<Error>(critical.error());
             }
             if (hasEpoch) {
                 return fail(ErrorKind::Malformed, "duplicate epoch field", field.offset);
             }
             auto value = decodeTlvUnsigned(field);
             if (!value) {
-                return std::unexpected(value.error());
+                return tl::unexpected<Error>(value.error());
             }
             if (*value == 0) {
                 return fail(ErrorKind::Malformed, "commit epoch is zero", field.offset);
@@ -154,14 +154,14 @@ Result<Commit> decodeCommit(std::span<const std::byte> payload, std::uint64_t of
         if (field.number > indexDigestField) {
             auto skipped = skipUnknownField(field);
             if (!skipped) {
-                return std::unexpected(skipped.error());
+                return tl::unexpected<Error>(skipped.error());
             }
             continue;
         }
 
         auto critical = requireCriticality(field, Criticality::Critical);
         if (!critical) {
-            return std::unexpected(critical.error());
+            return tl::unexpected<Error>(critical.error());
         }
         seen |= std::uint32_t{1} << field.number;
 
@@ -175,7 +175,7 @@ Result<Commit> decodeCommit(std::span<const std::byte> payload, std::uint64_t of
 
         auto value = decodeTlvUnsigned(field);
         if (!value) {
-            return std::unexpected(value.error());
+            return tl::unexpected<Error>(value.error());
         }
         values[field.number] = *value;
     }

@@ -6,6 +6,7 @@
 
 #include <sodium/utils.h>
 
+#include <algorithm>
 #include <charconv>
 #include <fstream>
 #include <string>
@@ -78,18 +79,18 @@ buildUnlock(const std::optional<std::string>& keyFile, bool promptIfNeeded) {
             auto secretBytes = parseRecipientHex(hex);
             // NOTE: parseRecipientHex validates hex; reuse its bytes as the secret.
             if (!secretBytes) {
-                return std::unexpected(secretBytes.error());
+                return tl::unexpected<Error>(secretBytes.error());
             }
             auto made = crypto::SecretBytes::make(32);
             if (!made) {
-                return std::unexpected(made.error());
+                return tl::unexpected<Error>(made.error());
             }
             crypto::SecretBytes secret(std::move(*made));
             std::ranges::copy(*secretBytes, secret.mut().begin());
             sodium_memzero(secretBytes->data(), secretBytes->size());
             auto pub = crypto::publicKeyOf(secret.bytes());
             if (!pub) {
-                return std::unexpected(pub.error());
+                return tl::unexpected<Error>(pub.error());
             }
             archive::ReaderUnlock::RecipientKey key;
             key.publicKey = *pub;
@@ -108,7 +109,7 @@ buildUnlock(const std::optional<std::string>& keyFile, bool promptIfNeeded) {
     if (promptIfNeeded && unlock.recipients.empty()) {
         auto password = promptPassword("bale password: ");
         if (!password) {
-            return std::unexpected(password.error());
+            return tl::unexpected<Error>(password.error());
         }
         unlock.hasPassword = true;
         unlock.password = std::move(*password);
@@ -165,14 +166,14 @@ Result<std::vector<crypto::SecretBytes>> loadSignSeeds(const std::string& path) 
         auto made = crypto::SecretBytes::make(crypto::signSeedSize);
         if (!made) {
             sodium_memzero(parsed->data(), parsed->size());
-            return std::unexpected(made.error());
+            return tl::unexpected<Error>(made.error());
         }
         crypto::SecretBytes seed(std::move(*made));
         std::ranges::copy(*parsed, seed.mut().begin());
         sodium_memzero(parsed->data(), parsed->size());
         // NOTE: fail fast on a bad seed before the caller truncates or creates anything.
         if (auto key = crypto::signPublicKeyOf(seed.bytes()); !key) {
-            return std::unexpected(key.error());
+            return tl::unexpected<Error>(key.error());
         }
         seeds.push_back(std::move(seed));
         if (seeds.size() > archive::maxSignaturesPerCommit) {

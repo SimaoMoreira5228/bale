@@ -18,7 +18,7 @@ ChunkEncoder::create(const CompressionProfile& profile, std::uint32_t chunkSize)
     case CodecId::Zstd: {
         auto encoder = ZstdEncoder::create(profile.level);
         if (!encoder) {
-            return std::unexpected(encoder.error());
+            return tl::unexpected<Error>(encoder.error());
         }
         chunkEncoder.encoder_.emplace<ZstdEncoder>(std::move(*encoder));
         chunkEncoder.buffer_.resize(ZstdEncoder::compressBound(chunkSize));
@@ -27,7 +27,7 @@ ChunkEncoder::create(const CompressionProfile& profile, std::uint32_t chunkSize)
     case CodecId::Lz4: {
         auto encoder = Lz4FrameEncoder::create(profile.level);
         if (!encoder) {
-            return std::unexpected(encoder.error());
+            return tl::unexpected<Error>(encoder.error());
         }
         chunkEncoder.encoder_.emplace<Lz4FrameEncoder>(std::move(*encoder));
         chunkEncoder.buffer_.resize(Lz4FrameEncoder::compressBound(chunkSize));
@@ -36,7 +36,7 @@ ChunkEncoder::create(const CompressionProfile& profile, std::uint32_t chunkSize)
     case CodecId::Lzma2: {
         auto encoder = Lzma2Encoder::create(profile.level);
         if (!encoder) {
-            return std::unexpected(encoder.error());
+            return tl::unexpected<Error>(encoder.error());
         }
         chunkEncoder.encoder_.emplace<Lzma2Encoder>(std::move(*encoder));
         chunkEncoder.buffer_.resize(Lzma2Encoder::compressBound(chunkSize));
@@ -45,7 +45,7 @@ ChunkEncoder::create(const CompressionProfile& profile, std::uint32_t chunkSize)
     case CodecId::Brotli: {
         auto encoder = BrotliEncoder::create(profile.level);
         if (!encoder) {
-            return std::unexpected(encoder.error());
+            return tl::unexpected<Error>(encoder.error());
         }
         chunkEncoder.encoder_.emplace<BrotliEncoder>(std::move(*encoder));
         chunkEncoder.buffer_.resize(BrotliEncoder::compressBound(chunkSize));
@@ -67,7 +67,7 @@ Result<EncodedChunk> ChunkEncoder::encode(std::span<const std::byte> chunk) {
         compressed = brotli->compress(chunk, buffer_);
     }
     if (!compressed) {
-        return std::unexpected(compressed.error());
+        return tl::unexpected<Error>(compressed.error());
     }
 
     if (*compressed >= chunk.size()) {
@@ -103,7 +103,7 @@ Result<void> ChunkDecoder::decode(
     if (!lz4_) {
         auto decoder = Lz4FrameDecoder::create();
         if (!decoder) {
-            return std::unexpected(decoder.error());
+            return tl::unexpected<Error>(decoder.error());
         }
         lz4_.emplace(std::move(*decoder));
     }
@@ -115,7 +115,7 @@ ChunkDecoder::decodeZstd(std::span<const std::byte> encoded, std::span<std::byte
     if (!zstd_) {
         auto decoder = ZstdDecoder::create();
         if (!decoder) {
-            return std::unexpected(decoder.error());
+            return tl::unexpected<Error>(decoder.error());
         }
         zstd_.emplace(std::move(*decoder));
     }
@@ -135,7 +135,7 @@ ChunkDecoder::decodeZstd(std::span<const std::byte> encoded, std::span<std::byte
         if (!step) {
             auto error = step.error();
             error.offset = consumed;
-            return std::unexpected(error);
+            return tl::unexpected<Error>(error);
         }
         if (full && step->produced != 0) {
             return fail(ErrorKind::Malformed, "zstd chunk exceeds its declared size", consumed);
@@ -162,7 +162,7 @@ ChunkDecoder::decodeLzma2(std::span<const std::byte> encoded, std::span<std::byt
     if (!lzma2_) {
         auto decoder = XzDecoder::create(XzLimits{.memLimitBytes = std::uint64_t{128} << 20});
         if (!decoder) {
-            return std::unexpected(decoder.error());
+            return tl::unexpected<Error>(decoder.error());
         }
         lzma2_.emplace(std::move(*decoder));
     }
@@ -182,7 +182,7 @@ ChunkDecoder::decodeLzma2(std::span<const std::byte> encoded, std::span<std::byt
         if (!step) {
             auto error = step.error();
             error.offset = consumed;
-            return std::unexpected(error);
+            return tl::unexpected<Error>(error);
         }
         if (full && step->produced != 0) {
             return fail(ErrorKind::Malformed, "lzma2 chunk exceeds its declared size", consumed);
@@ -213,7 +213,7 @@ ChunkDecoder::decodeBrotli(std::span<const std::byte> encoded, std::span<std::by
     if (!brotli_) {
         auto decoder = BrotliDecoder::create();
         if (!decoder) {
-            return std::unexpected(decoder.error());
+            return tl::unexpected<Error>(decoder.error());
         }
         brotli_.emplace(std::move(*decoder));
     }
@@ -233,7 +233,7 @@ ChunkDecoder::decodeBrotli(std::span<const std::byte> encoded, std::span<std::by
         if (!step) {
             auto error = step.error();
             error.offset = consumed;
-            return std::unexpected(error);
+            return tl::unexpected<Error>(error);
         }
         if (full && step->produced != 0) {
             return fail(ErrorKind::Malformed, "brotli chunk exceeds its declared size", consumed);

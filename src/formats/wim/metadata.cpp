@@ -146,7 +146,7 @@ struct StreamView {
         }
         auto name = convertName(buffer.data() + cursor, nameBytes / 2, at, limits);
         if (!name) {
-            return std::unexpected(name.error());
+            return tl::unexpected<Error>(name.error());
         }
         if (name->empty() || name->size() > limits.maxNameBytes) {
             return fail(ErrorKind::Malformed, "WIM entry without a name", at);
@@ -204,7 +204,7 @@ parseStream(const std::vector<std::byte>& buffer, std::uint64_t at, const Limits
         }
         auto name = convertName(buffer.data() + at + streamFixedSize, nameBytes / 2, at, limits);
         if (!name) {
-            return std::unexpected(name.error());
+            return tl::unexpected<Error>(name.error());
         }
         view.streamName = std::move(*name);
         view.named = true;
@@ -240,7 +240,7 @@ Result<std::string> parseReparseTarget(std::span<const std::byte> data, std::uin
     widen.maxNameBytes = 32768;
     auto target = convertName(data.data() + *begin, printLength / 2, Error::noOffset, widen);
     if (!target) {
-        return std::unexpected(target.error());
+        return tl::unexpected<Error>(target.error());
     }
     constexpr std::string_view prefix = "\\??\\";
     if (target->starts_with(prefix)) {
@@ -275,7 +275,7 @@ Result<std::vector<Node>> walkMetadata(const Resource& meta, const Limits& limit
     std::vector<std::byte> scratch(65536);
     auto streamed = meta.streamRange(0, meta.uncompressedSize(), scratch, sink);
     if (!streamed) {
-        return std::unexpected(streamed.error());
+        return tl::unexpected<Error>(streamed.error());
     }
 
     if (buffer.size() < 8) {
@@ -305,7 +305,7 @@ Result<std::vector<Node>> walkMetadata(const Resource& meta, const Limits& limit
     }
     auto root = parseDentry(buffer, securityLength, true, limits);
     if (!root) {
-        return std::unexpected(root.error());
+        return tl::unexpected<Error>(root.error());
     }
     if (root->subdir == 0) {
         return nodes;
@@ -340,7 +340,7 @@ Result<std::vector<Node>> walkMetadata(const Resource& meta, const Limits& limit
             }
             auto entry = parseDentry(buffer, at, false, limits);
             if (!entry) {
-                return std::unexpected(entry.error());
+                return tl::unexpected<Error>(entry.error());
             }
 
             std::string path =
@@ -356,7 +356,7 @@ Result<std::vector<Node>> walkMetadata(const Resource& meta, const Limits& limit
             for (std::uint16_t index = 0; index < entry->extraStreams; ++index) {
                 auto stream = parseStream(buffer, streamAt, limits);
                 if (!stream) {
-                    return std::unexpected(stream.error());
+                    return tl::unexpected<Error>(stream.error());
                 }
                 auto length = loadLe<std::uint64_t>(buffer.data() + streamAt);
                 length = (length + 7) & ~std::uint64_t{7};

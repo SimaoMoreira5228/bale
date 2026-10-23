@@ -77,18 +77,18 @@ Result<std::vector<std::byte>> decodeLzxChunk(
     }
     auto fileSize = file.size();
     if (!fileSize) {
-        return std::unexpected(fileSize.error());
+        return tl::unexpected<Error>(fileSize.error());
     }
     if (!fitsWithin(storedAt, storedSize, *fileSize)) {
         return fail(ErrorKind::Truncated, "WIM ends inside an LZX chunk", at);
     }
     auto bits = windowBitsForChunk(chunkSize, at);
     if (!bits) {
-        return std::unexpected(bits.error());
+        return tl::unexpected<Error>(bits.error());
     }
     auto decoder = cab::LzxDecoder::create(*bits, uncompressedSize, cab::LzxFraming::Wim);
     if (!decoder) {
-        return std::unexpected(decoder.error());
+        return tl::unexpected<Error>(decoder.error());
     }
     auto total = checkedCast<std::size_t>(uncompressedSize);
     if (!total) {
@@ -109,11 +109,11 @@ Result<std::vector<std::byte>> decodeLzxChunk(
             }
             auto read = file.readExactAt(*here, std::span(slice).first(take));
             if (!read) {
-                return std::unexpected(read.error());
+                return tl::unexpected<Error>(read.error());
             }
             auto pushed = decoder->push(std::span<const std::byte>(slice.data(), take));
             if (!pushed) {
-                return std::unexpected(pushed.error());
+                return tl::unexpected<Error>(pushed.error());
             }
             fed += take;
             needInput = false;
@@ -125,7 +125,7 @@ Result<std::vector<std::byte>> decodeLzxChunk(
             if (error.offset == Error::noOffset) {
                 error.offset = at;
             }
-            return std::unexpected(error);
+            return tl::unexpected<Error>(error);
         }
         produced += stepped->produced;
         if (stepped->produced == 0) {
@@ -144,7 +144,7 @@ Result<std::vector<std::byte>> decodeLzxChunk(
         if (error.offset == Error::noOffset) {
             error.offset = at;
         }
-        return std::unexpected(error);
+        return tl::unexpected<Error>(error);
     }
     if (!tail->empty()) {
         return fail(ErrorKind::Malformed, "WIM LZX chunk exceeds its declared size", at);

@@ -38,17 +38,17 @@ Result<Bytes> decodeOnce(
 ) {
     auto decoder = cab::LzxDecoder::create(windowBits, totalOut);
     if (!decoder) {
-        return std::unexpected(decoder.error());
+        return tl::unexpected<Error>(decoder.error());
     }
     if (auto pushed = decoder->push(stream); !pushed) {
-        return std::unexpected(pushed.error());
+        return tl::unexpected<Error>(pushed.error());
     }
     Bytes out;
     std::vector<std::byte> chunk(buffer);
     while (out.size() < totalOut) {
         auto got = decoder->decode(chunk);
         if (!got) {
-            return std::unexpected(got.error());
+            return tl::unexpected<Error>(got.error());
         }
         out.insert(
             out.end(),
@@ -64,7 +64,7 @@ Result<Bytes> decodeOnce(
     }
     auto tail = decoder->finish();
     if (!tail) {
-        return std::unexpected(tail.error());
+        return tl::unexpected<Error>(tail.error());
     }
     out.insert(out.end(), tail->begin(), tail->end());
     if (out.size() != totalOut) {
@@ -84,7 +84,7 @@ Result<Bytes> decodeTrickle(
 ) {
     auto decoder = cab::LzxDecoder::create(windowBits, totalOut);
     if (!decoder) {
-        return std::unexpected(decoder.error());
+        return tl::unexpected<Error>(decoder.error());
     }
     Bytes out;
     std::vector<std::byte> chunk(buffer);
@@ -94,13 +94,13 @@ Result<Bytes> decodeTrickle(
         if (fed < stream.size()) {
             std::size_t take = atATime < stream.size() - fed ? atATime : stream.size() - fed;
             if (auto pushed = decoder->push(stream.subspan(fed, take)); !pushed) {
-                return std::unexpected(pushed.error());
+                return tl::unexpected<Error>(pushed.error());
             }
             fed += take;
         }
         auto got = decoder->decode(chunk);
         if (!got) {
-            return std::unexpected(got.error());
+            return tl::unexpected<Error>(got.error());
         }
         if (got->produced == 0) {
             if (!got->starved) {
@@ -121,7 +121,7 @@ Result<Bytes> decodeTrickle(
     }
     auto tail = decoder->finish();
     if (!tail) {
-        return std::unexpected(tail.error());
+        return tl::unexpected<Error>(tail.error());
     }
     out.insert(out.end(), tail->begin(), tail->end());
     if (out.size() != totalOut) {

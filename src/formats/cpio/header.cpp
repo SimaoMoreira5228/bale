@@ -88,62 +88,62 @@ Result<Header> parseHeader(
 
     auto ino = field(inoOffset);
     if (!ino) {
-        return std::unexpected(ino.error());
+        return tl::unexpected<Error>(ino.error());
     }
 
     auto mode = field(modeOffset);
     if (!mode) {
-        return std::unexpected(mode.error());
+        return tl::unexpected<Error>(mode.error());
     }
 
     auto uid = field(uidOffset);
     if (!uid) {
-        return std::unexpected(uid.error());
+        return tl::unexpected<Error>(uid.error());
     }
 
     auto gid = field(gidOffset);
     if (!gid) {
-        return std::unexpected(gid.error());
+        return tl::unexpected<Error>(gid.error());
     }
 
     auto nlink = field(nlinkOffset);
     if (!nlink) {
-        return std::unexpected(nlink.error());
+        return tl::unexpected<Error>(nlink.error());
     }
 
     auto mtime = field(mtimeOffset);
     if (!mtime) {
-        return std::unexpected(mtime.error());
+        return tl::unexpected<Error>(mtime.error());
     }
 
     auto filesize = field(filesizeOffset);
     if (!filesize) {
-        return std::unexpected(filesize.error());
+        return tl::unexpected<Error>(filesize.error());
     }
 
     auto devMajor = field(devMajorOffset);
     if (!devMajor) {
-        return std::unexpected(devMajor.error());
+        return tl::unexpected<Error>(devMajor.error());
     }
 
     auto devMinor = field(devMinorOffset);
     if (!devMinor) {
-        return std::unexpected(devMinor.error());
+        return tl::unexpected<Error>(devMinor.error());
     }
 
     auto rdevMajor = field(rdevMajorOffset);
     if (!rdevMajor) {
-        return std::unexpected(rdevMajor.error());
+        return tl::unexpected<Error>(rdevMajor.error());
     }
 
     auto rdevMinor = field(rdevMinorOffset);
     if (!rdevMinor) {
-        return std::unexpected(rdevMinor.error());
+        return tl::unexpected<Error>(rdevMinor.error());
     }
 
     auto check = field(checkOffset);
     if (!check) {
-        return std::unexpected(check.error());
+        return tl::unexpected<Error>(check.error());
     }
 
     auto narrowed =
@@ -157,32 +157,32 @@ Result<Header> parseHeader(
 
     auto fileMode = narrowed(*mode, modeOffset, "cpio mode out of range");
     if (!fileMode) {
-        return std::unexpected(fileMode.error());
+        return tl::unexpected<Error>(fileMode.error());
     }
 
     auto checksum = narrowed(*check, checkOffset, "cpio checksum out of range");
     if (!checksum) {
-        return std::unexpected(checksum.error());
+        return tl::unexpected<Error>(checksum.error());
     }
 
     auto major = narrowed(*rdevMajor, rdevMajorOffset, "cpio device number out of range");
     if (!major) {
-        return std::unexpected(major.error());
+        return tl::unexpected<Error>(major.error());
     }
 
     auto minor = narrowed(*rdevMinor, rdevMinorOffset, "cpio device number out of range");
     if (!minor) {
-        return std::unexpected(minor.error());
+        return tl::unexpected<Error>(minor.error());
     }
 
     auto filesystemMajor = narrowed(*devMajor, devMajorOffset, "cpio device number out of range");
     if (!filesystemMajor) {
-        return std::unexpected(filesystemMajor.error());
+        return tl::unexpected<Error>(filesystemMajor.error());
     }
 
     auto filesystemMinor = narrowed(*devMinor, devMinorOffset, "cpio device number out of range");
     if (!filesystemMinor) {
-        return std::unexpected(filesystemMinor.error());
+        return tl::unexpected<Error>(filesystemMinor.error());
     }
 
     auto seconds = checkedCast<std::int64_t>(*mtime);

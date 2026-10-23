@@ -58,7 +58,7 @@ constexpr std::uint64_t bridgeScanSectors = 16;
     }
     auto start = sectorOffset(location, offset);
     if (!start) {
-        return std::unexpected(start.error());
+        return tl::unexpected<Error>(start.error());
     }
     return location;
 }
@@ -74,7 +74,7 @@ constexpr std::uint64_t bridgeScanSectors = 16;
     }
     auto start = sectorOffset(location, offset);
     if (!start) {
-        return std::unexpected(start.error());
+        return tl::unexpected<Error>(start.error());
     }
     auto end = checkedAdd(*start, tableSize);
     if (!end) {
@@ -157,19 +157,19 @@ parseRootRecord(std::span<const std::byte> sector, std::uint64_t offset) {
 
     auto loc = tableLocation(sector, pathTableLocOffset, false, offset);
     if (!loc) {
-        return std::unexpected(loc.error());
+        return tl::unexpected<Error>(loc.error());
     }
     auto optLoc = tableLocation(sector, pathTableOptLocOffset, false, offset);
     if (!optLoc) {
-        return std::unexpected(optLoc.error());
+        return tl::unexpected<Error>(optLoc.error());
     }
     auto locBe = tableLocation(sector, pathTableLocBeOffset, true, offset);
     if (!locBe) {
-        return std::unexpected(locBe.error());
+        return tl::unexpected<Error>(locBe.error());
     }
     auto optLocBe = tableLocation(sector, pathTableOptLocBeOffset, true, offset);
     if (!optLocBe) {
-        return std::unexpected(optLocBe.error());
+        return tl::unexpected<Error>(optLocBe.error());
     }
     if (*loc == 0 && *optLoc == 0 && *locBe == 0 && *optLocBe == 0) {
         return fail(ErrorKind::Malformed, "ISO path table without a location", offset);
@@ -196,7 +196,7 @@ Result<Volume> parseVolumes(const File& file, std::uint64_t fileSize, const Limi
         auto sectorNumber = static_cast<std::uint32_t>(firstVolumeSector + index);
         auto at = sectorOffset(sectorNumber, Error::noOffset);
         if (!at) {
-            return std::unexpected(at.error());
+            return tl::unexpected<Error>(at.error());
         }
         auto end = checkedAdd(*at, sectorSize);
         if (!end || *end > fileSize) {
@@ -206,7 +206,7 @@ Result<Volume> parseVolumes(const File& file, std::uint64_t fileSize, const Limi
         std::array<std::byte, sectorSize> sector{};
         auto read = file.readExactAt(*at, sector);
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
 
         std::string_view id(reinterpret_cast<const char*>(sector.data() + magicOffset), 5);
@@ -237,15 +237,15 @@ Result<Volume> parseVolumes(const File& file, std::uint64_t fileSize, const Limi
             }
             auto block = checkBlockSize(sector, *at);
             if (!block) {
-                return std::unexpected(block.error());
+                return tl::unexpected<Error>(block.error());
             }
             auto tables = checkPathTables(sector, fileSize, limits, *at);
             if (!tables) {
-                return std::unexpected(tables.error());
+                return tl::unexpected<Error>(tables.error());
             }
             auto root = parseRootRecord(sector, *at);
             if (!root) {
-                return std::unexpected(root.error());
+                return tl::unexpected<Error>(root.error());
             }
             volume.rootExtent = root->extent;
             volume.rootSize = root->size;
@@ -261,11 +261,11 @@ Result<Volume> parseVolumes(const File& file, std::uint64_t fileSize, const Limi
             }
             auto block = checkBlockSize(sector, *at);
             if (!block) {
-                return std::unexpected(block.error());
+                return tl::unexpected<Error>(block.error());
             }
             auto root = parseRootRecord(sector, *at);
             if (!root) {
-                return std::unexpected(root.error());
+                return tl::unexpected<Error>(root.error());
             }
             volume.hasJoliet = true;
             volume.jolietExtent = root->extent;
@@ -302,7 +302,7 @@ Result<Volume> parseVolumes(const File& file, std::uint64_t fileSize, const Limi
     // terminator, so probe the following sectors and refuse the image
     // instead of presenting the ISO view as the whole disc.
     for (std::uint64_t after = 1; after <= bridgeScanSectors; ++after) {
-        auto probe = checkedAdd<std::uint64_t>(terminatorSector, after);
+        auto probe = checkedAdd(terminatorSector, after);
         if (!probe) {
             break;
         }
@@ -317,7 +317,7 @@ Result<Volume> parseVolumes(const File& file, std::uint64_t fileSize, const Limi
         std::array<std::byte, sectorSize> sector{};
         auto read = file.readExactAt(*at, sector);
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         if (isUdfDescriptor(sector)) {
             return fail(
@@ -340,7 +340,7 @@ Result<Volume> parseVolumes(const File& file, std::uint64_t fileSize, const Limi
         }
         auto start = sectorOffset(extent, Error::noOffset);
         if (!start) {
-            return std::unexpected(start.error());
+            return tl::unexpected<Error>(start.error());
         }
         auto end = checkedAdd(*start, size);
         if (!end || *end > fileSize) {
@@ -351,12 +351,12 @@ Result<Volume> parseVolumes(const File& file, std::uint64_t fileSize, const Limi
 
     auto root = checkRoot(volume.rootExtent, volume.rootSize);
     if (!root) {
-        return std::unexpected(root.error());
+        return tl::unexpected<Error>(root.error());
     }
     if (volume.hasJoliet) {
         auto joliet = checkRoot(volume.jolietExtent, volume.jolietSize);
         if (!joliet) {
-            return std::unexpected(joliet.error());
+            return tl::unexpected<Error>(joliet.error());
         }
     }
     return volume;

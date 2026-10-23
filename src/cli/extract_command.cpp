@@ -169,14 +169,14 @@ template <typename Stream>
 ) {
     auto pending = session.extractor().beginFile(path, metadata);
     if (!pending) {
-        return std::unexpected(pending.error());
+        return tl::unexpected<Error>(pending.error());
     }
 
     auto written = stream([&pending](std::span<const std::byte> chunk) {
         return pending->write(chunk);
     });
     if (!written) {
-        return std::unexpected(written.error());
+        return tl::unexpected<Error>(written.error());
     }
     return pending->commit();
 }
@@ -185,7 +185,7 @@ template <typename Stream>
 extractTarEntry(Session& session, tar::Reader& reader, const tar::Entry& entry) {
     auto path = session.path(entry.path);
     if (!path) {
-        return std::unexpected(path.error());
+        return tl::unexpected<Error>(path.error());
     }
 
     EntryMetadata metadata{
@@ -204,7 +204,7 @@ extractTarEntry(Session& session, tar::Reader& reader, const tar::Entry& entry) 
     case tar::EntryKind::HardLink: {
         auto target = session.linkPath(entry.linkTarget);
         if (!target) {
-            return std::unexpected(target.error());
+            return tl::unexpected<Error>(target.error());
         }
         return session.extractor().createHardLink(*path, *target);
     }
@@ -293,7 +293,7 @@ ExitCode extractSingleFile(std::string_view argument, OpenedArchive archive, Ses
 ) {
     auto path = session.path(name);
     if (!path) {
-        return std::unexpected(path.error());
+        return tl::unexpected<Error>(path.error());
     }
 
     EntryMetadata metadata{
@@ -317,7 +317,7 @@ ExitCode extractSingleFile(std::string_view argument, OpenedArchive archive, Ses
             return Result<void>{};
         });
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         return session.extractor().createSymlink(*path, target, metadata);
     }
@@ -368,7 +368,7 @@ ExitCode extractZip(std::string_view argument, File file, Session& session) {
 extractSevenZipEntry(Session& session, sevenzip::Reader& reader, const sevenzip::Entry& entry) {
     auto path = session.path(entry.name);
     if (!path) {
-        return std::unexpected(path.error());
+        return tl::unexpected<Error>(path.error());
     }
 
     EntryMetadata metadata{
@@ -391,7 +391,7 @@ extractSevenZipEntry(Session& session, sevenzip::Reader& reader, const sevenzip:
             return Result<void>{};
         });
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         return session.extractor().createSymlink(*path, target, metadata);
     }
@@ -421,7 +421,7 @@ ExitCode extractSevenZip(std::string_view argument, File file, Session& session)
 extractArEntry(Session& session, ar::Reader& reader, const ar::Entry& entry) {
     auto path = session.path(entry.name);
     if (!path) {
-        return std::unexpected(path.error());
+        return tl::unexpected<Error>(path.error());
     }
 
     EntryMetadata metadata{
@@ -453,7 +453,7 @@ ExitCode extractAr(std::string_view argument, File file, Session& session) {
 extractCpioEntry(Session& session, cpio::Reader& reader, const cpio::Entry& entry) {
     auto path = session.path(entry.name);
     if (!path) {
-        return std::unexpected(path.error());
+        return tl::unexpected<Error>(path.error());
     }
 
     EntryMetadata metadata{
@@ -479,14 +479,14 @@ extractCpioEntry(Session& session, cpio::Reader& reader, const cpio::Entry& entr
             return Result<void>{};
         });
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         return session.extractor().createSymlink(*path, target, metadata);
     }
     case cpio::EntryKind::HardLink: {
         auto target = session.linkPath(entry.linkTarget);
         if (!target) {
-            return std::unexpected(target.error());
+            return tl::unexpected<Error>(target.error());
         }
         return session.extractor().createHardLink(*path, *target);
     }
@@ -545,7 +545,7 @@ ExitCode extractCpio(std::string_view argument, File file, Session& session) {
 extractRpmEntry(Session& session, rpm::Reader& reader, const rpm::Entry& entry) {
     auto path = session.path(entry.name);
     if (!path) {
-        return std::unexpected(path.error());
+        return tl::unexpected<Error>(path.error());
     }
 
     EntryMetadata metadata{
@@ -571,14 +571,14 @@ extractRpmEntry(Session& session, rpm::Reader& reader, const rpm::Entry& entry) 
             return Result<void>{};
         });
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         return session.extractor().createSymlink(*path, target, metadata);
     }
     case rpm::EntryKind::HardLink: {
         auto target = session.linkPath(entry.linkTarget);
         if (!target) {
-            return std::unexpected(target.error());
+            return tl::unexpected<Error>(target.error());
         }
         return session.extractor().createHardLink(*path, *target);
     }
@@ -638,7 +638,7 @@ ExitCode extractRpm(std::string_view argument, File file, Session& session) {
 extractIsoEntry(Session& session, iso::Reader& reader, const iso::Entry& entry) {
     auto path = session.path(entry.name);
     if (!path) {
-        return std::unexpected(path.error());
+        return tl::unexpected<Error>(path.error());
     }
 
     EntryMetadata metadata{
@@ -694,7 +694,7 @@ ExitCode extractIso(std::string_view argument, File file, Session& session) {
 extractCabEntry(Session& session, cab::Reader& reader, const cab::Entry& entry) {
     auto path = session.path(entry.name);
     if (!path) {
-        return std::unexpected(path.error());
+        return tl::unexpected<Error>(path.error());
     }
 
     EntryMetadata metadata{
@@ -729,7 +729,7 @@ ExitCode extractCab(std::string_view argument, File file, Session& session) {
 extractWimEntry(Session& session, wim::Reader& reader, const wim::Entry& entry) {
     auto path = session.path(entry.name);
     if (!path) {
-        return std::unexpected(path.error());
+        return tl::unexpected<Error>(path.error());
     }
 
     EntryMetadata metadata{
@@ -761,7 +761,7 @@ extractWimEntry(Session& session, wim::Reader& reader, const wim::Entry& entry) 
     case wim::EntryKind::HardLink: {
         auto target = session.linkPath(entry.linkTarget);
         if (!target) {
-            return std::unexpected(target.error());
+            return tl::unexpected<Error>(target.error());
         }
         return session.extractor().createHardLink(*path, *target);
     }
@@ -814,7 +814,7 @@ extractWim(std::string_view argument, File file, Session& session, std::uint32_t
 extractBaleEntry(Session& session, archive::Reader& reader, const archive::ManifestEntry& entry) {
     auto path = session.path(entry.path);
     if (!path) {
-        return std::unexpected(path.error());
+        return tl::unexpected<Error>(path.error());
     }
 
     EntryMetadata metadata{
@@ -833,7 +833,7 @@ extractBaleEntry(Session& session, archive::Reader& reader, const archive::Manif
     case archive::EntryKind::HardLink: {
         auto target = session.linkPath(entry.target);
         if (!target) {
-            return std::unexpected(target.error());
+            return tl::unexpected<Error>(target.error());
         }
         return session.extractor().createHardLink(*path, *target);
     }

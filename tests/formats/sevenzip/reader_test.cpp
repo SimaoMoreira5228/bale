@@ -41,7 +41,7 @@ streamText(sevenzip::Reader& reader, const sevenzip::Entry& entry, std::size_t s
         return Result<void>{};
     });
     if (!streamed) {
-        return std::unexpected(streamed.error());
+        return tl::unexpected<Error>(streamed.error());
     }
     return text;
 }

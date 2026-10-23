@@ -20,8 +20,6 @@ jobs:
             cxx: clang++-18
           - name: macos
             os: macos-15
-          - name: windows-msvc
-            os: windows-2025
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     steps:
@@ -48,6 +46,44 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --build-config Debug --output-on-failure --parallel 4
+
+
+  windows-gcc16:
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      CC: gcc
+      CXX: g++
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-gcc=16.2.0-6
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-python
+
+      - name: Verify GCC 16
+        run: test "$(gcc -dumpfullversion)" = "16.2.0"
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DBALE_WERROR=ON
+          -DBALE_LINK_COMPILE_COMMANDS=OFF
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --timeout 60 --parallel 4
 
   sanitize:
     runs-on: ubuntu-24.04

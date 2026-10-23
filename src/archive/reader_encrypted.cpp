@@ -44,7 +44,7 @@ findLatestFooterOffset(File& file, std::uint64_t fileSize, const ReaderOptions& 
         }
         block.resize(static_cast<std::size_t>(end - start));
         if (auto read = file.readExactAt(start, block); !read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         if (block.size() >= footerSize) {
             for (std::size_t at = block.size() - footerSize;; --at) {
@@ -77,7 +77,7 @@ findLatestFooterOffset(File& file, std::uint64_t fileSize, const ReaderOptions& 
         end = start + footerSize - 1;
     }
     if (nearest) {
-        return std::unexpected(*nearest);
+        return tl::unexpected<Error>(*nearest);
     }
     return fail(ErrorKind::Truncated, "no footer found: the archive is incomplete or truncated");
 }
@@ -88,7 +88,7 @@ Result<Reader>
 Reader::openEncrypted(File file, const ReaderOptions& options, ReaderUnlock&& unlock) {
     auto size = file.size();
     if (!size) {
-        return std::unexpected(size.error());
+        return tl::unexpected<Error>(size.error());
     }
     if (*size < superblockSize) {
         return fail(ErrorKind::Truncated, "file too small for a superblock", *size);
@@ -96,11 +96,11 @@ Reader::openEncrypted(File file, const ReaderOptions& options, ReaderUnlock&& un
     Reader reader(std::move(file), options, *size);
     std::array<std::byte, superblockSize> block{};
     if (auto read = reader.file_.readExactAt(0, block); !read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
     auto superblock = decodeSuperblock(block);
     if (!superblock) {
-        return std::unexpected(superblock.error());
+        return tl::unexpected<Error>(superblock.error());
     }
     reader.superblock_ = *superblock;
     if ((reader.superblock_.requiredFeatures & encryptedRequiredFeature) == 0) {
@@ -109,7 +109,7 @@ Reader::openEncrypted(File file, const ReaderOptions& options, ReaderUnlock&& un
 
     auto keys = collectDataKeys(reader.file_, reader.fileSize_, unlock, options.limits);
     if (!keys) {
-        return std::unexpected(keys.error());
+        return tl::unexpected<Error>(keys.error());
     }
     if (keys->empty()) {
         return fail(ErrorKind::PasswordRequired, "no keyslot could be unlocked");
@@ -117,14 +117,14 @@ Reader::openEncrypted(File file, const ReaderOptions& options, ReaderUnlock&& un
 
     auto latest = findLatestFooterOffset(reader.file_, reader.fileSize_, options);
     if (!latest) {
-        return std::unexpected(latest.error());
+        return tl::unexpected<Error>(latest.error());
     }
     Footer footer = latest->first;
     std::uint64_t footerOffset = latest->second;
 
     std::vector<std::byte> commitBuffer(static_cast<std::size_t>(footer.commitLength));
     if (auto read = reader.file_.readExactAt(footer.commitOffset, commitBuffer); !read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
     RecordLimits commitLimits{
         .maxPayloadLength = maxEncryptedPayloadBytes,
@@ -132,7 +132,7 @@ Reader::openEncrypted(File file, const ReaderOptions& options, ReaderUnlock&& un
     };
     auto commitRecord = decodeRecord(commitBuffer, commitLimits, footer.commitOffset);
     if (!commitRecord) {
-        return std::unexpected(commitRecord.error());
+        return tl::unexpected<Error>(commitRecord.error());
     }
     if (commitRecord->header.type != RecordType::Commit ||
         (commitRecord->header.flags & encryptedRecordFlag) == 0) {
@@ -160,7 +160,7 @@ Reader::openEncrypted(File file, const ReaderOptions& options, ReaderUnlock&& un
             if (opened.error().kind == ErrorKind::Integrity) {
                 continue;
             }
-            return std::unexpected(opened.error());
+            return tl::unexpected<Error>(opened.error());
         }
         auto decoded = decodeCommit(*opened, footer.commitOffset + recordPrefixSize);
         if (!decoded) {
@@ -218,11 +218,11 @@ Reader::openEncrypted(File file, const ReaderOptions& options, ReaderUnlock&& un
             std::array<std::byte, footerSize> parentBytes{};
             if (auto read = reader.file_.readExactAt(current.previousFooterOffset, parentBytes);
                 !read) {
-                return std::unexpected(read.error());
+                return tl::unexpected<Error>(read.error());
             }
             auto parentFooter = decodeFooter(parentBytes, current.previousFooterOffset);
             if (!parentFooter) {
-                return std::unexpected(parentFooter.error());
+                return tl::unexpected<Error>(parentFooter.error());
             }
             if (parentFooter->generation + 1 != current.generation ||
                 parentFooter->commitDigest != current.previous) {
@@ -250,19 +250,19 @@ Reader::openEncrypted(File file, const ReaderOptions& options, ReaderUnlock&& un
                     parentFooter->generation
                 );
                 !trailer) {
-                return std::unexpected(trailer.error());
+                return tl::unexpected<Error>(trailer.error());
             }
             std::vector<std::byte> parentBuffer(
                 static_cast<std::size_t>(parentFooter->commitLength)
             );
             if (auto read = reader.file_.readExactAt(parentFooter->commitOffset, parentBuffer);
                 !read) {
-                return std::unexpected(read.error());
+                return tl::unexpected<Error>(read.error());
             }
             auto parentRecord =
                 decodeRecord(parentBuffer, commitLimits, parentFooter->commitOffset);
             if (!parentRecord) {
-                return std::unexpected(parentRecord.error());
+                return tl::unexpected<Error>(parentRecord.error());
             }
             if (Blake3::of(HashDomain::Commit, parentRecord->payload) !=
                 parentFooter->commitDigest) {
@@ -285,7 +285,7 @@ Reader::openEncrypted(File file, const ReaderOptions& options, ReaderUnlock&& un
                     if (opened.error().kind == ErrorKind::Integrity) {
                         continue;
                     }
-                    return std::unexpected(opened.error());
+                    return tl::unexpected<Error>(opened.error());
                 }
                 auto decoded = decodeCommit(*opened, parentFooter->commitOffset + recordPrefixSize);
                 wipeBytes(*opened);
@@ -324,16 +324,16 @@ Reader::openEncrypted(File file, const ReaderOptions& options, ReaderUnlock&& un
     }
 
     if (auto metadata = reader.loadMetadataEncrypted(); !metadata) {
-        return std::unexpected(metadata.error());
+        return tl::unexpected<Error>(metadata.error());
     }
     if (auto locations = reader.checkLocationsEncrypted(); !locations) {
-        return std::unexpected(locations.error());
+        return tl::unexpected<Error>(locations.error());
     }
     if (auto signatures = reader.loadSignatures(); !signatures) {
-        return std::unexpected(signatures.error());
+        return tl::unexpected<Error>(signatures.error());
     }
     if (auto report = reader.walkRecords(); !report) {
-        return std::unexpected(report.error());
+        return tl::unexpected<Error>(report.error());
     } else {
         reader.sequenceCount_ = report->records;
     }
@@ -358,7 +358,7 @@ Result<void> Reader::loadMetadataEncrypted() {
         manifestBytes_
     );
     if (!manifestRecord) {
-        return std::unexpected(manifestRecord.error());
+        return tl::unexpected<Error>(manifestRecord.error());
     }
     if ((manifestRecord->header.flags & encryptedRecordFlag) == 0) {
         return fail(ErrorKind::Malformed, "manifest is not marked encrypted", manifest.offset);
@@ -377,7 +377,7 @@ Result<void> Reader::loadMetadataEncrypted() {
     auto manifestPlain =
         crypto::open(dataKey_.bytes(), manifestNonce, manifestBoxed, manifestAadBytes);
     if (!manifestPlain) {
-        return std::unexpected(manifestPlain.error());
+        return tl::unexpected<Error>(manifestPlain.error());
     }
     plainBuffer_.assign(manifestPlain->begin(), manifestPlain->end());
     wipeBytes(*manifestPlain);
@@ -388,7 +388,7 @@ Result<void> Reader::loadMetadataEncrypted() {
         manifest_
     );
     if (!decodedManifest) {
-        return std::unexpected(decodedManifest.error());
+        return tl::unexpected<Error>(decodedManifest.error());
     }
     if (manifest_.objectIds.size() != manifest_.chunks.size()) {
         return fail(
@@ -406,7 +406,7 @@ Result<void> Reader::loadMetadataEncrypted() {
         indexBytes_
     );
     if (!indexRecord) {
-        return std::unexpected(indexRecord.error());
+        return tl::unexpected<Error>(indexRecord.error());
     }
     if ((indexRecord->header.flags & encryptedRecordFlag) == 0) {
         return fail(ErrorKind::Malformed, "index is not marked encrypted", index.offset);
@@ -424,7 +424,7 @@ Result<void> Reader::loadMetadataEncrypted() {
     auto indexAadBytes = indexAad(idSpan(superblock_.archiveId), epoch_);
     auto indexPlain = crypto::open(dataKey_.bytes(), indexNonce, indexBoxed, indexAadBytes);
     if (!indexPlain) {
-        return std::unexpected(indexPlain.error());
+        return tl::unexpected<Error>(indexPlain.error());
     }
     std::vector<std::byte> indexPlainBuffer(indexPlain->begin(), indexPlain->end());
     wipeBytes(*indexPlain);
@@ -511,7 +511,7 @@ Reader::loadEncryptedExtent(const std::array<std::byte, 32>& object, const Chunk
         buffer_
     );
     if (!record) {
-        return std::unexpected(record.error());
+        return tl::unexpected<Error>(record.error());
     }
     if ((record->header.flags & encryptedRecordFlag) == 0) {
         return fail(
@@ -554,7 +554,7 @@ Reader::loadEncryptedExtent(const std::array<std::byte, 32>& object, const Chunk
     auto aad = dataAad(idSpan(superblock_.archiveId), aadObject, record->header.codec, epoch_);
     auto sealed = crypto::open(dataKey_.bytes(), nonce, boxed, aad);
     if (!sealed) {
-        return std::unexpected(sealed.error());
+        return tl::unexpected<Error>(sealed.error());
     }
     std::span<const std::byte> compressed(*sealed);
     std::span<const std::byte> decoded;
@@ -579,7 +579,7 @@ Reader::loadEncryptedExtent(const std::array<std::byte, 32>& object, const Chunk
         auto out = chunkDecoder_.decode(record->header.codec, compressed, decodedBuffer_);
         wipeBytes(*sealed);
         if (!out) {
-            return std::unexpected(out.error());
+            return tl::unexpected<Error>(out.error());
         }
         decoded = decodedBuffer_;
     }

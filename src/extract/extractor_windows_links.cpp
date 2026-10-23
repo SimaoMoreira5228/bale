@@ -28,7 +28,7 @@ Result<std::size_t> buildSymlinkReparse(std::string_view target, ReparseBuffer& 
     WideTarget wide{};
     auto converted = widen(target, wide);
     if (!converted) {
-        return std::unexpected(converted.error());
+        return tl::unexpected<Error>(converted.error());
     }
     std::replace(wide.begin(), wide.begin() + converted->size(), L'/', L'\\');
 
@@ -113,7 +113,7 @@ Result<EntryResult> Extractor::createSymlink(
 ) {
     auto entry = beginEntry(path);
     if (!entry) {
-        return std::unexpected(entry.error());
+        return tl::unexpected<Error>(entry.error());
     }
 
     if (policy_.symlinks == SymlinkPolicy::Refuse) {
@@ -128,13 +128,13 @@ Result<EntryResult> Extractor::createSymlink(
 
     auto normalized = normalizeLinkTarget(target, entry->parentDepth);
     if (!normalized) {
-        return std::unexpected(normalized.error());
+        return tl::unexpected<Error>(normalized.error());
     }
 
     ReparseBuffer reparse{};
     auto reparseSize = buildSymlinkReparse(*normalized, reparse);
     if (!reparseSize) {
-        return std::unexpected(reparseSize.error());
+        return tl::unexpected<Error>(reparseSize.error());
     }
 
     auto resolved = resolveTarget(path.path, *normalized, component_);
@@ -146,7 +146,7 @@ Result<EntryResult> Extractor::createSymlink(
 
     auto parent = openParent(path.path, true);
     if (!parent) {
-        return std::unexpected(parent.error());
+        return tl::unexpected<Error>(parent.error());
     }
 
     TempName tempName{};
@@ -156,7 +156,7 @@ Result<EntryResult> Extractor::createSymlink(
         nextTempName(tempName);
         auto name = widen(tempName.data(), wide);
         if (!name) {
-            return std::unexpected(name.error());
+            return tl::unexpected<Error>(name.error());
         }
 
         link = openRelative(
@@ -199,13 +199,13 @@ Result<EntryResult> Extractor::createSymlink(
         }
 
         auto failure = fail(ErrorKind::Io, "cannot set symlink reparse point");
-        failure.error().systemCode = static_cast<int>(error);
+        failure.value().systemCode = static_cast<int>(error);
         return failure;
     }
 
     auto times = applyTimes(link.handle, metadata, policy_.restoreMtime);
     auto placed = times ? place(*parent, link.handle, tempName.data(), entry->leaf)
-                        : Result<EntryResult>(std::unexpected(times.error()));
+                        : Result<EntryResult>(tl::unexpected<Error>(times.error()));
     if (!placed || placed->outcome == EntryOutcome::Skipped) {
         deleteByHandle(link.handle);
     }
@@ -216,7 +216,7 @@ Result<EntryResult>
 Extractor::createHardLink(const ArchivePath& path, const ArchivePath& existingPath) {
     auto entry = beginEntry(path);
     if (!entry) {
-        return std::unexpected(entry.error());
+        return tl::unexpected<Error>(entry.error());
     }
 
     if (policy_.hardLinks == HardLinkPolicy::Refuse) {
@@ -225,7 +225,7 @@ Extractor::createHardLink(const ArchivePath& path, const ArchivePath& existingPa
 
     auto source = splitPath(existingPath.path);
     if (!source) {
-        return std::unexpected(source.error());
+        return tl::unexpected<Error>(source.error());
     }
 
     auto sourceParent = openParent(existingPath.path, false);
@@ -236,13 +236,13 @@ Extractor::createHardLink(const ArchivePath& path, const ArchivePath& existingPa
                 "hard link target was not extracted in this session"
             );
         }
-        return std::unexpected(sourceParent.error());
+        return tl::unexpected<Error>(sourceParent.error());
     }
 
     WideName wide{};
     auto sourceName = widen(source->leaf, wide);
     if (!sourceName) {
-        return std::unexpected(sourceName.error());
+        return tl::unexpected<Error>(sourceName.error());
     }
 
     auto opened = openRelative(
@@ -265,7 +265,7 @@ Extractor::createHardLink(const ArchivePath& path, const ArchivePath& existingPa
 
     auto attributes = attributesOf(opened.handle);
     if (!attributes) {
-        return std::unexpected(attributes.error());
+        return tl::unexpected<Error>(attributes.error());
     }
     if ((*attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
         return fail(ErrorKind::UnsafePath, "hard link target is not a regular file");
@@ -273,7 +273,7 @@ Extractor::createHardLink(const ArchivePath& path, const ArchivePath& existingPa
 
     auto sourceId = fileIdOf(opened.handle);
     if (!sourceId) {
-        return std::unexpected(sourceId.error());
+        return tl::unexpected<Error>(sourceId.error());
     }
     if (!extractedFiles_.contains(*sourceId)) {
         return fail(ErrorKind::UnsafePath, "hard link target was not extracted in this session");
@@ -281,7 +281,7 @@ Extractor::createHardLink(const ArchivePath& path, const ArchivePath& existingPa
 
     auto parent = openParent(path.path, true);
     if (!parent) {
-        return std::unexpected(parent.error());
+        return tl::unexpected<Error>(parent.error());
     }
 
     // WORKAROUND: Wine silently succeeds when renaming one link of a file over another link of the
@@ -289,7 +289,7 @@ Extractor::createHardLink(const ArchivePath& path, const ArchivePath& existingPa
     if (policy_.overwrite != OverwritePolicy::Replace) {
         auto leafName = widen(entry->leaf, wide);
         if (!leafName) {
-            return std::unexpected(leafName.error());
+            return tl::unexpected<Error>(leafName.error());
         }
 
         auto existing =
@@ -315,7 +315,7 @@ Extractor::createHardLink(const ArchivePath& path, const ArchivePath& existingPa
         nextTempName(tempName);
         auto name = widen(tempName.data(), wide);
         if (!name) {
-            return std::unexpected(name.error());
+            return tl::unexpected<Error>(name.error());
         }
 
         tempWide = *name;

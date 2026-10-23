@@ -141,7 +141,7 @@ void skipWhitespace(Cursor& cursor) {
         cursor.skip(1);
         auto appended = appendUnit(out, unit, cursor);
         if (!appended) {
-            return std::unexpected(appended.error());
+            return tl::unexpected<Error>(appended.error());
         }
         if (out.size() > limits.maxNameBytes * 4) {
             return fail(ErrorKind::LimitExceeded, "WIM image name exceeds limit");
@@ -225,7 +225,7 @@ parseImageList(const File& file, const Header& header, const Limits& limits) {
     std::vector<std::byte> raw(bytes);
     auto read = file.readExactAt(header.xml.offset, std::span(raw));
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
 
     Cursor cursor{.data = raw.data(), .units = bytes / 2, .at = 0};
@@ -263,7 +263,7 @@ parseImageList(const File& file, const Header& header, const Limits& limits) {
             }
             auto number = parseDigits(cursor, header.xml.offset);
             if (!number) {
-                return std::unexpected(number.error());
+                return tl::unexpected<Error>(number.error());
             }
             if (!consumeUnit(cursor, '"')) {
                 return fail(ErrorKind::Malformed, "WIM IMAGE tag is not closed");
@@ -294,7 +294,7 @@ parseImageList(const File& file, const Header& header, const Limits& limits) {
                         cursor.skip(1);
                         auto text = parseText(cursor, limits);
                         if (!text) {
-                            return std::unexpected(text.error());
+                            return tl::unexpected<Error>(text.error());
                         }
                         if (!consumeUnit(cursor, '<') || !consume(cursor, "/NAME") ||
                             !consumeUnit(cursor, '>')) {
@@ -309,7 +309,7 @@ parseImageList(const File& file, const Header& header, const Limits& limits) {
                     cursor.at = body;
                     auto nested = skipElement(cursor);
                     if (!nested) {
-                        return std::unexpected(nested.error());
+                        return tl::unexpected<Error>(nested.error());
                     }
                     continue;
                 }
@@ -327,7 +327,7 @@ parseImageList(const File& file, const Header& header, const Limits& limits) {
         cursor.at = mark;
         auto skipped = skipElement(cursor);
         if (!skipped) {
-            return std::unexpected(skipped.error());
+            return tl::unexpected<Error>(skipped.error());
         }
     }
 

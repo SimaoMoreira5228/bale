@@ -11,6 +11,7 @@ import sys
 import tarfile
 import tempfile
 import zipfile
+import unicodedata
 from pathlib import Path
 
 try:
@@ -437,8 +438,9 @@ def make_rich_tree(root):
     (root / "empty.txt").write_bytes(b"")
     (root / "text.txt").write_bytes(b"compressible line of text\n" * 20_000)
     (root / "random.bin").write_bytes(os.urandom(1_500_000))
-    os.symlink("text.txt", root / "link-to-text")
-    os.symlink("l" * 120, root / "long-link")
+    if os.name != "nt":
+        os.symlink("text.txt", root / "link-to-text")
+        os.symlink("l" * 120, root / "long-link")
     os.link(root / "text.txt", root / "hard-text")
 
 
@@ -453,6 +455,30 @@ def expected_members(source):
         else:
             members[name] = ("file", path.read_bytes())
     return members
+
+
+def member_difference(expected, actual):
+    missing = sorted(expected.keys() - actual.keys())
+    extra = sorted(actual.keys() - expected.keys())
+    changed = []
+    for name in sorted(expected.keys() & actual.keys()):
+        expected_kind, expected_value = expected[name]
+        actual_kind, actual_value = actual[name]
+        if expected_kind != actual_kind or expected_value != actual_value:
+            expected_size = len(expected_value) if isinstance(expected_value, bytes) else None
+            actual_size = len(actual_value) if isinstance(actual_value, bytes) else None
+            changed.append((name, expected_kind, expected_size, actual_kind, actual_size))
+    return f"missing={missing[:5]}, extra={extra[:5]}, changed={changed[:5]}"
+
+
+def normalize_member_names(members):
+    normalized = {}
+    for name, value in members.items():
+        canonical = unicodedata.normalize("NFC", name)
+        if canonical in normalized:
+            return None
+        normalized[canonical] = value
+    return normalized
 
 
 def zip_members(archive):
@@ -515,27 +541,50 @@ def test_created_formats(work):
         created = run("create", archive, source, cwd=work)
         expect_exit(f"create {archive_name}", created, EXIT_OK)
         if reader is not None:
-            check(f"python reads {archive_name}", reader(archive) == expected, archive_name)
+            read_members = reader(archive)
+            check(
+                f"python reads {archive_name}",
+                read_members == expected,
+                member_difference(expected, read_members),
+            )
 
         output = work / (archive_name + ".bale-out")
         extracted = run("extract", archive, "-o", output, "--allow-symlinks", cwd=work)
         expect_exit(f"bale extracts {archive_name}", extracted, EXIT_OK)
-        check(f"bale round trip {archive_name}", expected_members(output) == expected)
+        extracted_members = expected_members(output)
+        check(
+            f"bale round trip {archive_name}",
+            extracted_members == expected,
+            member_difference(expected, extracted_members),
+        )
 
     first = (work / "rich.tar").read_bytes()
     (work / "rich.tar").unlink()
     expect_exit("create tar again", run("create", work / "rich.tar", source, cwd=work), EXIT_OK)
     check("tar output is deterministic", (work / "rich.tar").read_bytes() == first)
 
-    if shutil.which("unzip"):
+    if os.name != "nt" and shutil.which("unzip"):
         output = work / "unzip-out"
         system_extract("system unzip", ["unzip", "-q", str(work / "rich.zip")], output)
         check("system unzip contents", expected_members(output) == expected)
-    if shutil.which("tar"):
+    if os.name != "nt" and shutil.which("tar"):
         for archive_name in ("rich.tar", "rich.tgz"):
             output = work / (archive_name + ".tar-out")
             system_extract(f"system tar {archive_name}", ["tar", "-xf", str(work / archive_name)], output)
-            check(f"system tar {archive_name} contents", expected_members(output) == expected)
+            expected_names = normalize_member_names(expected)
+            actual = normalize_member_names(expected_members(output))
+            if expected_names is None or actual is None:
+                check(
+                    f"system tar {archive_name} contents",
+                    False,
+                    "Unicode path normalization collision",
+                )
+                continue
+            check(
+                f"system tar {archive_name} contents",
+                actual == expected_names,
+                member_difference(expected_names, actual),
+            )
     if shutil.which("zstd"):
         result = subprocess.run(["zstd", "-t", "-q", str(work / "rich.tar.zst")], capture_output=True)
         check("system zstd test", result.returncode == 0, result.stderr.decode("utf-8", "replace"))

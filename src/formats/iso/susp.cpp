@@ -52,7 +52,7 @@ constexpr std::size_t dateLength = 7;
 
     auto start = sectorOffset(*extent, recordOffset);
     if (!start) {
-        return std::unexpected(start.error());
+        return tl::unexpected<Error>(start.error());
     }
     auto dataStart = checkedAdd(*start, static_cast<std::uint64_t>(*offset));
     if (!dataStart) {
@@ -85,7 +85,7 @@ constexpr std::size_t dateLength = 7;
     std::vector<std::byte> area(*bytes);
     auto read = file.readExactAt(*dataStart, area);
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
     return parseSystemUse(area, file, fileSize, limits, state, recordOffset, hops + 1);
 }

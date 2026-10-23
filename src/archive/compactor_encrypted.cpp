@@ -22,7 +22,7 @@ Result<WriteSummary> Writer::compactEncrypted(
     }
     auto verified = source.verify(VerifyMode::Structure);
     if (!verified) {
-        return std::unexpected(verified.error());
+        return tl::unexpected<Error>(verified.error());
     }
     // NOTE: same refuse-or-carry rule as the plain compactor: signatures bind the old commit
     // NOTE: digest, so a signed source needs explicit re-signing keys.
@@ -90,7 +90,7 @@ Result<WriteSummary> Writer::compactEncrypted(
 
     auto madeKey = crypto::SecretBytes::make(source.dataKey_.size());
     if (!madeKey) {
-        return std::unexpected(madeKey.error());
+        return tl::unexpected<Error>(madeKey.error());
     }
     crypto::SecretBytes cloned(std::move(*madeKey));
     std::ranges::copy(source.dataKey_.bytes(), cloned.mut().begin());
@@ -102,11 +102,11 @@ Result<WriteSummary> Writer::compactEncrypted(
     writer.archiveId_ = source.superblock_.archiveId;
     for (auto& seed : signSeeds) {
         if (auto added = writer.addSignSeed(std::move(seed)); !added) {
-            return std::unexpected(added.error());
+            return tl::unexpected<Error>(added.error());
         }
     }
     if (auto started = writer.startPipeline(); !started) {
-        return std::unexpected(started.error());
+        return tl::unexpected<Error>(started.error());
     }
     Superblock superblock;
     superblock.archiveId = writer.archiveId_;
@@ -116,7 +116,7 @@ Result<WriteSummary> Writer::compactEncrypted(
         superblock.requiredFeatures |= parityRequiredFeature;
     }
     if (auto written = writer.appendRaw(encodeSuperblock(superblock)); !written) {
-        return std::unexpected(written.error());
+        return tl::unexpected<Error>(written.error());
     }
 
     // NOTE: copy KEYSLOT Extension records verbatim (new sequence, same payload and flags).
@@ -148,23 +148,23 @@ Result<WriteSummary> Writer::compactEncrypted(
             }
             std::array<std::byte, recordPrefixSize> prefix{};
             if (auto read = source.file_.readExactAt(position, prefix); !read) {
-                return std::unexpected(read.error());
+                return tl::unexpected<Error>(read.error());
             }
             auto header = decodeRecordPrefix(prefix, keyLimits, position);
             if (!header) {
-                return std::unexpected(header.error());
+                return tl::unexpected<Error>(header.error());
             }
             auto size = recordSize(header->payloadLength);
             if (!size) {
-                return std::unexpected(size.error());
+                return tl::unexpected<Error>(size.error());
             }
             recordBytes.resize(static_cast<std::size_t>(*size));
             if (auto read = source.file_.readExactAt(position, recordBytes); !read) {
-                return std::unexpected(read.error());
+                return tl::unexpected<Error>(read.error());
             }
             auto record = decodeRecord(recordBytes, keyLimits, position);
             if (!record) {
-                return std::unexpected(record.error());
+                return tl::unexpected<Error>(record.error());
             }
             if (record->header.type == RecordType::Extension &&
                 (record->header.flags & encryptedRecordFlag) != 0) {
@@ -173,7 +173,7 @@ Result<WriteSummary> Writer::compactEncrypted(
                 // NOTE: guarantees a signed source is re-signed instead of silently dropped.
                 auto kind = peekExtensionKind(record->payload, position + recordPrefixSize);
                 if (!kind) {
-                    return std::unexpected(kind.error());
+                    return tl::unexpected<Error>(kind.error());
                 }
                 if (*kind != keyslotExtensionKind) {
                     position += *size;
@@ -188,7 +188,7 @@ Result<WriteSummary> Writer::compactEncrypted(
                     encryptedRecordFlag
                 );
                 if (!copied) {
-                    return std::unexpected(copied.error());
+                    return tl::unexpected<Error>(copied.error());
                 }
             }
             position += *size;
@@ -210,7 +210,7 @@ Result<WriteSummary> Writer::compactEncrypted(
     for (const ManifestEntry& entry : source.manifest_.entries) {
         auto pending = writer.beginEntry(entry.path, entry.kind);
         if (!pending) {
-            return std::unexpected(pending.error());
+            return tl::unexpected<Error>(pending.error());
         }
         auto target = writer.storeName(entry.target);
         (*pending)->targetOffset = target.offset;
@@ -239,7 +239,7 @@ Result<WriteSummary> Writer::compactEncrypted(
             source.buffer_
         );
         if (!record) {
-            return std::unexpected(record.error());
+            return tl::unexpected<Error>(record.error());
         }
         if ((record->header.flags & encryptedRecordFlag) == 0) {
             return fail(
@@ -257,7 +257,7 @@ Result<WriteSummary> Writer::compactEncrypted(
             encryptedRecordFlag
         );
         if (!copied) {
-            return std::unexpected(copied.error());
+            return tl::unexpected<Error>(copied.error());
         }
         writer.index_.push_back(
             IndexEntry{

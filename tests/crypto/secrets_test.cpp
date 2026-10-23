@@ -43,32 +43,34 @@ TEST_CASE("secret storage moves ownership") {
     CHECK(third.bytes()[3] == std::byte{3});
 }
 
-TEST_CASE("secret storage wipes on demand") {
-    auto made = SecretBytes::make(32);
-    REQUIRE(made.has_value());
-    SecretBytes secret(std::move(*made));
-    for (std::size_t at = 0; at < secret.size(); ++at) {
-        secret.mut()[at] = static_cast<std::byte>(0xA5);
+TEST_CASE("secret storage wipes on demand and empty secrets stay inert") {
+    SUBCASE("wipe zeroes") {
+        auto made = SecretBytes::make(32);
+        REQUIRE(made.has_value());
+        SecretBytes secret(std::move(*made));
+        for (std::size_t at = 0; at < secret.size(); ++at) {
+            secret.mut()[at] = static_cast<std::byte>(0xA5);
+        }
+
+        secret.wipe();
+
+        for (std::byte value : secret.bytes()) {
+            CHECK(value == std::byte{0});
+        }
     }
 
-    secret.wipe();
+    SUBCASE("empty stays inert") {
+        SecretBytes secret;
+        CHECK(secret.size() == 0);
+        CHECK(secret.bytes().empty());
+        CHECK(secret.mut().empty());
 
-    for (std::byte value : secret.bytes()) {
-        CHECK(value == std::byte{0});
+        secret.wipe();
+        CHECK(secret.bytes().empty());
+
+        auto made = SecretBytes::make(0);
+        REQUIRE(made.has_value());
+        CHECK(made->size() == 0);
+        CHECK(made->bytes().empty());
     }
-}
-
-TEST_CASE("empty secrets stay inert") {
-    SecretBytes secret;
-    CHECK(secret.size() == 0);
-    CHECK(secret.bytes().empty());
-    CHECK(secret.mut().empty());
-
-    secret.wipe();
-    CHECK(secret.bytes().empty());
-
-    auto made = SecretBytes::make(0);
-    REQUIRE(made.has_value());
-    CHECK(made->size() == 0);
-    CHECK(made->bytes().empty());
 }

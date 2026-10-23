@@ -231,7 +231,7 @@ Result<bool> Cursor::next(Entry& entry) {
 
     auto extras = readExtraFields(*extra, extraOffset, saturated, entry, diskStart);
     if (!extras) {
-        return std::unexpected(extras.error());
+        return tl::unexpected<Error>(extras.error());
     }
 
     if (diskStart != 0) {

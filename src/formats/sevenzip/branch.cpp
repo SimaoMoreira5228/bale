@@ -114,7 +114,7 @@ BcjFilter::filter(std::span<const std::byte> input, std::span<std::byte> output)
         if (!convertible(value)) {
             auto noted = noteSkip(at, false);
             if (!noted) {
-                return std::unexpected(noted.error());
+                return tl::unexpected<Error>(noted.error());
             }
             ++scan_;
             continue;
@@ -127,7 +127,7 @@ BcjFilter::filter(std::span<const std::byte> input, std::span<std::byte> output)
         if (nearCount >= 2) {
             auto noted = noteSkip(at, true);
             if (!noted) {
-                return std::unexpected(noted.error());
+                return tl::unexpected<Error>(noted.error());
             }
             ++scan_;
             continue;
@@ -140,7 +140,7 @@ BcjFilter::filter(std::span<const std::byte> input, std::span<std::byte> output)
         if (at3 && at5 && at6 && !at4) {
             auto noted = noteSkip(at, true);
             if (!noted) {
-                return std::unexpected(noted.error());
+                return tl::unexpected<Error>(noted.error());
             }
             ++scan_;
             continue;

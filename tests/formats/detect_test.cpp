@@ -58,15 +58,44 @@ TEST_CASE("detectFormat recognizes each format by structure, not extension") {
 }
 
 TEST_CASE("detectFormat rejects lookalikes") {
-    auto header = tarHeader();
-    header[148] = std::byte{'7'};
-    CHECK(detectBytes(header) == ArchiveFormat{});
+    SUBCASE("tar and zip") {
+        auto header = tarHeader();
+        header[148] = std::byte{'7'};
+        CHECK(detectBytes(header) == ArchiveFormat{});
 
-    auto zipWithJunkAfter = emptyZip(0);
-    zipWithJunkAfter.push_back(std::byte{0});
-    CHECK(detectBytes(zipWithJunkAfter) == ArchiveFormat{});
+        auto zipWithJunkAfter = emptyZip(0);
+        zipWithJunkAfter.push_back(std::byte{0});
+        CHECK(detectBytes(zipWithJunkAfter) == ArchiveFormat{});
 
-    CHECK(detectBytes({}) == ArchiveFormat{});
+        CHECK(detectBytes({}) == ArchiveFormat{});
+    }
+
+    SUBCASE("xz and bzip2") {
+        CHECK_FALSE(xz::looksLikeXz({}));
+        CHECK_FALSE(bzip2::looksLikeBzip2({}));
+
+        std::array<std::byte, 5> shortXz{
+            std::byte{0xFD},
+            std::byte{0x37},
+            std::byte{0x7A},
+            std::byte{0x58},
+            std::byte{0x5A},
+        };
+        CHECK_FALSE(xz::looksLikeXz(shortXz));
+
+        std::array<std::byte, 4> badDigit{
+            std::byte{'B'},
+            std::byte{'Z'},
+            std::byte{'h'},
+            std::byte{'0'},
+        };
+        CHECK_FALSE(bzip2::looksLikeBzip2(badDigit));
+
+        std::vector<std::byte> text(2000, std::byte{'t'});
+        auto xz = test::xzCompress(text);
+        xz[0] = std::byte{0x1F};
+        CHECK(detectBytes(xz) == ArchiveFormat{});
+    }
 }
 
 TEST_CASE("detectFormat looks one tar block into every compressed stream") {
@@ -121,31 +150,4 @@ TEST_CASE("detectFormat looks one tar block into every compressed stream") {
     auto corrupt = test::zstdCompress(tarBytes, 20);
     corrupt.resize(8);
     CHECK(detectBytes(corrupt) == zstdFile);
-}
-
-TEST_CASE("detectFormat rejects xz and bzip2 lookalikes") {
-    CHECK_FALSE(xz::looksLikeXz({}));
-    CHECK_FALSE(bzip2::looksLikeBzip2({}));
-
-    std::array<std::byte, 5> shortXz{
-        std::byte{0xFD},
-        std::byte{0x37},
-        std::byte{0x7A},
-        std::byte{0x58},
-        std::byte{0x5A},
-    };
-    CHECK_FALSE(xz::looksLikeXz(shortXz));
-
-    std::array<std::byte, 4> badDigit{
-        std::byte{'B'},
-        std::byte{'Z'},
-        std::byte{'h'},
-        std::byte{'0'},
-    };
-    CHECK_FALSE(bzip2::looksLikeBzip2(badDigit));
-
-    std::vector<std::byte> text(2000, std::byte{'t'});
-    auto xz = test::xzCompress(text);
-    xz[0] = std::byte{0x1F};
-    CHECK(detectBytes(xz) == ArchiveFormat{});
 }

@@ -10,7 +10,7 @@ namespace bale {
 
 namespace {
 
-std::unexpected<Error> lzmaEncodeFailure(lzma_ret status) {
+tl::unexpected<Error> lzmaEncodeFailure(lzma_ret status) {
     switch (status) {
     case LZMA_MEM_ERROR:
         return fail(ErrorKind::LimitExceeded, "lzma2 encoder allocation failed");

@@ -78,6 +78,10 @@ TEST_CASE("ar reader lists golden System V archives from GNU ar 2.46.1") {
     // `ar rcsD` from GNU binutils 2.46.1, which forces uid/gid/mtime to zero
     // and drops the file-type bits from the mode.
     auto reader = openBytes(golden("gnu.a"));
+    if (!reader) {
+        INFO(reader.error().what);
+        INFO(reader.error().offset);
+    }
     REQUIRE(reader);
 
     auto entries = std::vector<Entry>(reader->entries().begin(), reader->entries().end());
@@ -107,6 +111,10 @@ TEST_CASE("ar reader lists golden System V archives from GNU ar 2.46.1") {
 
 TEST_CASE("ar reader resolves golden GNU long names from GNU ar 2.46.1") {
     auto reader = openBytes(golden("long.a"));
+    if (!reader) {
+        INFO(reader.error().what);
+        INFO(reader.error().offset);
+    }
     REQUIRE(reader);
 
     auto entries = std::vector<Entry>(reader->entries().begin(), reader->entries().end());
@@ -182,10 +190,10 @@ TEST_CASE("ar reader rejects malformed archives") {
     wrongMagic.raw("!<arch?\n").member(named("a/", "x"));
     CHECK(bad(wrongMagic) == ErrorKind::Malformed);
 
-    auto terminator = MemberSpec(named("a/", "x"));
-    terminator.terminator = "!!";
+    auto termMember = MemberSpec(named("a/", "x"));
+    termMember.terminator = "!!";
     ArchiveBuilder badTerminator;
-    badTerminator.member(terminator);
+    badTerminator.member(termMember);
     CHECK(bad(badTerminator) == ErrorKind::Malformed);
 
     auto decimal = MemberSpec(named("a/", "x"));
@@ -356,6 +364,7 @@ TEST_CASE("looksLikeAr detects the ar magic") {
     REQUIRE(file);
     auto format = detectFormat(*file);
     REQUIRE(format);
+    INFO(name(*format));
     CHECK(*format == ArchiveFormat{.container = Container::Ar});
     CHECK(name(*format) == "ar");
 }

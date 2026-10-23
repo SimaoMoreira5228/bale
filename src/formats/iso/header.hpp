@@ -13,7 +13,7 @@
 
 namespace bale::iso {
 
-inline constexpr std::size_t sectorSize = 2048;
+inline constexpr std::uint64_t sectorSize = 2048;
 inline constexpr std::uint64_t systemSectors = 16;
 inline constexpr std::uint64_t firstVolumeSector = 16;
 inline constexpr std::uint64_t maxVolumeDescriptors = 64;

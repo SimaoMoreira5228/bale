@@ -19,9 +19,9 @@ constexpr int directoryFlags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC;
 constexpr int maxTempAttempts = 16;
 constexpr std::int64_t nanosecondsPerSecond = 1'000'000'000;
 
-std::unexpected<Error> systemFailure(ErrorKind kind, std::string_view what) {
+tl::unexpected<Error> systemFailure(ErrorKind kind, std::string_view what) {
     auto failure = fail(kind, what);
-    failure.error().systemCode = errno;
+    failure.value().systemCode = errno;
     return failure;
 }
 
@@ -38,7 +38,7 @@ int openAt(int directory, const char* name, int flags, mode_t mode = 0) {
     return error == ELOOP || error == EMLINK || error == ENOTDIR;
 }
 
-std::unexpected<Error> componentFailure(int directory, const char* name) {
+tl::unexpected<Error> componentFailure(int directory, const char* name) {
     const int error = errno;
     if (!isNotDirectoryError(error)) {
         return systemFailure(ErrorKind::Io, "cannot open directory in extraction path");
@@ -92,7 +92,7 @@ Result<void> applyTimes(int fd, const char* name, const EntryMetadata& metadata,
 
     auto modified = toTimespec(*metadata.mtimeNanoseconds);
     if (!modified) {
-        return std::unexpected(modified.error());
+        return tl::unexpected<Error>(modified.error());
     }
 
     timespec times[2]{};
@@ -199,7 +199,7 @@ Result<OsHandle> Extractor::openParent(std::string_view path, bool create) {
 
         auto next = openDirectoryAt(current.get(), component_.c_str(), create, mode);
         if (!next) {
-            return std::unexpected(next.error());
+            return tl::unexpected<Error>(next.error());
         }
 
         current = std::move(*next);
@@ -289,12 +289,12 @@ Result<EntryResult>
 Extractor::createDirectory(const ArchivePath& path, const EntryMetadata& metadata) {
     auto entry = beginEntry(path);
     if (!entry) {
-        return std::unexpected(entry.error());
+        return tl::unexpected<Error>(entry.error());
     }
 
     auto parent = openParent(path.path, true);
     if (!parent) {
-        return std::unexpected(parent.error());
+        return tl::unexpected<Error>(parent.error());
     }
 
     component_.assign(entry->leaf);
@@ -326,7 +326,7 @@ Extractor::createDirectory(const ArchivePath& path, const EntryMetadata& metadat
     if (policy_.restoreMtime && metadata.mtimeNanoseconds) {
         auto checked = toTimespec(*metadata.mtimeNanoseconds);
         if (!checked) {
-            return std::unexpected(checked.error());
+            return tl::unexpected<Error>(checked.error());
         }
 
         struct stat status{};
@@ -339,7 +339,7 @@ Extractor::createDirectory(const ArchivePath& path, const EntryMetadata& metadat
     if (policy_.durable && created) {
         auto synced = syncHandle(parent->get());
         if (!synced) {
-            return std::unexpected(synced.error());
+            return tl::unexpected<Error>(synced.error());
         }
     }
     return EntryResult{};
@@ -348,12 +348,12 @@ Extractor::createDirectory(const ArchivePath& path, const EntryMetadata& metadat
 Result<PendingFile> Extractor::beginFile(const ArchivePath& path, const EntryMetadata& metadata) {
     auto entry = beginEntry(path);
     if (!entry) {
-        return std::unexpected(entry.error());
+        return tl::unexpected<Error>(entry.error());
     }
 
     auto parent = openParent(path.path, true);
     if (!parent) {
-        return std::unexpected(parent.error());
+        return tl::unexpected<Error>(parent.error());
     }
 
     PendingFile pending(*this);
@@ -380,7 +380,7 @@ Result<PendingFile> Extractor::beginFile(const ArchivePath& path, const EntryMet
 
     auto file = openTemporary(*parent, pending.tempName_);
     if (!file) {
-        return std::unexpected(file.error());
+        return tl::unexpected<Error>(file.error());
     }
 
     pending.directory_ = std::move(*parent);
@@ -396,13 +396,13 @@ Result<EntryResult> Extractor::finishFile(PendingFile& file) {
 
     auto times = applyTimes(fd, nullptr, file.metadata_, policy_.restoreMtime);
     if (!times) {
-        return std::unexpected(times.error());
+        return tl::unexpected<Error>(times.error());
     }
 
     if (policy_.durable) {
         auto synced = syncHandle(fd);
         if (!synced) {
-            return std::unexpected(synced.error());
+            return tl::unexpected<Error>(synced.error());
         }
     }
 
@@ -421,7 +421,7 @@ Result<EntryResult> Extractor::finishFile(PendingFile& file) {
     if (policy_.durable) {
         auto synced = syncHandle(file.directory_.get());
         if (!synced) {
-            return std::unexpected(synced.error());
+            return tl::unexpected<Error>(synced.error());
         }
     }
     return placed;
@@ -434,7 +434,7 @@ Result<EntryResult> Extractor::createSymlink(
 ) {
     auto entry = beginEntry(path);
     if (!entry) {
-        return std::unexpected(entry.error());
+        return tl::unexpected<Error>(entry.error());
     }
 
     if (policy_.symlinks == SymlinkPolicy::Refuse) {
@@ -449,12 +449,12 @@ Result<EntryResult> Extractor::createSymlink(
 
     auto normalized = normalizeLinkTarget(target, entry->parentDepth);
     if (!normalized) {
-        return std::unexpected(normalized.error());
+        return tl::unexpected<Error>(normalized.error());
     }
 
     auto parent = openParent(path.path, true);
     if (!parent) {
-        return std::unexpected(parent.error());
+        return tl::unexpected<Error>(parent.error());
     }
 
     TempName tempName{};
@@ -472,7 +472,7 @@ Result<EntryResult> Extractor::createSymlink(
 
     auto times = applyTimes(parent->get(), tempName.data(), metadata, policy_.restoreMtime);
     auto placed = times ? place(*parent, OsHandle{}, tempName.data(), entry->leaf)
-                        : Result<EntryResult>(std::unexpected(times.error()));
+                        : Result<EntryResult>(tl::unexpected<Error>(times.error()));
     if (!placed || placed->outcome == EntryOutcome::Skipped) {
         ::unlinkat(parent->get(), tempName.data(), 0);
         return placed;
@@ -481,7 +481,7 @@ Result<EntryResult> Extractor::createSymlink(
     if (policy_.durable) {
         auto synced = syncHandle(parent->get());
         if (!synced) {
-            return std::unexpected(synced.error());
+            return tl::unexpected<Error>(synced.error());
         }
     }
     return placed;
@@ -491,7 +491,7 @@ Result<EntryResult>
 Extractor::createHardLink(const ArchivePath& path, const ArchivePath& existingPath) {
     auto entry = beginEntry(path);
     if (!entry) {
-        return std::unexpected(entry.error());
+        return tl::unexpected<Error>(entry.error());
     }
 
     if (policy_.hardLinks == HardLinkPolicy::Refuse) {
@@ -500,7 +500,7 @@ Extractor::createHardLink(const ArchivePath& path, const ArchivePath& existingPa
 
     auto source = splitPath(existingPath.path);
     if (!source) {
-        return std::unexpected(source.error());
+        return tl::unexpected<Error>(source.error());
     }
 
     auto sourceParent = openParent(existingPath.path, false);
@@ -512,7 +512,7 @@ Extractor::createHardLink(const ArchivePath& path, const ArchivePath& existingPa
                 "hard link target was not extracted in this session"
             );
         }
-        return std::unexpected(sourceParent.error());
+        return tl::unexpected<Error>(sourceParent.error());
     }
 
     std::array<char, maxLeafBytes + 1> sourceName{};
@@ -539,7 +539,7 @@ Extractor::createHardLink(const ArchivePath& path, const ArchivePath& existingPa
 
     auto parent = openParent(path.path, true);
     if (!parent) {
-        return std::unexpected(parent.error());
+        return tl::unexpected<Error>(parent.error());
     }
 
     TempName tempName{};
@@ -573,7 +573,7 @@ Extractor::createHardLink(const ArchivePath& path, const ArchivePath& existingPa
     if (policy_.durable) {
         auto synced = syncHandle(parent->get());
         if (!synced) {
-            return std::unexpected(synced.error());
+            return tl::unexpected<Error>(synced.error());
         }
     }
     return placed;
@@ -585,7 +585,7 @@ Result<void> Extractor::applyDeferredTime(std::string_view path, const DeferredT
         if (isGone(parent.error())) {
             return {};
         }
-        return std::unexpected(parent.error());
+        return tl::unexpected<Error>(parent.error());
     }
 
     const std::size_t slash = path.rfind('/');

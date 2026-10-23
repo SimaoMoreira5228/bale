@@ -37,7 +37,7 @@ std::string_view pickText(
 
 Result<const Entry*> Reader::next() {
     if (failure_) {
-        return std::unexpected(*failure_);
+        return tl::unexpected<Error>(*failure_);
     }
     if (done_) {
         return nullptr;
@@ -53,7 +53,7 @@ Result<const Entry*> Reader::next() {
 Result<const Entry*> Reader::readNext() {
     auto skipped = source_.skip(dataLeft_ + paddingLeft_);
     if (!skipped) {
-        return std::unexpected(skipped.error());
+        return tl::unexpected<Error>(skipped.error());
     }
     dataLeft_ = 0;
     paddingLeft_ = 0;
@@ -67,7 +67,7 @@ Result<const Entry*> Reader::readNext() {
 
         auto state = readBlock();
         if (!state) {
-            return std::unexpected(state.error());
+            return tl::unexpected<Error>(state.error());
         }
         if (*state != BlockState::Header) {
             return endOfArchive(*state, pendingMeta);
@@ -75,7 +75,7 @@ Result<const Entry*> Reader::readNext() {
 
         auto header = parseHeader(block_, position_);
         if (!header) {
-            return std::unexpected(header.error());
+            return tl::unexpected<Error>(header.error());
         }
 
         switch (header->typeflag) {
@@ -84,12 +84,12 @@ Result<const Entry*> Reader::readNext() {
             auto dataOffset = position_ + blockSize;
             auto read = readMetaData(*header, metaBuffer_);
             if (!read) {
-                return std::unexpected(read.error());
+                return tl::unexpected<Error>(read.error());
             }
 
             auto parsed = parsePaxRecords(metaBuffer_, dataOffset, limits_, localPax_);
             if (!parsed) {
-                return std::unexpected(parsed.error());
+                return tl::unexpected<Error>(parsed.error());
             }
             continue;
         }
@@ -97,12 +97,12 @@ Result<const Entry*> Reader::readNext() {
             auto dataOffset = position_ + blockSize;
             auto read = readMetaData(*header, metaBuffer_);
             if (!read) {
-                return std::unexpected(read.error());
+                return tl::unexpected<Error>(read.error());
             }
 
             auto parsed = parsePaxRecords(metaBuffer_, dataOffset, limits_, globalPax_);
             if (!parsed) {
-                return std::unexpected(parsed.error());
+                return tl::unexpected<Error>(parsed.error());
             }
             continue;
         }
@@ -112,7 +112,7 @@ Result<const Entry*> Reader::readNext() {
             auto& target = header->typeflag == 'L' ? longPath_ : longLink_;
             auto read = readMetaData(*header, target);
             if (!read) {
-                return std::unexpected(read.error());
+                return tl::unexpected<Error>(read.error());
             }
 
             auto terminator = target.find('\0');
@@ -156,7 +156,7 @@ Result<void> Reader::readData(std::span<std::byte> out) {
 Result<void> Reader::readExact(std::span<std::byte> out) {
     auto count = source_.readFull(out);
     if (!count) {
-        return std::unexpected(count.error());
+        return tl::unexpected<Error>(count.error());
     }
     if (*count < out.size()) {
         return fail(ErrorKind::Truncated, "tar archive ends inside entry data", source_.position());
@@ -168,7 +168,7 @@ Result<Reader::BlockState> Reader::readBlock() {
     position_ = source_.position();
     auto count = source_.readFull(block_);
     if (!count) {
-        return std::unexpected(count.error());
+        return tl::unexpected<Error>(count.error());
     }
     if (*count == 0) {
         return BlockState::End;
@@ -199,7 +199,7 @@ Result<void> Reader::readMetaData(const Header& header, std::string& buffer) {
 
     auto pad = padding(position_ + blockSize, header.size);
     if (!pad) {
-        return std::unexpected(pad.error());
+        return tl::unexpected<Error>(pad.error());
     }
 
     buffer.resize(static_cast<std::size_t>(header.size));
@@ -218,7 +218,7 @@ Result<const Entry*> Reader::endOfArchive(BlockState state, bool pendingMeta) {
     if (state == BlockState::Zero) {
         auto second = readBlock();
         if (!second) {
-            return std::unexpected(second.error());
+            return tl::unexpected<Error>(second.error());
         }
         if (*second == BlockState::Header) {
             return fail(ErrorKind::Malformed, "lone zero block before tar header", position_);
@@ -227,7 +227,7 @@ Result<const Entry*> Reader::endOfArchive(BlockState state, bool pendingMeta) {
 
     auto finished = source_.finish();
     if (!finished) {
-        return std::unexpected(finished.error());
+        return tl::unexpected<Error>(finished.error());
     }
 
     done_ = true;
@@ -276,7 +276,7 @@ Result<const Entry*> Reader::finishEntry(const Header& header) {
     auto dataOffset = position_ + blockSize;
     auto pad = padding(dataOffset, size);
     if (!pad) {
-        return std::unexpected(pad.error());
+        return tl::unexpected<Error>(pad.error());
     }
 
     entry_ = Entry{};

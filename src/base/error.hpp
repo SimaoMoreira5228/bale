@@ -1,9 +1,9 @@
 #pragma once
 
 #include <cstdint>
-#include <expected>
 #include <limits>
 #include <string_view>
+#include <tl/expected.hpp>
 
 namespace bale {
 
@@ -28,17 +28,21 @@ struct Error {
     int systemCode = 0;
 };
 
-template <typename T> using Result = std::expected<T, Error>;
+// NOTE: Result is tl::expected, not std::expected. Clang does not advertise
+// a completed concepts implementation, which is what libstdc++ gates its
+// <expected> header on, so the standard header is empty under Clang with the
+// default library. The vendored replacement is CC0, single-header, and API
+// compatible for everything bale uses. Do not switch back without checking
+// that combination first.
+template <typename T> using Result = tl::expected<T, Error>;
 
-[[nodiscard]] constexpr std::unexpected<Error>
+[[nodiscard]] constexpr tl::unexpected<Error>
 fail(ErrorKind kind, std::string_view what, std::uint64_t offset = Error::noOffset) {
-    return std::unexpected(
-        Error{
-            .kind = kind,
-            .what = what,
-            .offset = offset,
-        }
-    );
+    return tl::unexpected<Error>(Error{
+        .kind = kind,
+        .what = what,
+        .offset = offset,
+    });
 }
 
 [[nodiscard]] constexpr std::string_view name(ErrorKind kind) {

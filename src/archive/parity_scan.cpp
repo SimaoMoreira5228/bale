@@ -41,7 +41,7 @@ scanGeneration(File& file, std::uint64_t start, std::uint64_t end, std::uint64_t
                 scan.truncated = true;
                 break;
             }
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         auto header = decodeRecordPrefix(prefix, limits, position);
         if (!header) {
@@ -68,7 +68,7 @@ scanGeneration(File& file, std::uint64_t start, std::uint64_t end, std::uint64_t
                     scan.truncated = true;
                     break;
                 }
-                return std::unexpected(read.error());
+                return tl::unexpected<Error>(read.error());
             }
             auto decoded = decodeRecord(recordBytes, limits, position);
             if (!decoded) {

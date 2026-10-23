@@ -110,11 +110,11 @@ KdfParams moderateKdfParams() {
 Result<SecretBytes>
 deriveKey(std::span<const std::byte> password, std::span<const std::byte> salt, KdfParams params) {
     if (auto init = ensureInit(); !init) {
-        return std::unexpected(init.error());
+        return tl::unexpected<Error>(init.error());
     }
 
     if (auto sized = requireSize(salt, saltSize, "kdf salt must hold 16 bytes"); !sized) {
-        return std::unexpected(sized.error());
+        return tl::unexpected<Error>(sized.error());
     }
 
     if (params.opslimit < crypto_pwhash_argon2id_opslimit_min() ||
@@ -139,7 +139,7 @@ deriveKey(std::span<const std::byte> password, std::span<const std::byte> salt, 
 
     auto made = SecretBytes::make(keySize);
     if (!made) {
-        return std::unexpected(made.error());
+        return tl::unexpected<Error>(made.error());
     }
     SecretBytes key(std::move(*made));
 
@@ -161,12 +161,12 @@ deriveKey(std::span<const std::byte> password, std::span<const std::byte> salt, 
 
 Result<SecretBytes> makeKey() {
     if (auto init = ensureInit(); !init) {
-        return std::unexpected(init.error());
+        return tl::unexpected<Error>(init.error());
     }
 
     auto made = SecretBytes::make(keySize);
     if (!made) {
-        return std::unexpected(made.error());
+        return tl::unexpected<Error>(made.error());
     }
     SecretBytes key(std::move(*made));
     randomFill(key.mut());
@@ -175,7 +175,7 @@ Result<SecretBytes> makeKey() {
 
 Result<std::array<std::byte, nonceSize>> makeNonce() {
     if (auto init = ensureInit(); !init) {
-        return std::unexpected(init.error());
+        return tl::unexpected<Error>(init.error());
     }
 
     std::array<std::byte, nonceSize> nonce{};
@@ -185,14 +185,14 @@ Result<std::array<std::byte, nonceSize>> makeNonce() {
 
 Result<BoxKeyPair> makeKeyPair() {
     if (auto init = ensureInit(); !init) {
-        return std::unexpected(init.error());
+        return tl::unexpected<Error>(init.error());
     }
 
     BoxKeyPair pair;
 
     auto made = SecretBytes::make(secretKeySize);
     if (!made) {
-        return std::unexpected(made.error());
+        return tl::unexpected<Error>(made.error());
     }
     SecretBytes secret(std::move(*made));
     randomFill(secret.mut());
@@ -207,11 +207,11 @@ Result<BoxKeyPair> makeKeyPair() {
 
 Result<std::array<std::byte, publicKeySize>> publicKeyOf(std::span<const std::byte> secretKey) {
     if (auto init = ensureInit(); !init) {
-        return std::unexpected(init.error());
+        return tl::unexpected<Error>(init.error());
     }
     if (auto sized = requireSize(secretKey, secretKeySize, "recipient key must hold 32 bytes");
         !sized) {
-        return std::unexpected(sized.error());
+        return tl::unexpected<Error>(sized.error());
     }
     std::array<std::byte, publicKeySize> publicKey{};
     crypto_scalarmult_base(
@@ -228,15 +228,15 @@ Result<std::vector<std::byte>> seal(
     std::span<const std::byte> ad
 ) {
     if (auto init = ensureInit(); !init) {
-        return std::unexpected(init.error());
+        return tl::unexpected<Error>(init.error());
     }
 
     if (auto sized = requireSize(key, keySize, "aead key must hold 32 bytes"); !sized) {
-        return std::unexpected(sized.error());
+        return tl::unexpected<Error>(sized.error());
     }
 
     if (auto sized = requireSize(nonce, nonceSize, "aead nonce must hold 24 bytes"); !sized) {
-        return std::unexpected(sized.error());
+        return tl::unexpected<Error>(sized.error());
     }
 
     auto boxedSize = checkedAdd(plaintext.size(), tagSize);
@@ -270,15 +270,15 @@ Result<std::vector<std::byte>> open(
     std::span<const std::byte> ad
 ) {
     if (auto init = ensureInit(); !init) {
-        return std::unexpected(init.error());
+        return tl::unexpected<Error>(init.error());
     }
 
     if (auto sized = requireSize(key, keySize, "aead key must hold 32 bytes"); !sized) {
-        return std::unexpected(sized.error());
+        return tl::unexpected<Error>(sized.error());
     }
 
     if (auto sized = requireSize(nonce, nonceSize, "aead nonce must hold 24 bytes"); !sized) {
-        return std::unexpected(sized.error());
+        return tl::unexpected<Error>(sized.error());
     }
 
     if (boxed.size() < tagSize) {
@@ -315,7 +315,7 @@ Result<PasswordSlot> wrapPasswordKey(
     std::uint64_t epoch
 ) {
     if (auto sized = requireSize(key, keySize, "data key must hold 32 bytes"); !sized) {
-        return std::unexpected(sized.error());
+        return tl::unexpected<Error>(sized.error());
     }
 
     if (epoch == 0) {
@@ -328,20 +328,20 @@ Result<PasswordSlot> wrapPasswordKey(
     slot.memlimitBytes = params.memlimitBytes;
 
     if (auto init = ensureInit(); !init) {
-        return std::unexpected(init.error());
+        return tl::unexpected<Error>(init.error());
     }
     randomFill(slot.salt);
     randomFill(slot.nonce);
 
     auto stretched = deriveKey(password, slot.salt, params);
     if (!stretched) {
-        return std::unexpected(stretched.error());
+        return tl::unexpected<Error>(stretched.error());
     }
 
     auto ad = slotAad(epoch);
     auto wrapped = seal(stretched->bytes(), slot.nonce, key, ad);
     if (!wrapped) {
-        return std::unexpected(wrapped.error());
+        return tl::unexpected<Error>(wrapped.error());
     }
     slot.wrapped = std::move(*wrapped);
     return slot;
@@ -369,19 +369,19 @@ unwrapPasswordKey(const PasswordSlot& slot, std::span<const std::byte> password)
     };
     auto stretched = deriveKey(password, slot.salt, params);
     if (!stretched) {
-        return std::unexpected(stretched.error());
+        return tl::unexpected<Error>(stretched.error());
     }
 
     auto ad = slotAad(slot.epoch);
     auto key = open(stretched->bytes(), slot.nonce, slot.wrapped, ad);
     if (!key) {
-        return std::unexpected(key.error());
+        return tl::unexpected<Error>(key.error());
     }
 
     auto made = SecretBytes::make(key->size());
     if (!made) {
         sodium_memzero(key->data(), key->size());
-        return std::unexpected(made.error());
+        return tl::unexpected<Error>(made.error());
     }
     SecretBytes out(std::move(*made));
     std::ranges::copy(*key, out.mut().begin());
@@ -392,16 +392,16 @@ unwrapPasswordKey(const PasswordSlot& slot, std::span<const std::byte> password)
 Result<RecipientSlot>
 wrapRecipientKey(std::span<const std::byte> key, std::span<const std::byte> publicKey) {
     if (auto init = ensureInit(); !init) {
-        return std::unexpected(init.error());
+        return tl::unexpected<Error>(init.error());
     }
 
     if (auto sized = requireSize(key, keySize, "data key must hold 32 bytes"); !sized) {
-        return std::unexpected(sized.error());
+        return tl::unexpected<Error>(sized.error());
     }
 
     if (auto sized = requireSize(publicKey, publicKeySize, "recipient key must hold 32 bytes");
         !sized) {
-        return std::unexpected(sized.error());
+        return tl::unexpected<Error>(sized.error());
     }
 
     RecipientSlot slot;
@@ -425,7 +425,7 @@ Result<SecretBytes> unwrapRecipientKey(
     std::span<const std::byte> secretKey
 ) {
     if (auto init = ensureInit(); !init) {
-        return std::unexpected(init.error());
+        return tl::unexpected<Error>(init.error());
     }
 
     if (slot.sealed.size() != keySize + sealOverhead) {
@@ -438,17 +438,17 @@ Result<SecretBytes> unwrapRecipientKey(
 
     if (auto sized = requireSize(publicKey, publicKeySize, "recipient key must hold 32 bytes");
         !sized) {
-        return std::unexpected(sized.error());
+        return tl::unexpected<Error>(sized.error());
     }
 
     if (auto sized = requireSize(secretKey, secretKeySize, "recipient key must hold 32 bytes");
         !sized) {
-        return std::unexpected(sized.error());
+        return tl::unexpected<Error>(sized.error());
     }
 
     auto made = SecretBytes::make(keySize);
     if (!made) {
-        return std::unexpected(made.error());
+        return tl::unexpected<Error>(made.error());
     }
     SecretBytes key(std::move(*made));
 
@@ -467,12 +467,12 @@ Result<SecretBytes> unwrapRecipientKey(
 
 Result<SignKeyPair> makeSignKeyPair() {
     if (auto init = ensureInit(); !init) {
-        return std::unexpected(init.error());
+        return tl::unexpected<Error>(init.error());
     }
 
     auto made = SecretBytes::make(signSecretKeySize);
     if (!made) {
-        return std::unexpected(made.error());
+        return tl::unexpected<Error>(made.error());
     }
     SecretBytes secret(std::move(*made));
     SignKeyPair pair;
@@ -486,14 +486,14 @@ Result<SignKeyPair> makeSignKeyPair() {
 
 Result<std::array<std::byte, signPublicKeySize>> signPublicKeyOf(std::span<const std::byte> seed) {
     if (auto init = ensureInit(); !init) {
-        return std::unexpected(init.error());
+        return tl::unexpected<Error>(init.error());
     }
     if (auto sized = requireSize(seed, signSeedSize, "signing seed must hold 32 bytes"); !sized) {
-        return std::unexpected(sized.error());
+        return tl::unexpected<Error>(sized.error());
     }
     auto made = SecretBytes::make(signSecretKeySize);
     if (!made) {
-        return std::unexpected(made.error());
+        return tl::unexpected<Error>(made.error());
     }
     SecretBytes expanded(std::move(*made));
     std::array<std::byte, signPublicKeySize> publicKey{};
@@ -508,14 +508,14 @@ Result<std::array<std::byte, signPublicKeySize>> signPublicKeyOf(std::span<const
 Result<std::array<std::byte, signSignatureSize>>
 signDetached(std::span<const std::byte> message, std::span<const std::byte> seed) {
     if (auto init = ensureInit(); !init) {
-        return std::unexpected(init.error());
+        return tl::unexpected<Error>(init.error());
     }
     if (auto sized = requireSize(seed, signSeedSize, "signing seed must hold 32 bytes"); !sized) {
-        return std::unexpected(sized.error());
+        return tl::unexpected<Error>(sized.error());
     }
     auto made = SecretBytes::make(signSecretKeySize);
     if (!made) {
-        return std::unexpected(made.error());
+        return tl::unexpected<Error>(made.error());
     }
     SecretBytes expanded(std::move(*made));
     std::array<unsigned char, crypto_sign_ed25519_PUBLICKEYBYTES> publicKey{};
@@ -545,15 +545,15 @@ Result<void> verifyDetached(
     std::span<const std::byte> publicKey
 ) {
     if (auto init = ensureInit(); !init) {
-        return std::unexpected(init.error());
+        return tl::unexpected<Error>(init.error());
     }
     if (auto sized = requireSize(signature, signSignatureSize, "signature must hold 64 bytes");
         !sized) {
-        return std::unexpected(sized.error());
+        return tl::unexpected<Error>(sized.error());
     }
     if (auto sized = requireSize(publicKey, signPublicKeySize, "signing key must hold 32 bytes");
         !sized) {
-        return std::unexpected(sized.error());
+        return tl::unexpected<Error>(sized.error());
     }
     int valid = crypto_sign_ed25519_verify_detached(
         bytesOrDummy(signature),

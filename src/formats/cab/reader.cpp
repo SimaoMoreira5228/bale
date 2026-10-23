@@ -10,7 +10,7 @@ namespace bale::cab {
 Result<Reader> Reader::open(File file, const Limits& limits) {
     auto size = file.size();
     if (!size) {
-        return std::unexpected(size.error());
+        return tl::unexpected<Error>(size.error());
     }
     if (*size < signature.size()) {
         return fail(ErrorKind::Malformed, "not a cabinet archive");
@@ -19,7 +19,7 @@ Result<Reader> Reader::open(File file, const Limits& limits) {
     std::array<std::byte, 8> head{};
     auto headRead = file.readExactAt(0, head);
     if (!headRead) {
-        return std::unexpected(headRead.error());
+        return tl::unexpected<Error>(headRead.error());
     }
     if (!looksLikeCab(head)) {
         return fail(ErrorKind::Malformed, "not a cabinet archive");
@@ -27,7 +27,7 @@ Result<Reader> Reader::open(File file, const Limits& limits) {
 
     auto model = parseCabinet(file, *size, limits);
     if (!model) {
-        return std::unexpected(model.error());
+        return tl::unexpected<Error>(model.error());
     }
     if (model->hasPrev || model->hasNext) {
         return fail(ErrorKind::Unsupported, "multi-cabinet sets are not supported");
@@ -74,19 +74,19 @@ Result<Session*> Reader::sessionFor(const Entry& entry) {
     if (folder.method == methodMszip && !inflater_) {
         auto created = Inflater::create();
         if (!created) {
-            return std::unexpected(created.error());
+            return tl::unexpected<Error>(created.error());
         }
         inflater_.emplace(std::move(*created));
     }
 
     auto duplicate = file_.duplicate();
     if (!duplicate) {
-        return std::unexpected(duplicate.error());
+        return tl::unexpected<Error>(duplicate.error());
     }
 
     auto session = Session::start(std::move(*duplicate), folder, inflater_ ? &*inflater_ : nullptr);
     if (!session) {
-        return std::unexpected(session.error());
+        return tl::unexpected<Error>(session.error());
     }
 
     active_.emplace(Active{.folder = entry.folder, .session = std::move(*session)});

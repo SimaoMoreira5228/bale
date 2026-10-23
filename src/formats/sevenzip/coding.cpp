@@ -7,7 +7,7 @@ namespace bale::sevenzip {
 Result<std::uint64_t> readNumber(ByteReader& reader) {
     auto first = reader.u8();
     if (!first) {
-        return std::unexpected(first.error());
+        return tl::unexpected<Error>(first.error());
     }
 
     unsigned mask = 0x80;
@@ -29,7 +29,7 @@ Result<std::uint64_t> readNumber(ByteReader& reader) {
 
         auto next = reader.u8();
         if (!next) {
-            return std::unexpected(next.error());
+            return tl::unexpected<Error>(next.error());
         }
 
         value |= std::uint64_t{*next} << (index * 8);
@@ -44,7 +44,7 @@ Result<std::uint64_t> readNumber(ByteReader& reader) {
 Result<std::uint8_t> readId(ByteReader& reader) {
     auto id = reader.u8();
     if (!id) {
-        return std::unexpected(id.error());
+        return tl::unexpected<Error>(id.error());
     }
     return *id;
 }
@@ -52,7 +52,7 @@ Result<std::uint8_t> readId(ByteReader& reader) {
 Result<void> expectId(ByteReader& reader, std::uint8_t expected, std::string_view what) {
     auto id = readId(reader);
     if (!id) {
-        return std::unexpected(id.error());
+        return tl::unexpected<Error>(id.error());
     }
     if (*id != expected) {
         return fail(ErrorKind::Malformed, what, reader.offset());
@@ -74,7 +74,7 @@ Result<std::vector<std::byte>> readBits(ByteReader& reader, std::uint64_t count)
 
     auto taken = reader.bytes(*size);
     if (!taken) {
-        return std::unexpected(taken.error());
+        return tl::unexpected<Error>(taken.error());
     }
     return std::vector<std::byte>(taken->begin(), taken->end());
 }
@@ -87,14 +87,14 @@ readDigests(ByteReader& reader, std::uint64_t count, const Limits& limits) {
 
     auto defined = readId(reader);
     if (!defined) {
-        return std::unexpected(defined.error());
+        return tl::unexpected<Error>(defined.error());
     }
 
     std::vector<std::byte> bits;
     if (*defined == 0) {
         auto read = readBits(reader, count);
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         bits = std::move(*read);
     } else if (*defined != 1) {
@@ -112,7 +112,7 @@ readDigests(ByteReader& reader, std::uint64_t count, const Limits& limits) {
 
         auto value = reader.u32le();
         if (!value) {
-            return std::unexpected(value.error());
+            return tl::unexpected<Error>(value.error());
         }
         digests.emplace_back(*value);
     }
@@ -123,7 +123,7 @@ Result<void> skipProperties(ByteReader& reader, std::uint64_t offset) {
     while (true) {
         auto kind = readId(reader);
         if (!kind) {
-            return std::unexpected(kind.error());
+            return tl::unexpected<Error>(kind.error());
         }
         if (*kind == nidEnd) {
             return {};
@@ -131,7 +131,7 @@ Result<void> skipProperties(ByteReader& reader, std::uint64_t offset) {
 
         auto size = readNumber(reader);
         if (!size) {
-            return std::unexpected(size.error());
+            return tl::unexpected<Error>(size.error());
         }
         if (*size > reader.remaining()) {
             return fail(ErrorKind::Malformed, "7z archive property overruns the header", offset);
@@ -139,7 +139,7 @@ Result<void> skipProperties(ByteReader& reader, std::uint64_t offset) {
 
         auto skipped = reader.skip(checkedCast<std::size_t>(*size).value_or(reader.remaining()));
         if (!skipped) {
-            return std::unexpected(skipped.error());
+            return tl::unexpected<Error>(skipped.error());
         }
     }
 }

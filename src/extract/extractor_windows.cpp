@@ -18,15 +18,15 @@ constexpr std::int64_t unixEpochTicks = 116'444'736'000'000'000;
 
 }
 
-std::unexpected<Error> systemFailure(ErrorKind kind, std::string_view what) {
+tl::unexpected<Error> systemFailure(ErrorKind kind, std::string_view what) {
     auto failure = fail(kind, what);
-    failure.error().systemCode = static_cast<int>(GetLastError());
+    failure.value().systemCode = static_cast<int>(GetLastError());
     return failure;
 }
 
-std::unexpected<Error> statusFailure(ErrorKind kind, std::string_view what, NTSTATUS status) {
+tl::unexpected<Error> statusFailure(ErrorKind kind, std::string_view what, NTSTATUS status) {
     auto failure = fail(kind, what);
-    failure.error().systemCode = static_cast<int>(RtlNtStatusToDosError(status));
+    failure.value().systemCode = static_cast<int>(RtlNtStatusToDosError(status));
     return failure;
 }
 
@@ -139,7 +139,7 @@ Result<void> applyTimes(const OsHandle& handle, const EntryMetadata& metadata, b
 
     auto modified = toFileTime(*metadata.mtimeNanoseconds);
     if (!modified) {
-        return std::unexpected(modified.error());
+        return tl::unexpected<Error>(modified.error());
     }
     if (!SetFileTime(handle.get(), nullptr, nullptr, &*modified)) {
         return systemFailure(ErrorKind::Io, "cannot set modification time");
@@ -182,7 +182,7 @@ Result<OsHandle> openDirectoryAt(HANDLE parent, std::wstring_view name, bool cre
 
     auto attributes = attributesOf(opened.handle);
     if (!attributes) {
-        return std::unexpected(attributes.error());
+        return tl::unexpected<Error>(attributes.error());
     }
     if ((*attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
         return fail(ErrorKind::UnsafePath, "reparse point in extraction path");
@@ -217,7 +217,7 @@ Extractor::open(const std::filesystem::path& destinationRoot, const ExtractPolic
     OsHandle root(handle);
     auto attributes = attributesOf(root);
     if (!attributes) {
-        return std::unexpected(attributes.error());
+        return tl::unexpected<Error>(attributes.error());
     }
     if ((*attributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
         return fail(ErrorKind::Io, "extraction root is not a directory");
@@ -246,12 +246,12 @@ Result<OsHandle> Extractor::openParent(std::string_view path, bool create) {
          slash = path.find('/', start)) {
         auto name = widen(path.substr(start, slash - start), wide);
         if (!name) {
-            return std::unexpected(name.error());
+            return tl::unexpected<Error>(name.error());
         }
 
         auto next = openDirectoryAt(current.get(), *name, create);
         if (!next) {
-            return std::unexpected(next.error());
+            return tl::unexpected<Error>(next.error());
         }
 
         current = std::move(*next);
@@ -267,7 +267,7 @@ Result<OsHandle> Extractor::openTemporary(const OsHandle& directory, TempName& n
 
         auto wideName = widen(name.data(), wide);
         if (!wideName) {
-            return std::unexpected(wideName.error());
+            return tl::unexpected<Error>(wideName.error());
         }
 
         auto opened = openRelative(
@@ -316,7 +316,7 @@ Result<EntryResult> Extractor::place(
     WideName wide{};
     auto name = widen(leaf, wide);
     if (!name) {
-        return std::unexpected(name.error());
+        return tl::unexpected<Error>(name.error());
     }
 
     const bool replace = policy_.overwrite == OverwritePolicy::Replace;
@@ -326,7 +326,7 @@ Result<EntryResult> Extractor::place(
         if (isSuccess(existing.status)) {
             auto attributes = attributesOf(existing.handle);
             if (!attributes) {
-                return std::unexpected(attributes.error());
+                return tl::unexpected<Error>(attributes.error());
             }
             if ((*attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
                 return fail(ErrorKind::AlreadyExists, "existing target is not a regular file");
@@ -375,18 +375,18 @@ Result<EntryResult>
 Extractor::createDirectory(const ArchivePath& path, const EntryMetadata& metadata) {
     auto entry = beginEntry(path);
     if (!entry) {
-        return std::unexpected(entry.error());
+        return tl::unexpected<Error>(entry.error());
     }
 
     auto parent = openParent(path.path, true);
     if (!parent) {
-        return std::unexpected(parent.error());
+        return tl::unexpected<Error>(parent.error());
     }
 
     WideName wide{};
     auto name = widen(entry->leaf, wide);
     if (!name) {
-        return std::unexpected(name.error());
+        return tl::unexpected<Error>(name.error());
     }
 
     auto opened = openRelative(
@@ -412,7 +412,7 @@ Extractor::createDirectory(const ArchivePath& path, const EntryMetadata& metadat
 
     auto attributes = attributesOf(opened.handle);
     if (!attributes) {
-        return std::unexpected(attributes.error());
+        return tl::unexpected<Error>(attributes.error());
     }
     if ((*attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
         return fail(ErrorKind::UnsafePath, "reparse point at extraction target");
@@ -421,12 +421,12 @@ Extractor::createDirectory(const ArchivePath& path, const EntryMetadata& metadat
     if (policy_.restoreMtime && metadata.mtimeNanoseconds) {
         auto checked = toFileTime(*metadata.mtimeNanoseconds);
         if (!checked) {
-            return std::unexpected(checked.error());
+            return tl::unexpected<Error>(checked.error());
         }
 
         auto id = fileIdOf(opened.handle);
         if (!id) {
-            return std::unexpected(id.error());
+            return tl::unexpected<Error>(id.error());
         }
         deferDirectoryTime(path, *id, *metadata.mtimeNanoseconds);
     }
@@ -436,18 +436,18 @@ Extractor::createDirectory(const ArchivePath& path, const EntryMetadata& metadat
 Result<PendingFile> Extractor::beginFile(const ArchivePath& path, const EntryMetadata& metadata) {
     auto entry = beginEntry(path);
     if (!entry) {
-        return std::unexpected(entry.error());
+        return tl::unexpected<Error>(entry.error());
     }
 
     auto parent = openParent(path.path, true);
     if (!parent) {
-        return std::unexpected(parent.error());
+        return tl::unexpected<Error>(parent.error());
     }
 
     WideName wide{};
     auto name = widen(entry->leaf, wide);
     if (!name) {
-        return std::unexpected(name.error());
+        return tl::unexpected<Error>(name.error());
     }
 
     PendingFile pending(*this);
@@ -469,7 +469,7 @@ Result<PendingFile> Extractor::beginFile(const ArchivePath& path, const EntryMet
 
         auto attributes = attributesOf(existing.handle);
         if (!attributes) {
-            return std::unexpected(attributes.error());
+            return tl::unexpected<Error>(attributes.error());
         }
         if ((*attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != 0) {
             return fail(ErrorKind::AlreadyExists, "existing target is not a regular file");
@@ -480,7 +480,7 @@ Result<PendingFile> Extractor::beginFile(const ArchivePath& path, const EntryMet
 
     auto file = openTemporary(*parent, pending.tempName_);
     if (!file) {
-        return std::unexpected(file.error());
+        return tl::unexpected<Error>(file.error());
     }
 
     pending.directory_ = std::move(*parent);
@@ -491,19 +491,19 @@ Result<PendingFile> Extractor::beginFile(const ArchivePath& path, const EntryMet
 Result<EntryResult> Extractor::finishFile(PendingFile& file) {
     auto times = applyTimes(file.file_, file.metadata_, policy_.restoreMtime);
     if (!times) {
-        return std::unexpected(times.error());
+        return tl::unexpected<Error>(times.error());
     }
 
     if (policy_.durable) {
         auto synced = syncHandle(file.file_);
         if (!synced) {
-            return std::unexpected(synced.error());
+            return tl::unexpected<Error>(synced.error());
         }
     }
 
     auto id = fileIdOf(file.file_);
     if (!id) {
-        return std::unexpected(id.error());
+        return tl::unexpected<Error>(id.error());
     }
 
     auto placed = place(file.directory_, file.file_, file.tempName_.data(), file.leaf());
@@ -519,14 +519,14 @@ Result<void> Extractor::applyDeferredTime(std::string_view path, const DeferredT
         if (isGone(parent.error())) {
             return {};
         }
-        return std::unexpected(parent.error());
+        return tl::unexpected<Error>(parent.error());
     }
 
     const std::size_t slash = path.rfind('/');
     WideName wide{};
     auto name = widen(slash == std::string_view::npos ? path : path.substr(slash + 1), wide);
     if (!name) {
-        return std::unexpected(name.error());
+        return tl::unexpected<Error>(name.error());
     }
 
     auto opened = openRelative(
@@ -546,11 +546,11 @@ Result<void> Extractor::applyDeferredTime(std::string_view path, const DeferredT
 
     auto attributes = attributesOf(opened.handle);
     if (!attributes) {
-        return std::unexpected(attributes.error());
+        return tl::unexpected<Error>(attributes.error());
     }
     auto id = fileIdOf(opened.handle);
     if (!id) {
-        return std::unexpected(id.error());
+        return tl::unexpected<Error>(id.error());
     }
     if ((*attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0 || *id != time.id) {
         return {};

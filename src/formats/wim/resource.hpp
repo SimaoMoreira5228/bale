@@ -86,14 +86,14 @@ class Resource {
             auto chunk = scratch.first(want);
             auto count = file_->readAt(at, chunk);
             if (!count) {
-                return std::unexpected(count.error());
+                return tl::unexpected<Error>(count.error());
             }
             if (*count == 0) {
                 return fail(ErrorKind::Truncated, "WIM ends inside a resource", at);
             }
             auto sunk = sink(std::span<const std::byte>(chunk.data(), *count));
             if (!sunk) {
-                return std::unexpected(sunk.error());
+                return tl::unexpected<Error>(sunk.error());
             }
             at += *count;
             size -= *count;
@@ -117,12 +117,12 @@ class Resource {
             }
             auto stored = chunkStoredSize(chunk);
             if (!stored) {
-                return std::unexpected(stored.error());
+                return tl::unexpected<Error>(stored.error());
             }
             if (*stored != usize) {
                 auto decoded = streamCompressedChunk(chunk, begin, end, sink, *stored, usize);
                 if (!decoded) {
-                    return std::unexpected(decoded.error());
+                    return tl::unexpected<Error>(decoded.error());
                 }
                 if (chunk == last) {
                     break;
@@ -131,14 +131,14 @@ class Resource {
             }
             auto start = chunkFileOffset(chunk);
             if (!start) {
-                return std::unexpected(start.error());
+                return tl::unexpected<Error>(start.error());
             }
             std::uint64_t chunkBegin = chunk * chunkSize_;
             std::uint64_t from = begin > chunkBegin ? begin - chunkBegin : 0;
             std::uint64_t until = (end - chunkBegin) < usize ? end - chunkBegin : usize;
             auto read = streamRaw(*start + from, until - from, scratch, sink);
             if (!read) {
-                return std::unexpected(read.error());
+                return tl::unexpected<Error>(read.error());
             }
             if (chunk == last) {
                 break;
@@ -161,11 +161,11 @@ class Resource {
         }
         auto start = chunkFileOffset(chunk);
         if (!start) {
-            return std::unexpected(start.error());
+            return tl::unexpected<Error>(start.error());
         }
         auto plain = decodeLzxChunk(*file_, *start, stored, usize, chunkSize_, *start);
         if (!plain) {
-            return std::unexpected(plain.error());
+            return tl::unexpected<Error>(plain.error());
         }
         auto base = checkedMul(chunk, chunkSize_);
         if (!base) {

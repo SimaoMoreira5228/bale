@@ -235,7 +235,7 @@ Result<Writer> Writer::create(File file, const WriterOptions& options) {
     if (options.level > 0) {
         auto created = DeflateEncoder::create(options.level);
         if (!created) {
-            return std::unexpected(created.error());
+            return tl::unexpected<Error>(created.error());
         }
         encoder.emplace(std::move(*created));
     }
@@ -244,12 +244,12 @@ Result<Writer> Writer::create(File file, const WriterOptions& options) {
 
 Result<void> Writer::poison(const Error& error) {
     failure_ = error;
-    return std::unexpected(error);
+    return tl::unexpected<Error>(error);
 }
 
 Result<void> Writer::check() const {
     if (failure_) {
-        return std::unexpected(*failure_);
+        return tl::unexpected<Error>(*failure_);
     }
     if (finished_) {
         return fail(ErrorKind::Malformed, "ZIP archive already finished");
@@ -272,7 +272,7 @@ Result<void> Writer::flush() {
 }
 
 Result<void> Writer::put(std::span<const std::byte> data) {
-    auto end = checkedAdd<std::uint64_t>(position_, data.size());
+    auto end = checkedAdd(position_, data.size());
     if (!end) {
         return poison(
             Error{.kind = ErrorKind::LimitExceeded, .what = "ZIP archive size overflows"}
@@ -595,11 +595,11 @@ Result<void> Writer::write(std::span<const std::byte> data) {
 Result<std::uint64_t> Writer::finish(bool durable) {
     auto usable = check();
     if (!usable) {
-        return std::unexpected(usable.error());
+        return tl::unexpected<Error>(usable.error());
     }
     auto closed = closeEntry();
     if (!closed) {
-        return std::unexpected(closed.error());
+        return tl::unexpected<Error>(closed.error());
     }
 
     auto directoryOffset = position_;
@@ -607,16 +607,16 @@ Result<std::uint64_t> Writer::finish(bool durable) {
     appendEndRecords(entries_, directoryOffset, directorySize, central_);
     auto written = put(central_);
     if (!written) {
-        return std::unexpected(written.error());
+        return tl::unexpected<Error>(written.error());
     }
     auto flushed = flush();
     if (!flushed) {
-        return std::unexpected(flushed.error());
+        return tl::unexpected<Error>(flushed.error());
     }
     if (durable) {
         auto synced = file_.sync();
         if (!synced) {
-            return std::unexpected(poison(synced.error()).error());
+            return tl::unexpected<Error>(poison(synced.error()).error());
         }
     }
 

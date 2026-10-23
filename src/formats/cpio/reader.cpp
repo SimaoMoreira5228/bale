@@ -38,7 +38,7 @@ Result<std::uint64_t> parseNamesize(std::span<const std::byte> header, std::uint
 Result<Reader> Reader::open(File file, const Limits& limits) {
     auto size = file.size();
     if (!size) {
-        return std::unexpected(size.error());
+        return tl::unexpected<Error>(size.error());
     }
     if (*size < newcMagic.size()) {
         return fail(ErrorKind::Malformed, "not a cpio archive");
@@ -47,7 +47,7 @@ Result<Reader> Reader::open(File file, const Limits& limits) {
     std::array<std::byte, newcMagic.size()> head{};
     auto read = file.readExactAt(0, head);
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
     if (!looksLikeCpio(head)) {
         return fail(ErrorKind::Malformed, "not a cpio archive");
@@ -56,7 +56,7 @@ Result<Reader> Reader::open(File file, const Limits& limits) {
     Reader reader(std::move(file), limits);
     auto indexed = reader.index(*size);
     if (!indexed) {
-        return std::unexpected(indexed.error());
+        return tl::unexpected<Error>(indexed.error());
     }
     return reader;
 }
@@ -71,7 +71,7 @@ Result<void> Reader::index(std::uint64_t fileSize) {
 
         auto done = indexOne(offset, fileSize);
         if (!done) {
-            return std::unexpected(done.error());
+            return tl::unexpected<Error>(done.error());
         }
         if (*done) {
             trailer = true;
@@ -91,7 +91,7 @@ Result<void> Reader::index(std::uint64_t fileSize) {
 
         auto read = file_.readExactAt(offset, chunk);
         if (!read) {
-            return std::unexpected(read.error());
+            return tl::unexpected<Error>(read.error());
         }
         for (std::byte byte : chunk) {
             if (byte != std::byte{0}) {
@@ -119,7 +119,7 @@ Result<bool> Reader::indexOne(std::uint64_t& offset, std::uint64_t fileSize) {
     std::array<std::byte, headerSize> header{};
     auto read = file_.readExactAt(offset, header);
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
 
     std::string_view magicText(reinterpret_cast<const char*>(header.data()), magicLength);
@@ -129,7 +129,7 @@ Result<bool> Reader::indexOne(std::uint64_t& offset, std::uint64_t fileSize) {
 
     auto namesize = parseNamesize(header, offset);
     if (!namesize) {
-        return std::unexpected(namesize.error());
+        return tl::unexpected<Error>(namesize.error());
     }
     if (*namesize == 0 || *namesize > limits_.maxNameBytes) {
         return fail(
@@ -156,7 +156,7 @@ Result<bool> Reader::indexOne(std::uint64_t& offset, std::uint64_t fileSize) {
     auto nameRead = file_.readExactAt(*end, std::as_writable_bytes(std::span(stored)));
     if (!nameRead) {
         names_.pop_back();
-        return std::unexpected(nameRead.error());
+        return tl::unexpected<Error>(nameRead.error());
     }
     if (stored.back() != '\0') {
         names_.pop_back();
@@ -178,7 +178,7 @@ Result<bool> Reader::indexOne(std::uint64_t& offset, std::uint64_t fileSize) {
     auto parsed = parseHeader(header, stored, offset, *dataOffset);
     if (!parsed) {
         names_.pop_back();
-        return std::unexpected(parsed.error());
+        return tl::unexpected<Error>(parsed.error());
     }
 
     if (parsed->trailer) {

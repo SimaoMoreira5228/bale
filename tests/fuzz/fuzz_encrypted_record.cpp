@@ -2,6 +2,7 @@
 #include "crypto/crypto.hpp"
 #include "fuzz/memory_file.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>

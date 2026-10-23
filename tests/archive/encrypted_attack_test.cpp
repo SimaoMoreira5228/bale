@@ -13,6 +13,7 @@
 #include <doctest/doctest.h>
 #include <sodium/crypto_pwhash_argon2id.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <filesystem>

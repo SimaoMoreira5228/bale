@@ -14,7 +14,8 @@ constexpr std::uint32_t skippableMagic = 0x184D2A50;
 }
 
 bool looksLikeZstd(std::span<const std::byte> head) {
-    return std::ranges::starts_with(head, frameMagic);
+    return head.size() >= frameMagic.size() &&
+        std::ranges::equal(frameMagic, head.first(frameMagic.size()));
 }
 
 Result<Stream> Stream::open(File file, const Limits& limits) {
@@ -24,17 +25,17 @@ Result<Stream> Stream::open(File file, const Limits& limits) {
 
     auto decoder = ZstdDecoder::create({.maxWindowLog = limits.maxWindowLog});
     if (!decoder) {
-        return std::unexpected(decoder.error());
+        return tl::unexpected<Error>(decoder.error());
     }
 
     auto input = FileInput::open(std::move(file), std::max(limits.chunkBytes, frameMagic.size()));
     if (!input) {
-        return std::unexpected(input.error());
+        return tl::unexpected<Error>(input.error());
     }
 
     auto filled = input->fill(frameMagic.size());
     if (!filled) {
-        return std::unexpected(filled.error());
+        return tl::unexpected<Error>(filled.error());
     }
 
     auto head = input->pending();
@@ -50,7 +51,7 @@ Result<Stream> Stream::open(File file, const Limits& limits) {
 
 Result<std::size_t> Stream::read(std::span<std::byte> out) {
     if (failure_) {
-        return std::unexpected(*failure_);
+        return tl::unexpected<Error>(*failure_);
     }
     if (out.empty()) {
         return fail(ErrorKind::LimitExceeded, "zstd read buffer is empty");
@@ -68,7 +69,7 @@ Result<std::size_t> Stream::decode(std::span<std::byte> out) {
         if (input_.pending().empty()) {
             auto filled = input_.fill(1);
             if (!filled) {
-                return std::unexpected(filled.error());
+                return tl::unexpected<Error>(filled.error());
             }
         }
 
@@ -86,7 +87,7 @@ Result<std::size_t> Stream::decode(std::span<std::byte> out) {
         if (!step) {
             auto error = step.error();
             error.offset = offset;
-            return std::unexpected(error);
+            return tl::unexpected<Error>(error);
         }
 
         input_.consume(step->consumed);

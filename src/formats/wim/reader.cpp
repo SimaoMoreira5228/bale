@@ -44,7 +44,7 @@ readReparseTarget(const Resource& resource, const Found& found, const Node& node
     std::vector<std::byte> scratch(65536);
     auto streamed = resource.streamRange(found.base, found.size, scratch, sink);
     if (!streamed) {
-        return std::unexpected(streamed.error());
+        return tl::unexpected<Error>(streamed.error());
     }
     return parseReparseTarget(data, node.reparseTag);
 }
@@ -107,11 +107,11 @@ Reader& Reader::operator=(Reader&& other) noexcept {
 Result<Reader> Reader::open(File file, const Limits& limits, std::uint32_t imageIndex) {
     auto fileSize = file.size();
     if (!fileSize) {
-        return std::unexpected(fileSize.error());
+        return tl::unexpected<Error>(fileSize.error());
     }
     auto header = parseHeader(file, *fileSize);
     if (!header) {
-        return std::unexpected(header.error());
+        return tl::unexpected<Error>(header.error());
     }
     if (header->imageCount > limits.maxImages) {
         return fail(ErrorKind::LimitExceeded, "WIM image count exceeds limit");
@@ -119,7 +119,7 @@ Result<Reader> Reader::open(File file, const Limits& limits, std::uint32_t image
 
     auto images = parseImageList(file, *header, limits);
     if (!images) {
-        return std::unexpected(images.error());
+        return tl::unexpected<Error>(images.error());
     }
 
     // NOTE: an explicit --image index wins; otherwise the bootable image wins
@@ -138,7 +138,7 @@ Result<Reader> Reader::open(File file, const Limits& limits, std::uint32_t image
 
     auto table = parseLookup(file, *header, *fileSize, limits);
     if (!table) {
-        return std::unexpected(table.error());
+        return tl::unexpected<Error>(table.error());
     }
     if (table->metadata.size() < header->imageCount) {
         return fail(ErrorKind::Malformed, "WIM is missing image metadata");
@@ -161,7 +161,7 @@ Result<Reader> Reader::open(File file, const Limits& limits, std::uint32_t image
         auto resource =
             Resource::open(reader.file_, blob.ref, context, limits, limits.maxTotalBytes);
         if (!resource) {
-            return std::unexpected(resource.error());
+            return tl::unexpected<Error>(resource.error());
         }
         BlobKey key;
         key.bytes = blob.hash;
@@ -178,7 +178,7 @@ Result<Reader> Reader::open(File file, const Limits& limits, std::uint32_t image
             auto resource =
                 Resource::open(reader.file_, ref, context, limits, limits.maxTotalBytes);
             if (!resource) {
-                return std::unexpected(resource.error());
+                return tl::unexpected<Error>(resource.error());
             }
             opened.push_back(*resource);
         }
@@ -267,11 +267,11 @@ Result<Reader> Reader::open(File file, const Limits& limits, std::uint32_t image
         limits.maxTotalBytes
     );
     if (!meta) {
-        return std::unexpected(meta.error());
+        return tl::unexpected<Error>(meta.error());
     }
     auto nodes = walkMetadata(*meta, limits);
     if (!nodes) {
-        return std::unexpected(nodes.error());
+        return tl::unexpected<Error>(nodes.error());
     }
 
     std::unordered_set<std::string_view> seen;
@@ -292,7 +292,7 @@ Result<Reader> Reader::open(File file, const Limits& limits, std::uint32_t image
             node.hasData) {
             auto found = findBlob(node.hash);
             if (!found) {
-                return std::unexpected(found.error());
+                return tl::unexpected<Error>(found.error());
             }
             if (found->size > limits.maxEntryBytes) {
                 return fail(ErrorKind::LimitExceeded, "WIM entry exceeds size limit");
@@ -318,15 +318,15 @@ Result<Reader> Reader::open(File file, const Limits& limits, std::uint32_t image
         } else if (node.kind == EntryKind::Symlink && node.hasReparse) {
             auto found = findBlob(node.reparseHash);
             if (!found) {
-                return std::unexpected(found.error());
+                return tl::unexpected<Error>(found.error());
             }
             auto resource = findResource(*found);
             if (!resource) {
-                return std::unexpected(resource.error());
+                return tl::unexpected<Error>(resource.error());
             }
             auto target = readReparseTarget(**resource, *found, node);
             if (!target) {
-                return std::unexpected(target.error());
+                return tl::unexpected<Error>(target.error());
             }
             reader.targets_.push_back(std::move(*target));
         } else {

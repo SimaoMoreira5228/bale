@@ -149,75 +149,77 @@ TEST_CASE("Inflater reports corrupt streams and stalls on truncated ones") {
     }
 }
 
-TEST_CASE("ZstdDecoder decodes a golden frame and verifies its content checksum") {
-    auto decoder = ZstdDecoder::create();
-    REQUIRE(decoder);
-    auto golden = bytesOf(goldenZstd);
+TEST_CASE("ZstdDecoder verifies checksums and enforces the caller window limit") {
+    SUBCASE("golden frame, checksum and magic") {
+        auto decoder = ZstdDecoder::create();
+        REQUIRE(decoder);
+        auto golden = bytesOf(goldenZstd);
 
-    auto drained = drain(*decoder, golden, 3, 5);
-    CHECK_FALSE(drained.failed);
-    CHECK(drained.finished);
-    CHECK(drained.output == goldenZstdText);
+        auto drained = drain(*decoder, golden, 3, 5);
+        CHECK_FALSE(drained.failed);
+        CHECK(drained.finished);
+        CHECK(drained.output == goldenZstdText);
 
-    auto corrupted = golden;
-    corrupted.back() ^= std::byte{0x01};
-    REQUIRE(decoder->reset());
-    auto badChecksum = drain(*decoder, corrupted, corrupted.size(), 4096);
-    REQUIRE(badChecksum.failed);
-    CHECK(badChecksum.error.kind == ErrorKind::Integrity);
-    CHECK(badChecksum.error.what == "zstd content checksum mismatch");
+        auto corrupted = golden;
+        corrupted.back() ^= std::byte{0x01};
+        REQUIRE(decoder->reset());
+        auto badChecksum = drain(*decoder, corrupted, corrupted.size(), 4096);
+        REQUIRE(badChecksum.failed);
+        CHECK(badChecksum.error.kind == ErrorKind::Integrity);
+        CHECK(badChecksum.error.what == "zstd content checksum mismatch");
 
-    REQUIRE(decoder->reset());
-    auto truncated = drain(*decoder, std::span(golden).first(golden.size() - 1), 7, 4096);
-    CHECK_FALSE(truncated.failed);
-    CHECK_FALSE(truncated.finished);
+        REQUIRE(decoder->reset());
+        auto truncated = drain(*decoder, std::span(golden).first(golden.size() - 1), 7, 4096);
+        CHECK_FALSE(truncated.failed);
+        CHECK_FALSE(truncated.finished);
 
-    auto notZstd = golden;
-    notZstd[0] = std::byte{0x29};
-    REQUIRE(decoder->reset());
-    auto badMagic = drain(*decoder, notZstd, notZstd.size(), 4096);
-    REQUIRE(badMagic.failed);
-    CHECK(badMagic.error.kind == ErrorKind::Malformed);
-    CHECK(badMagic.error.what == "not a zstd frame");
+        auto notZstd = golden;
+        notZstd[0] = std::byte{0x29};
+        REQUIRE(decoder->reset());
+        auto badMagic = drain(*decoder, notZstd, notZstd.size(), 4096);
+        REQUIRE(badMagic.failed);
+        CHECK(badMagic.error.kind == ErrorKind::Malformed);
+        CHECK(badMagic.error.what == "not a zstd frame");
 
-    auto limited = ZstdDecoder::create({.maxWindowLog = 22});
-    REQUIRE(limited);
-    auto tooWide = drain(*limited, golden, golden.size(), 4096);
-    REQUIRE(tooWide.failed);
-    CHECK(tooWide.error.kind == ErrorKind::LimitExceeded);
-}
-
-TEST_CASE("ZstdDecoder rejects frames whose window exceeds the caller limit") {
-    std::string text(200'000, 'z');
-    for (std::size_t index = 0; index < text.size(); index += 31) {
-        text[index] = static_cast<char>('0' + index % 10);
+        auto limited = ZstdDecoder::create({.maxWindowLog = 22});
+        REQUIRE(limited);
+        auto tooWide = drain(*limited, golden, golden.size(), 4096);
+        REQUIRE(tooWide.failed);
+        CHECK(tooWide.error.kind == ErrorKind::LimitExceeded);
     }
-    auto frame = test::zstdCompress(asBytes(text), 24);
-    REQUIRE_FALSE(frame.empty());
 
-    auto narrow = ZstdDecoder::create({.maxWindowLog = 23});
-    REQUIRE(narrow);
-    auto rejected = drain(*narrow, frame, frame.size(), 4096);
-    REQUIRE(rejected.failed);
-    CHECK(rejected.error.kind == ErrorKind::LimitExceeded);
-    CHECK(rejected.error.what == "zstd frame window exceeds limit");
-    CHECK(rejected.output.empty());
+    SUBCASE("wide window, multi-frame and out-of-range limit") {
+        std::string text(200'000, 'z');
+        for (std::size_t index = 0; index < text.size(); index += 31) {
+            text[index] = static_cast<char>('0' + index % 10);
+        }
+        auto frame = test::zstdCompress(asBytes(text), 24);
+        REQUIRE_FALSE(frame.empty());
 
-    auto wide = ZstdDecoder::create({.maxWindowLog = 24});
-    REQUIRE(wide);
-    auto twoFrames = frame;
-    twoFrames.insert(twoFrames.end(), frame.begin(), frame.end());
-    auto first = drain(*wide, twoFrames, 1000, 7000);
-    CHECK(first.finished);
-    CHECK(first.output == text);
-    CHECK(first.consumed == frame.size());
-    auto second = drain(*wide, std::span(twoFrames).subspan(first.consumed), 1000, 7000);
-    CHECK(second.finished);
-    CHECK(second.output == text);
+        auto narrow = ZstdDecoder::create({.maxWindowLog = 23});
+        REQUIRE(narrow);
+        auto rejected = drain(*narrow, frame, frame.size(), 4096);
+        REQUIRE(rejected.failed);
+        CHECK(rejected.error.kind == ErrorKind::LimitExceeded);
+        CHECK(rejected.error.what == "zstd frame window exceeds limit");
+        CHECK(rejected.output.empty());
 
-    auto outOfRange = ZstdDecoder::create({.maxWindowLog = 5});
-    REQUIRE_FALSE(outOfRange);
-    CHECK(outOfRange.error().kind == ErrorKind::Unsupported);
+        auto wide = ZstdDecoder::create({.maxWindowLog = 24});
+        REQUIRE(wide);
+        auto twoFrames = frame;
+        twoFrames.insert(twoFrames.end(), frame.begin(), frame.end());
+        auto first = drain(*wide, twoFrames, 1000, 7000);
+        CHECK(first.finished);
+        CHECK(first.output == text);
+        CHECK(first.consumed == frame.size());
+        auto second = drain(*wide, std::span(twoFrames).subspan(first.consumed), 1000, 7000);
+        CHECK(second.finished);
+        CHECK(second.output == text);
+
+        auto outOfRange = ZstdDecoder::create({.maxWindowLog = 5});
+        REQUIRE_FALSE(outOfRange);
+        CHECK(outOfRange.error().kind == ErrorKind::Unsupported);
+    }
 }
 
 TEST_CASE("DeflateEncoder output inflates back and short buffers or bad levels are refused") {

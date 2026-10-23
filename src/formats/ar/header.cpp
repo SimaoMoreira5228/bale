@@ -38,12 +38,12 @@ Result<std::uint64_t> parseDecimalField(
             return fail(ErrorKind::Malformed, "invalid ar decimal field", at + offset);
         }
 
-        auto scaled = checkedMul<std::uint64_t>(value, 10);
+        auto scaled = checkedMul(value, 10u);
         if (!scaled) {
             return fail(ErrorKind::Malformed, "ar numeric field overflows", at + offset);
         }
 
-        auto next = checkedAdd<std::uint64_t>(*scaled, static_cast<std::uint64_t>(digit - '0'));
+        auto next = checkedAdd(*scaled, static_cast<std::uint64_t>(digit - '0'));
         if (!next) {
             return fail(ErrorKind::Malformed, "ar numeric field overflows", at + offset);
         }
@@ -101,27 +101,27 @@ Result<Member> parseMember(std::span<const std::byte, headerSize> header, std::u
 
     auto date = parseDecimalField(body, dateOffset, dateLength, offset);
     if (!date) {
-        return std::unexpected(date.error());
+        return tl::unexpected<Error>(date.error());
     }
 
     auto uid = parseDecimalField(body, uidOffset, uidLength, offset);
     if (!uid) {
-        return std::unexpected(uid.error());
+        return tl::unexpected<Error>(uid.error());
     }
 
     auto gid = parseDecimalField(body, gidOffset, gidLength, offset);
     if (!gid) {
-        return std::unexpected(gid.error());
+        return tl::unexpected<Error>(gid.error());
     }
 
     auto mode = parseOctalField(body, modeOffset, modeLength, offset);
     if (!mode) {
-        return std::unexpected(mode.error());
+        return tl::unexpected<Error>(mode.error());
     }
 
     auto size = parseDecimalField(body, sizeOffset, sizeLength, offset);
     if (!size) {
-        return std::unexpected(size.error());
+        return tl::unexpected<Error>(size.error());
     }
 
     auto seconds = checkedCast<std::int64_t>(*date);

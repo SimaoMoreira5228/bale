@@ -46,7 +46,7 @@ class CompressedStream {
         while (true) {
             auto count = read(scratch);
             if (!count) {
-                return std::unexpected(count.error());
+                return tl::unexpected<Error>(count.error());
             }
             if (*count == 0) {
                 return {};

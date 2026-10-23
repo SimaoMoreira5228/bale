@@ -79,7 +79,7 @@ parseLookup(const File& file, const Header& header, std::uint64_t fileSize, cons
     std::vector<std::byte> table(tableBytes);
     auto read = file.readExactAt(header.lookup.offset, std::span(table));
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
 
     std::vector<RawEntry> raw;

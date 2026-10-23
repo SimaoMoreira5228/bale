@@ -23,7 +23,7 @@ constexpr std::uint64_t bootSectorBytes = 512;
 imageSize(std::uint8_t media, std::uint16_t sectors, const Limits& limits, std::uint64_t at) {
     switch (media) {
     case 0: {
-        auto size = checkedMul<std::uint64_t>(sectors, bootSectorBytes);
+        auto size = checkedMul(sectors, bootSectorBytes);
         if (!size) {
             return fail(ErrorKind::Malformed, "El Torito image size overflows", at);
         }
@@ -66,7 +66,7 @@ Result<std::vector<BootImage>> parseBootCatalog(
     }
     auto catalogStart = sectorOffset(catalogExtent, Error::noOffset);
     if (!catalogStart) {
-        return std::unexpected(catalogStart.error());
+        return tl::unexpected<Error>(catalogStart.error());
     }
     auto catalogEnd = checkedAdd(*catalogStart, sectorSize);
     if (!catalogEnd || *catalogEnd > fileSize) {
@@ -76,7 +76,7 @@ Result<std::vector<BootImage>> parseBootCatalog(
     std::array<std::byte, sectorSize> catalog{};
     auto read = file.readExactAt(*catalogStart, catalog);
     if (!read) {
-        return std::unexpected(read.error());
+        return tl::unexpected<Error>(read.error());
     }
 
     std::uint32_t checksum = 0;
@@ -108,7 +108,7 @@ Result<std::vector<BootImage>> parseBootCatalog(
         std::uint16_t sectors = readLe16(entry.subspan(6, 2));
         auto size = imageSize(media, sectors, limits, at);
         if (!size) {
-            return std::unexpected(size.error());
+            return tl::unexpected<Error>(size.error());
         }
         std::uint32_t extent = readLe32(entry.subspan(8, 4));
         if (extent < systemSectors) {
@@ -116,7 +116,7 @@ Result<std::vector<BootImage>> parseBootCatalog(
         }
         auto imageStart = sectorOffset(extent, at);
         if (!imageStart) {
-            return std::unexpected(imageStart.error());
+            return tl::unexpected<Error>(imageStart.error());
         }
         auto imageEnd = checkedAdd(*imageStart, *size);
         if (!imageEnd || *imageEnd > fileSize) {

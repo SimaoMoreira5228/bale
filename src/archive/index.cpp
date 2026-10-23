@@ -29,7 +29,7 @@ Result<IndexEntry> decodeEntry(std::span<const std::byte> data, std::uint64_t of
     while (true) {
         auto more = reader.next(field);
         if (!more) {
-            return std::unexpected(more.error());
+            return tl::unexpected<Error>(more.error());
         }
         if (!*more) {
             break;
@@ -37,7 +37,7 @@ Result<IndexEntry> decodeEntry(std::span<const std::byte> data, std::uint64_t of
 
         auto accepted = keyFields.accept(field);
         if (!accepted) {
-            return std::unexpected(accepted.error());
+            return tl::unexpected<Error>(accepted.error());
         }
         if (*accepted) {
             continue;
@@ -46,18 +46,18 @@ Result<IndexEntry> decodeEntry(std::span<const std::byte> data, std::uint64_t of
         if (field.number > codecField) {
             auto skipped = skipUnknownField(field);
             if (!skipped) {
-                return std::unexpected(skipped.error());
+                return tl::unexpected<Error>(skipped.error());
             }
             continue;
         }
 
         auto critical = requireCriticality(field, Criticality::Critical);
         if (!critical) {
-            return std::unexpected(critical.error());
+            return tl::unexpected<Error>(critical.error());
         }
         auto value = decodeTlvUnsigned(field);
         if (!value) {
-            return std::unexpected(value.error());
+            return tl::unexpected<Error>(value.error());
         }
 
         if (field.number == offsetField) {
@@ -77,7 +77,7 @@ Result<IndexEntry> decodeEntry(std::span<const std::byte> data, std::uint64_t of
 
     auto key = keyFields.finish(offset);
     if (!key) {
-        return std::unexpected(key.error());
+        return tl::unexpected<Error>(key.error());
     }
     if (!hasOffset || !hasLength || !hasCodec) {
         return fail(ErrorKind::Malformed, "index entry is missing a field", offset);
@@ -100,7 +100,7 @@ Result<void>
 decodeEntries(const TlvField& field, std::uint64_t maxEntries, std::vector<IndexEntry>& out) {
     auto list = TlvListReader::open(field, maxEntries);
     if (!list) {
-        return std::unexpected(list.error());
+        return tl::unexpected<Error>(list.error());
     }
     out.reserve(static_cast<std::size_t>(list->count()));
 
@@ -109,7 +109,7 @@ decodeEntries(const TlvField& field, std::uint64_t maxEntries, std::vector<Index
     while (true) {
         auto more = list->next(element, elementOffset);
         if (!more) {
-            return std::unexpected(more.error());
+            return tl::unexpected<Error>(more.error());
         }
         if (!*more) {
             return {};
@@ -117,7 +117,7 @@ decodeEntries(const TlvField& field, std::uint64_t maxEntries, std::vector<Index
 
         auto entry = decodeEntry(element, elementOffset);
         if (!entry) {
-            return std::unexpected(entry.error());
+            return tl::unexpected<Error>(entry.error());
         }
         if (!out.empty() && entry->key <= out.back().key) {
             return fail(
@@ -185,7 +185,7 @@ Result<void> decodeIndex(
     while (true) {
         auto more = reader.next(field);
         if (!more) {
-            return std::unexpected(more.error());
+            return tl::unexpected<Error>(more.error());
         }
         if (!*more) {
             break;
@@ -207,7 +207,7 @@ Result<void> decodeIndex(
         if (field.number == versionField) {
             auto version = decodeTlvUnsigned(field);
             if (!version) {
-                return std::unexpected(version.error());
+                return tl::unexpected<Error>(version.error());
             }
             if (*version != indexSchemaVersion) {
                 return fail(

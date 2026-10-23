@@ -61,7 +61,7 @@ Result<Signature> decodeSignature(std::span<const std::byte> payload, std::uint6
     while (true) {
         auto more = reader.next(field);
         if (!more) {
-            return std::unexpected(more.error());
+            return tl::unexpected<Error>(more.error());
         }
         if (!*more) {
             break;
@@ -69,7 +69,7 @@ Result<Signature> decodeSignature(std::span<const std::byte> payload, std::uint6
         if (field.number > sigSignatureField) {
             auto skipped = skipUnknownField(field);
             if (!skipped) {
-                return std::unexpected(skipped.error());
+                return tl::unexpected<Error>(skipped.error());
             }
             continue;
         }
@@ -79,19 +79,19 @@ Result<Signature> decodeSignature(std::span<const std::byte> payload, std::uint6
         if (!known) {
             auto skipped = skipUnknownField(field);
             if (!skipped) {
-                return std::unexpected(skipped.error());
+                return tl::unexpected<Error>(skipped.error());
             }
             continue;
         }
         auto critical = requireCriticality(field, Criticality::Critical);
         if (!critical) {
-            return std::unexpected(critical.error());
+            return tl::unexpected<Error>(critical.error());
         }
         switch (field.number) {
         case sigKindField: {
             auto value = decodeTlvUnsigned(field);
             if (!value) {
-                return std::unexpected(value.error());
+                return tl::unexpected<Error>(value.error());
             }
             if (*value != signatureExtensionKind) {
                 return fail(ErrorKind::Unsupported, "unknown extension kind", field.offset);
@@ -105,7 +105,7 @@ Result<Signature> decodeSignature(std::span<const std::byte> payload, std::uint6
         case sigVersionField: {
             auto value = decodeTlvUnsigned(field);
             if (!value) {
-                return std::unexpected(value.error());
+                return tl::unexpected<Error>(value.error());
             }
             if (*value != signatureVersion) {
                 return fail(ErrorKind::Unsupported, "unsupported signature version", field.offset);
@@ -119,7 +119,7 @@ Result<Signature> decodeSignature(std::span<const std::byte> payload, std::uint6
         case sigEpochField: {
             auto value = decodeTlvUnsigned(field);
             if (!value) {
-                return std::unexpected(value.error());
+                return tl::unexpected<Error>(value.error());
             }
             if (hasEpoch) {
                 return fail(ErrorKind::Malformed, "duplicate signature epoch", field.offset);
@@ -164,7 +164,7 @@ Result<std::uint32_t> peekExtensionKind(std::span<const std::byte> payload, std:
     TlvField field;
     auto more = reader.next(field);
     if (!more) {
-        return std::unexpected(more.error());
+        return tl::unexpected<Error>(more.error());
     }
     if (!*more) {
         return fail(ErrorKind::Malformed, "extension payload is empty", offset);
@@ -174,11 +174,11 @@ Result<std::uint32_t> peekExtensionKind(std::span<const std::byte> payload, std:
     }
     auto critical = requireCriticality(field, Criticality::Critical);
     if (!critical) {
-        return std::unexpected(critical.error());
+        return tl::unexpected<Error>(critical.error());
     }
     auto value = decodeTlvUnsigned(field);
     if (!value) {
-        return std::unexpected(value.error());
+        return tl::unexpected<Error>(value.error());
     }
     if (*value > maxTlvFieldNumber) {
         return fail(ErrorKind::Malformed, "extension kind out of range", field.offset);
@@ -218,12 +218,12 @@ Result<Signature> makeSignature(
     }
     auto publicKey = crypto::signPublicKeyOf(seed);
     if (!publicKey) {
-        return std::unexpected(publicKey.error());
+        return tl::unexpected<Error>(publicKey.error());
     }
     auto message = signatureMessage(archiveId, generation, epoch, commitDigest);
     auto signature = crypto::signDetached(message, seed);
     if (!signature) {
-        return std::unexpected(signature.error());
+        return tl::unexpected<Error>(signature.error());
     }
     Signature out;
     out.epoch = epoch;

@@ -125,7 +125,7 @@ Result<std::string> drain(gzip::Stream& stream, std::size_t readSize) {
     while (true) {
         auto count = stream.read(buffer);
         if (!count) {
-            return std::unexpected(count.error());
+            return tl::unexpected<Error>(count.error());
         }
         if (*count == 0) {
             return output;
@@ -143,7 +143,7 @@ Decoded decodeBytes(const Bytes& bytes, const gzip::Limits& limits = {}) {
 
     auto stream = gzip::Stream::open(std::move(*file), limits);
     if (!stream) {
-        decoded.summary = std::unexpected(stream.error());
+        decoded.summary = tl::unexpected<Error>(stream.error());
         return decoded;
     }
 
@@ -151,7 +151,7 @@ Decoded decodeBytes(const Bytes& bytes, const gzip::Limits& limits = {}) {
     while (true) {
         auto count = stream->read(buffer);
         if (!count) {
-            decoded.summary = std::unexpected(count.error());
+            decoded.summary = tl::unexpected<Error>(count.error());
             return decoded;
         }
         if (*count == 0) {

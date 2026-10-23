@@ -113,7 +113,7 @@ template <std::integral T> Result<T> parseField(Block block, Field field, std::u
     auto fieldOffset = offset + field.offset;
     auto value = parseNumber(bytesOf(block, field), fieldOffset);
     if (!value) {
-        return std::unexpected(value.error());
+        return tl::unexpected<Error>(value.error());
     }
 
     auto narrowed = checkedCast<T>(*value);
@@ -134,12 +134,12 @@ Result<std::uint64_t> parseDecimal(std::string_view text, std::uint64_t offset) 
             return fail(ErrorKind::Malformed, "invalid pax number", offset);
         }
 
-        auto scaled = checkedMul<std::uint64_t>(value, 10);
+        auto scaled = checkedMul(value, 10u);
         if (!scaled) {
             return fail(ErrorKind::Malformed, "pax number overflows", offset);
         }
 
-        auto next = checkedAdd<std::uint64_t>(*scaled, static_cast<std::uint64_t>(digit - '0'));
+        auto next = checkedAdd(*scaled, static_cast<std::uint64_t>(digit - '0'));
         if (!next) {
             return fail(ErrorKind::Malformed, "pax number overflows", offset);
         }
@@ -157,7 +157,7 @@ Result<void> parsePaxTime(std::string_view text, std::uint64_t offset, PaxValues
     auto dot = text.find('.');
     auto whole = parseDecimal(text.substr(0, dot), offset);
     if (!whole) {
-        return std::unexpected(whole.error());
+        return tl::unexpected<Error>(whole.error());
     }
 
     auto seconds = checkedCast<std::int64_t>(*whole);
@@ -221,7 +221,7 @@ assignNumber(std::string_view value, std::uint64_t offset, std::uint64_t& target
 
     auto number = parseDecimal(value, offset);
     if (!number) {
-        return std::unexpected(number.error());
+        return tl::unexpected<Error>(number.error());
     }
 
     target = *number;
@@ -320,7 +320,7 @@ Result<Header> parseHeader(Block block, std::uint64_t offset) {
 
     auto format = detectFormat(block, offset);
     if (!format) {
-        return std::unexpected(format.error());
+        return tl::unexpected<Error>(format.error());
     }
 
     Header header;
@@ -331,27 +331,27 @@ Result<Header> parseHeader(Block block, std::uint64_t offset) {
 
     auto mode = parseField<std::uint32_t>(block, modeField, offset);
     if (!mode) {
-        return std::unexpected(mode.error());
+        return tl::unexpected<Error>(mode.error());
     }
 
     auto uid = parseField<std::uint64_t>(block, uidField, offset);
     if (!uid) {
-        return std::unexpected(uid.error());
+        return tl::unexpected<Error>(uid.error());
     }
 
     auto gid = parseField<std::uint64_t>(block, gidField, offset);
     if (!gid) {
-        return std::unexpected(gid.error());
+        return tl::unexpected<Error>(gid.error());
     }
 
     auto size = parseField<std::uint64_t>(block, sizeField, offset);
     if (!size) {
-        return std::unexpected(size.error());
+        return tl::unexpected<Error>(size.error());
     }
 
     auto mtime = parseField<std::int64_t>(block, mtimeField, offset);
     if (!mtime) {
-        return std::unexpected(mtime.error());
+        return tl::unexpected<Error>(mtime.error());
     }
 
     header.mode = *mode;
@@ -374,12 +374,12 @@ Result<Header> parseHeader(Block block, std::uint64_t offset) {
     if (kind == EntryKind::CharDevice || kind == EntryKind::BlockDevice) {
         auto major = parseField<std::uint32_t>(block, devMajorField, offset);
         if (!major) {
-            return std::unexpected(major.error());
+            return tl::unexpected<Error>(major.error());
         }
 
         auto minor = parseField<std::uint32_t>(block, devMinorField, offset);
         if (!minor) {
-            return std::unexpected(minor.error());
+            return tl::unexpected<Error>(minor.error());
         }
         header.devMajor = *major;
         header.devMinor = *minor;
@@ -427,7 +427,7 @@ bool entryHasData(EntryKind kind) {
 }
 
 std::optional<std::uint64_t> paddedSize(std::uint64_t size) {
-    auto rounded = checkedAdd<std::uint64_t>(size, blockSize - 1);
+    auto rounded = checkedAdd(size, blockSize - 1);
     if (!rounded) {
         return std::nullopt;
     }
