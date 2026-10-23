@@ -25,6 +25,7 @@ add_executable(bale_tests
     base/checked_test.cpp
     checksum/blake3_test.cpp
     checksum/crc_test.cpp
+    cli/sevenzip_cli_test.cpp
     cli/single_file_test.cpp
     cli/rpm_cli_test.cpp
     cli/repair_cli_test.cpp
@@ -62,6 +63,7 @@ add_executable(bale_tests
     formats/tar/reader_test.cpp
     formats/tar/writer_test.cpp
     formats/sevenzip/reader_test.cpp
+    formats/sevenzip/writer_test.cpp
     formats/zip/reader_test.cpp
     formats/zip/writer_test.cpp
     formats/zstd/stream_test.cpp

@@ -24,17 +24,16 @@ namespace {
 
 using bale::cli::ExitCode;
 
-constexpr std::int32_t defaultZstdLevel = 3;
-constexpr std::int32_t defaultLz4Level = 0;
-constexpr std::int32_t defaultLzma2Level = 6;
-constexpr std::int32_t defaultBrotliLevel = 11;
-
 constexpr std::string_view usage = R"(usage: bale <command> [arguments]
 
 commands:
   create <archive> <dir> [options]
-      --format <name>         bale, zip, tar, tar.gz or tar.zst (default: from the extension)
-      --level <n>             zip 0-9 (0 stores), tar.gz 1-9, tar.zst 1-22, bale: see --codec
+      --format <name>         bale, zip, 7z, tar, tar.gz or tar.zst (default: from the extension)
+      --level <n>             zip 0-9 (0 stores), tar.gz 1-9, tar.zst 1-22, 7z depends on --codec,
+                              bale: see --codec
+      --codec <name>          bale: raw, zstd, lz4, lzma2 or brotli; 7z: copy, lzma1, lzma2,
+                              deflate or bzip2
+      --solid, --no-solid     7z only: one solid block (default) or one folder per file
       --sync                  flush the archive to disk before finishing
     native .bale only:
       --chunk-size <n>        chunk size in bytes, K or M suffix allowed (default 1M, fixed only)
@@ -55,10 +54,12 @@ commands:
       --key-file <path>       recipient secret keys for update/unlock (one hex key per line)
       --sign <path>           sign the commit with Ed25519 seeds (one 64-hex-char seed per line)
       --verify-key <hex>      require a commit signature from this Ed25519 public key (repeatable)
-  update <archive.bale> <dir> [options]
-      append a new snapshot of the directory, reusing unchanged chunks; takes create's options
-  convert <input> <output> [--format <name>] [--level <n>] [--image <n>]
-      rewrite a bale, zip, tar, 7z, ar, cpio, cab, iso, wim or rpm archive entry by entry in another format
+  update <archive> <dir> [options]
+      update a .bale snapshot or rewrite a .7z archive with a merged, sorted entry
+      list; takes create's options, where --codec and --level follow the archive kind
+  convert <input> <output> [--format <name>] [--codec <name>] [--level <n>]
+      [--solid | --no-solid] [--image <n>]
+      rewrite a bale, zip, 7z, tar, ar, cpio, cab, iso, wim or rpm archive entry by entry in another format
   compact <archive.bale> <output.bale> [--sync] [--experimental-encryption] [--key-file <path>]
       [--sign <path>] [--verify-key <hex>]
       write the current snapshot to a new archive and keep the source
@@ -200,46 +201,24 @@ std::optional<std::int32_t> parseLevel(std::string_view text) {
 }
 
 std::optional<std::string_view> checkLevel(bale::CodecId codec, std::int32_t level) {
-    switch (codec) {
-    case bale::CodecId::Raw:
-        return "--level does not apply to --codec raw";
-    case bale::CodecId::Zstd:
-        if (level < 1 || level > 22) {
-            return "--level must be between 1 and 22 for zstd";
-        }
-        return std::nullopt;
-    case bale::CodecId::Lz4:
-        if (level < 0 || level > 12) {
-            return "--level must be between 0 and 12 for lz4";
-        }
-        return std::nullopt;
-    case bale::CodecId::Lzma2:
-        if (level < 0 || level > 9) {
-            return "--level must be between 0 and 9 for lzma2";
-        }
-        return std::nullopt;
-    case bale::CodecId::Brotli:
-        if (level < 0 || level > 11) {
-            return "--level must be between 0 and 11 for brotli";
-        }
-        return std::nullopt;
-    }
-    return "codec has no levels";
+    return bale::cli::checkBaleCodecLevel(codec, level);
 }
 
 int runCreate(std::span<const std::string_view> arguments, bool update = false) {
     bale::cli::CreateOptions options;
     std::vector<std::string_view> positional;
     std::optional<std::int32_t> explicitLevel;
+    std::optional<std::string> codecName;
     std::optional<bale::cli::OutputFormat> explicitFormat;
     std::string_view nativeOption;
     bool chunkSizeSet = false;
     bool cdcSizesSet = false;
+    bool solidExplicit = false;
     for (std::size_t index = 0; index < arguments.size(); ++index) {
         std::string_view argument = arguments[index];
         if (argument == "--chunk-size" || argument == "--threads" || argument == "--preset" ||
-            argument == "--codec" || argument == "--chunking" || argument == "--chunk-min" ||
-            argument == "--chunk-target" || argument == "--chunk-max" || argument == "--parity" ||
+            argument == "--chunking" || argument == "--chunk-min" || argument == "--chunk-target" ||
+            argument == "--chunk-max" || argument == "--parity" ||
             argument == "--parity-shard-size") {
             nativeOption = argument;
         }
@@ -250,8 +229,18 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
             ++index;
             explicitFormat = bale::cli::parseOutputFormat(arguments[index]);
             if (!explicitFormat) {
-                return usageError("--format must be bale, zip, tar, tar.gz or tar.zst");
+                return usageError("--format must be bale, zip, 7z, tar, tar.gz or tar.zst");
             }
+            continue;
+        }
+        if (argument == "--solid") {
+            options.sevenZipSolid = true;
+            solidExplicit = true;
+            continue;
+        }
+        if (argument == "--no-solid") {
+            options.sevenZipSolid = false;
+            solidExplicit = true;
             continue;
         }
         if (argument == "--chunk-size") {
@@ -333,28 +322,10 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
         }
         if (argument == "--codec") {
             if (index + 1 == arguments.size()) {
-                return usageError("--codec needs raw, zstd, lz4, lzma2 or brotli");
+                return usageError("--codec needs a name");
             }
             ++index;
-            if (arguments[index] == "raw") {
-                options.compression.codec = bale::CodecId::Raw;
-                options.compression.level = 0;
-            } else if (arguments[index] == "zstd") {
-                options.compression.codec = bale::CodecId::Zstd;
-                options.compression.level = defaultZstdLevel;
-            } else if (arguments[index] == "lz4") {
-                options.compression.codec = bale::CodecId::Lz4;
-                options.compression.level = defaultLz4Level;
-            } else if (arguments[index] == "lzma2") {
-                options.compression.codec = bale::CodecId::Lzma2;
-                options.compression.level = defaultLzma2Level;
-            } else if (arguments[index] == "brotli") {
-                options.compression.codec = bale::CodecId::Brotli;
-                options.compression.level = defaultBrotliLevel;
-            } else {
-                return usageError("--codec must be raw, zstd, lz4, lzma2 or brotli");
-            }
-            options.compression.preset.reset();
+            codecName = std::string(arguments[index]);
             continue;
         }
         if (argument == "--level") {
@@ -439,7 +410,39 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
 
     if (update) {
         if (explicitFormat) {
-            return usageError("update only appends to .bale archives");
+            return usageError("update takes no --format; the archive kind is detected");
+        }
+        // NOTE: the archive kind is detected by updateArchive, so both codec
+        // families are accepted here and the detected container decides.
+        if (codecName) {
+            bool mapped = false;
+            if (bale::cli::applyBaleCodecName(options, *codecName)) {
+                mapped = true;
+            }
+            if (auto codec = bale::cli::parseSevenZipCodec(*codecName)) {
+                options.sevenZipCodec = *codec;
+                mapped = true;
+            }
+            if (!mapped) {
+                return usageError(
+                    "--codec must be raw, zstd, lz4, lzma2, brotli, copy, lzma1, deflate or bzip2"
+                );
+            }
+            options.codecName = std::move(codecName);
+        }
+        options.sevenZipSolidExplicit = solidExplicit;
+        if (explicitLevel) {
+            options.level = explicitLevel;
+            bool sevenOnly = options.codecName &&
+                bale::cli::parseSevenZipCodec(*options.codecName) &&
+                !bale::cli::isBaleCodecName(*options.codecName);
+            if (!sevenOnly) {
+                if (auto problem = checkLevel(options.compression.codec, *explicitLevel)) {
+                    return usageError(*problem);
+                }
+                options.compression.level = *explicitLevel;
+                options.compression.preset.reset();
+            }
         }
     } else {
         auto format =
@@ -448,27 +451,66 @@ int runCreate(std::span<const std::string_view> arguments, bool update = false) 
             return usageError("cannot tell the format from the archive name; pass --format");
         }
         options.format = *format;
-    }
-
-    if (options.format != bale::cli::OutputFormat::Bale) {
-        if (!nativeOption.empty()) {
-            return usageError(
-                "--chunk-size, --chunking, --chunk-min, --chunk-target, --chunk-max, "
-                "--threads, --preset, --codec, --parity and --parity-shard-size apply only to bale"
-            );
-        }
-        if (explicitLevel) {
-            if (auto problem = bale::cli::checkOutputLevel(options.format, *explicitLevel)) {
-                return usageError(*problem);
+        if (options.format == bale::cli::OutputFormat::Bale) {
+            if (solidExplicit) {
+                return usageError("--solid and --no-solid apply only to 7z");
             }
-            options.level = explicitLevel;
+            if (codecName) {
+                if (!bale::cli::applyBaleCodecName(options, *codecName)) {
+                    return usageError("--codec must be raw, zstd, lz4, lzma2 or brotli");
+                }
+            }
+            if (explicitLevel) {
+                if (auto problem = checkLevel(options.compression.codec, *explicitLevel)) {
+                    return usageError(*problem);
+                }
+                options.compression.level = *explicitLevel;
+                options.compression.preset.reset();
+            }
+        } else if (options.format == bale::cli::OutputFormat::SevenZip) {
+            if (!nativeOption.empty()) {
+                return usageError(
+                    "--chunk-size, --chunking, --chunk-min, --chunk-target, --chunk-max, "
+                    "--threads, --preset, --parity and --parity-shard-size apply only to bale"
+                );
+            }
+            if (codecName) {
+                auto codec = bale::cli::parseSevenZipCodec(*codecName);
+                if (!codec) {
+                    return usageError(
+                        "--codec must be copy, lzma1, lzma2, deflate or bzip2 for 7z"
+                    );
+                }
+                options.sevenZipCodec = *codec;
+            }
+            if (explicitLevel) {
+                if (auto problem =
+                        bale::cli::checkSevenZipLevel(options.sevenZipCodec, *explicitLevel)) {
+                    return usageError(*problem);
+                }
+                options.sevenZipLevel = *explicitLevel;
+            }
+        } else {
+            if (!nativeOption.empty()) {
+                return usageError(
+                    "--chunk-size, --chunking, --chunk-min, --chunk-target, --chunk-max, "
+                    "--threads, --preset, --codec, --parity and --parity-shard-size apply only "
+                    "to bale"
+                );
+            }
+            if (codecName) {
+                return usageError("--codec applies only to bale and 7z");
+            }
+            if (solidExplicit) {
+                return usageError("--solid and --no-solid apply only to 7z");
+            }
+            if (explicitLevel) {
+                if (auto problem = bale::cli::checkOutputLevel(options.format, *explicitLevel)) {
+                    return usageError(*problem);
+                }
+                options.level = explicitLevel;
+            }
         }
-    } else if (explicitLevel) {
-        if (auto problem = checkLevel(options.compression.codec, *explicitLevel)) {
-            return usageError(*problem);
-        }
-        options.compression.level = *explicitLevel;
-        options.compression.preset.reset();
     }
 
     if (options.chunkPolicy == bale::archive::ChunkPolicy::Cdc) {
@@ -515,25 +557,39 @@ int runConvert(std::span<const std::string_view> arguments) {
     bale::cli::ConvertOptions options;
     std::optional<bale::cli::OutputFormat> explicitFormat;
     std::optional<std::int32_t> explicitLevel;
+    std::optional<std::string> codecName;
+    bool solidExplicit = false;
     std::vector<std::string_view> positional;
     for (std::size_t index = 0; index < arguments.size(); ++index) {
         std::string_view argument = arguments[index];
-        if (argument == "--format" || argument == "--level") {
+        if (argument == "--format" || argument == "--level" || argument == "--codec") {
             if (index + 1 == arguments.size()) {
-                return usageError("--format and --level need a value");
+                return usageError("--format, --level and --codec need a value");
             }
             ++index;
             if (argument == "--format") {
                 explicitFormat = bale::cli::parseOutputFormat(arguments[index]);
                 if (!explicitFormat) {
-                    return usageError("--format must be bale, zip, tar, tar.gz or tar.zst");
+                    return usageError("--format must be bale, zip, 7z, tar, tar.gz or tar.zst");
                 }
-            } else {
+            } else if (argument == "--level") {
                 explicitLevel = parseLevel(arguments[index]);
                 if (!explicitLevel) {
                     return usageError("--level needs a number");
                 }
+            } else {
+                codecName = std::string(arguments[index]);
             }
+            continue;
+        }
+        if (argument == "--solid") {
+            options.sevenZipSolid = true;
+            solidExplicit = true;
+            continue;
+        }
+        if (argument == "--no-solid") {
+            options.sevenZipSolid = false;
+            solidExplicit = true;
             continue;
         }
         if (argument == "--image") {
@@ -561,6 +617,29 @@ int runConvert(std::span<const std::string_view> arguments) {
         return usageError("cannot tell the format from the output name; pass --format");
     }
     options.format = *format;
+    if (options.format == bale::cli::OutputFormat::SevenZip) {
+        if (codecName) {
+            auto codec = bale::cli::parseSevenZipCodec(*codecName);
+            if (!codec) {
+                return usageError("--codec must be copy, lzma1, lzma2, deflate or bzip2 for 7z");
+            }
+            options.sevenZipCodec = *codec;
+        }
+        if (explicitLevel) {
+            if (auto problem =
+                    bale::cli::checkSevenZipLevel(options.sevenZipCodec, *explicitLevel)) {
+                return usageError(*problem);
+            }
+            options.sevenZipLevel = *explicitLevel;
+        }
+        return exitWith(bale::cli::convertArchive(positional[0], positional[1], options));
+    }
+    if (codecName) {
+        return usageError("--codec applies only to 7z");
+    }
+    if (solidExplicit) {
+        return usageError("--solid and --no-solid apply only to 7z");
+    }
     if (explicitLevel) {
         if (*format == bale::cli::OutputFormat::Bale) {
             return usageError("convert to bale uses the default profile and takes no --level");
@@ -849,8 +928,9 @@ int runFormats() {
     printFormat("zip", true, "stored and deflate, ZIP64, no encryption");
     printFormat(
         "7z",
-        false,
-        "read-only; copy, lzma1, lzma2, deflate, bzip2; solid blocks decode from the block start"
+        true,
+        "copy, lzma1, lzma2, deflate, bzip2; solid blocks decode from the block start; no "
+        "encryption, no filter chains"
     );
     printFormat("tar", true, "ustar, pax, GNU long names; no sparse files");
     printFormat("tar.gz", true, "tar inside gzip, recognized by content; read as one stream");

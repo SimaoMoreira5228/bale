@@ -9,6 +9,7 @@
 #include "format/record.hpp"
 #include "formats/compressed/stream.hpp"
 #include "formats/detect.hpp"
+#include "formats/sevenzip/writer.hpp"
 #include "formats/tar/source.hpp"
 #include "io/file.hpp"
 #include "security/archive_path.hpp"
@@ -55,6 +56,8 @@ struct OpenedArchive {
 [[nodiscard]] Result<ArchivePath>
 singleFileName(std::string_view archive, const CompressedStream& stream, std::string& out);
 
+void reportSkipped(const std::vector<SkippedPath>& skipped);
+
 struct ListOptions {
     bool detailed = false;
     std::uint32_t imageIndex = 0;
@@ -74,6 +77,14 @@ struct ListOptions {
 struct CreateOptions {
     OutputFormat format = OutputFormat::Bale;
     std::optional<int> level;
+    sevenzip::Codec sevenZipCodec = sevenzip::Codec::Lzma2;
+    int sevenZipLevel = sevenzip::defaultSevenZipLevel;
+    bool sevenZipSolid = true;
+    // NOTE: update detects the archive kind at runtime, so it carries the
+    // raw --codec text and the solidarity flag through for the detected
+    // container to interpret; create resolves them eagerly instead.
+    std::optional<std::string> codecName;
+    bool sevenZipSolidExplicit = false;
     std::uint32_t chunkSize = archive::defaultChunkSize;
     archive::ChunkPolicy chunkPolicy = archive::ChunkPolicy::Fixed;
     archive::CdcParams cdc = archive::defaultCdcParams;
@@ -92,6 +103,13 @@ struct CreateOptions {
     std::string_view archivePath,
     std::string_view directory,
     const CreateOptions& options
+);
+
+[[nodiscard]] ExitCode updateSevenZipArchive(
+    std::string_view archivePath,
+    std::string_view directory,
+    const CreateOptions& options,
+    std::vector<crypto::SecretBytes> signSeeds
 );
 
 [[nodiscard]] ExitCode updateArchive(
@@ -113,6 +131,9 @@ struct CreateOptions {
 struct ConvertOptions {
     OutputFormat format = OutputFormat::Bale;
     std::optional<int> level;
+    sevenzip::Codec sevenZipCodec = sevenzip::Codec::Lzma2;
+    int sevenZipLevel = sevenzip::defaultSevenZipLevel;
+    bool sevenZipSolid = true;
     std::uint32_t imageIndex = 0;
 };
 
@@ -152,5 +173,18 @@ convertArchive(std::string_view input, std::string_view output, const ConvertOpt
     const std::optional<std::string>& keyFile = std::nullopt,
     const VerifyKeys& verifyKeys = {}
 );
+
+[[nodiscard]] std::optional<sevenzip::Codec> parseSevenZipCodec(std::string_view text);
+
+[[nodiscard]] std::string_view name(sevenzip::Codec codec);
+
+[[nodiscard]] std::optional<std::string_view> checkSevenZipLevel(sevenzip::Codec codec, int level);
+
+[[nodiscard]] bool isBaleCodecName(std::string_view text);
+
+[[nodiscard]] bool applyBaleCodecName(CreateOptions& options, std::string_view text);
+
+[[nodiscard]] std::optional<std::string_view>
+checkBaleCodecLevel(CodecId codec, std::int32_t level);
 
 }

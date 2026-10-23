@@ -2,6 +2,7 @@
 
 #include "archive/writer.hpp"
 #include "base/error.hpp"
+#include "formats/sevenzip/writer.hpp"
 #include "formats/tar/writer.hpp"
 #include "formats/zip/writer.hpp"
 #include "io/file.hpp"
@@ -23,6 +24,7 @@ enum class OutputFormat : std::uint8_t {
     Tar,
     TarGzip,
     TarZstd,
+    SevenZip,
 };
 
 [[nodiscard]] std::optional<OutputFormat> parseOutputFormat(std::string_view text);
@@ -36,6 +38,9 @@ enum class OutputFormat : std::uint8_t {
 struct OutputOptions {
     OutputFormat format = OutputFormat::Bale;
     std::optional<int> level{};
+    sevenzip::Codec sevenZipCodec = sevenzip::Codec::Lzma2;
+    int sevenZipLevel = sevenzip::defaultSevenZipLevel;
+    bool sevenZipSolid = true;
     archive::WriterOptions native;
 };
 
@@ -54,7 +59,17 @@ class ArchiveOutput {
     }
 
     [[nodiscard]] bool storesHardLinks() const {
-        return format_ != OutputFormat::Zip;
+        switch (format_) {
+        case OutputFormat::Bale:
+        case OutputFormat::Tar:
+        case OutputFormat::TarGzip:
+        case OutputFormat::TarZstd:
+            return true;
+        case OutputFormat::Zip:
+        case OutputFormat::SevenZip:
+            return false;
+        }
+        return false;
     }
 
     [[nodiscard]] Result<void>
@@ -94,7 +109,7 @@ class ArchiveOutput {
     [[nodiscard]] Result<void> addSignSeed(crypto::SecretBytes seed);
 
   private:
-    using Sink = std::variant<archive::Writer, tar::Writer, zip::Writer>;
+    using Sink = std::variant<archive::Writer, tar::Writer, zip::Writer, sevenzip::Writer>;
 
     ArchiveOutput(Sink sink, OutputFormat format, bool durable) :
         sink_(std::move(sink)), format_(format), durable_(durable) {
