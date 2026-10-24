@@ -67,6 +67,7 @@ commands:
   test <archive> [--image <n>] [--key-file <path>] [--verify-key <hex>]            check archive structure and entry checksums
   repair <archive> [--key-file <path>] [--verify-key <hex>]          repair stripe damage with parity, then check like test
   info <archive> [--key-file <path>] [--verify-key <hex>]            show the format and, for .bale, the recorded compression profile
+  history <archive.bale> [--key-file <path>] [--verify-key <hex>]    list committed snapshots in a native archive
   extract <archive> [options]
       -o, --output <dir>      extract into dir (default: current directory)
       --image <n>             wim image index (default: bootable image, else image 1)
@@ -158,6 +159,44 @@ int runList(std::span<const std::string_view> arguments) {
         return usageError("list needs an archive");
     }
     return exitWith(bale::cli::listArchive(archive, options));
+}
+
+int runHistory(std::span<const std::string_view> arguments) {
+    std::optional<std::string> keyFile;
+    bale::cli::VerifyKeys verifyKeys;
+    std::string_view archive;
+    for (std::size_t index = 0; index < arguments.size(); ++index) {
+        const std::string_view argument = arguments[index];
+        if (argument == "--key-file") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--key-file needs a path");
+            }
+            keyFile = std::string(arguments[++index]);
+            continue;
+        }
+        if (argument == "--verify-key") {
+            if (index + 1 == arguments.size()) {
+                return usageError("--verify-key needs a key");
+            }
+            auto parsed = bale::cli::parseVerifyKey(arguments[++index]);
+            if (!parsed) {
+                return usageError("invalid --verify-key");
+            }
+            verifyKeys.push_back(*parsed);
+            continue;
+        }
+        if (argument.starts_with('-')) {
+            return usageError("unknown option for history");
+        }
+        if (!archive.empty()) {
+            return usageError("history takes one archive");
+        }
+        archive = argument;
+    }
+    if (archive.empty()) {
+        return usageError("history needs an archive");
+    }
+    return exitWith(bale::cli::historyArchive(archive, keyFile, verifyKeys));
 }
 
 std::optional<std::uint32_t> parseSize(std::string_view text) {
@@ -1017,6 +1056,9 @@ int run(std::span<const std::string_view> argv) {
             return usageError("info takes exactly one archive");
         }
         return exitWith(bale::cli::describeArchive(archive, keyFile, verifyKeys));
+    }
+    if (command == "history") {
+        return runHistory(rest);
     }
     if (command == "test") {
         return runTest(rest);

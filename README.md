@@ -13,6 +13,7 @@ bale create backup.zip ./project
 bale create backup.tar.zst ./project --level 19
 bale convert backup.tar.gz backup.bale
 bale update backup.bale ./project
+bale history backup.bale
 bale info backup.bale
 bale compact backup.bale compacted.bale
 bale test backup.bale
@@ -32,7 +33,9 @@ bale formats
 
 `update` adds a new snapshot from the directory you pass. The snapshot becomes the archive's visible contents, and chunks already in the archive are reused when their contents match. For `.7z` archives, which have no appendable generation model, `update` instead rewrites the archive with the old entries and the directory merged, sorted, directory files winning name collisions.
 
-Earlier snapshots stay in the file. `compact` writes the current snapshot and its referenced chunks to a new archive, leaving the source and its history alone.
+Earlier snapshots stay in the file. Run `bale history backup.bale` to see their generation numbers
+and commit digests. `*` marks the current snapshot. `compact` writes the current snapshot and its
+referenced chunks to a new archive, leaving the source and its history alone.
 
 ## Experimental encrypted archives
 

@@ -45,6 +45,13 @@ struct VerifyReport {
 
 class Reader {
   public:
+    struct Generation {
+        Footer footer;
+        Commit commit;
+        Blake3Digest digest{};
+        std::uint64_t footerOffset = 0;
+    };
+
     [[nodiscard]] static Result<Reader> open(File file, const ReaderOptions& options = {});
     [[nodiscard]] static Result<Reader>
     openEncrypted(File file, const ReaderOptions& options, ReaderUnlock&& unlock);
@@ -59,6 +66,10 @@ class Reader {
 
     [[nodiscard]] const Blake3Digest& commitDigest() const {
         return commitDigest_;
+    }
+
+    [[nodiscard]] std::span<const Generation> history() const {
+        return generations_;
     }
 
     [[nodiscard]] const Manifest& manifest() const {
@@ -148,13 +159,6 @@ class Reader {
 
   private:
     friend class Writer;
-
-    struct Generation {
-        Footer footer;
-        Commit commit;
-        Blake3Digest digest{};
-        std::uint64_t footerOffset = 0;
-    };
 
     Reader(File file, const ReaderOptions& options, std::uint64_t fileSize) :
         file_(std::move(file)), options_(options), fileSize_(fileSize) {
