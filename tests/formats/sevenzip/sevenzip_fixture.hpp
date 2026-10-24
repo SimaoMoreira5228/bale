@@ -1,211 +1,19 @@
 #pragma once
 
-#include "base/endian.hpp"
 #include "checksum/crc.hpp"
 #include "codecs/codec_fixture.hpp"
+#include "formats/sevenzip/codec_fixture.hpp"
+#include "formats/sevenzip/fixture_bytes.hpp"
 #include "io/temp_file.hpp"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
-#include <span>
 #include <string>
-#include <string_view>
 #include <vector>
 
-#include <lzma.h>
-
 namespace bale::sevenzip::test {
-
-using Bytes = std::vector<std::byte>;
-
-inline void put8(Bytes& out, std::uint8_t value) {
-    out.push_back(static_cast<std::byte>(value));
-}
-
-inline void put16(Bytes& out, std::uint16_t value) {
-    std::array<std::byte, 2> raw{};
-    storeLe(raw.data(), value);
-    out.insert(out.end(), raw.begin(), raw.end());
-}
-
-inline void put32(Bytes& out, std::uint32_t value) {
-    std::array<std::byte, 4> raw{};
-    storeLe(raw.data(), value);
-    out.insert(out.end(), raw.begin(), raw.end());
-}
-
-inline void put64(Bytes& out, std::uint64_t value) {
-    std::array<std::byte, 8> raw{};
-    storeLe(raw.data(), value);
-    out.insert(out.end(), raw.begin(), raw.end());
-}
-
-inline void putNumber(Bytes& out, std::uint64_t value) {
-    if (value < 0x80) {
-        put8(out, static_cast<std::uint8_t>(value));
-        return;
-    }
-
-    std::uint8_t extra = 0;
-    std::uint64_t shifted = value;
-    while (shifted >= (std::uint64_t{1} << (7 + 7 * extra))) {
-        ++extra;
-    }
-
-    std::uint8_t first = 0;
-    for (std::uint8_t index = 0; index < extra; ++index) {
-        first |= static_cast<std::uint8_t>(0x80 >> index);
-    }
-    first |= static_cast<std::uint8_t>(value >> (8 * extra));
-    put8(out, first);
-    for (std::uint8_t index = 0; index < extra; ++index) {
-        put8(out, static_cast<std::uint8_t>(value >> (8 * index)));
-    }
-}
-
-inline void putText(Bytes& out, std::string_view text) {
-    for (char c : text) {
-        out.push_back(static_cast<std::byte>(c));
-    }
-}
-
-inline void putUtf16(Bytes& out, std::string_view utf8) {
-    std::size_t index = 0;
-    while (index < utf8.size()) {
-        auto byte = static_cast<unsigned char>(utf8[index]);
-        char32_t point = 0;
-        std::size_t width = 0;
-        if (byte < 0x80) {
-            point = byte;
-            width = 1;
-        } else if ((byte & 0xE0) == 0xC0) {
-            point = byte & 0x1F;
-            width = 2;
-        } else if ((byte & 0xF0) == 0xE0) {
-            point = byte & 0x0F;
-            width = 3;
-        } else {
-            point = byte & 0x07;
-            width = 4;
-        }
-        for (std::size_t tail = 1; tail < width; ++tail) {
-            point = (point << 6) | (static_cast<unsigned char>(utf8[index + tail]) & 0x3F);
-        }
-        index += width;
-
-        if (point < 0x10000) {
-            put16(out, static_cast<std::uint16_t>(point));
-        } else {
-            point -= 0x10000;
-            put16(out, static_cast<std::uint16_t>(0xD800 + (point >> 10)));
-            put16(out, static_cast<std::uint16_t>(0xDC00 + (point & 0x3FF)));
-        }
-    }
-    put16(out, 0);
-}
-
-inline void patch8(Bytes& out, std::size_t at, std::uint8_t value) {
-    out[at] = static_cast<std::byte>(value);
-}
-
-inline void patch16(Bytes& out, std::size_t at, std::uint16_t value) {
-    storeLe(out.data() + at, value);
-}
-
-inline void patch32(Bytes& out, std::size_t at, std::uint32_t value) {
-    storeLe(out.data() + at, value);
-}
-
-inline void patch64(Bytes& out, std::size_t at, std::uint64_t value) {
-    storeLe(out.data() + at, value);
-}
-
-inline std::span<const std::byte> asBytes(std::string_view text) {
-    return std::as_bytes(std::span(text.data(), text.size()));
-}
-
-inline Bytes lzma1Encode(std::span<const std::byte> data) {
-    lzma_stream stream = LZMA_STREAM_INIT;
-    lzma_options_lzma options;
-    if (lzma_lzma_preset(&options, 1) != LZMA_OK) {
-        return {};
-    }
-    options.dict_size = 1U << 12;
-    options.lc = 3;
-    options.lp = 0;
-    options.pb = 2;
-    lzma_filter filters[2] = {
-        {.id = LZMA_FILTER_LZMA1, .options = &options},
-        {.id = LZMA_VLI_UNKNOWN, .options = nullptr},
-    };
-    if (lzma_raw_encoder(&stream, filters) != LZMA_OK) {
-        return {};
-    }
-
-    Bytes out(data.size() + 64);
-    stream.next_in = reinterpret_cast<const std::uint8_t*>(data.data());
-    stream.avail_in = data.size();
-    while (true) {
-        if (stream.total_out == out.size()) {
-            out.resize(out.size() + data.size() + 64);
-        }
-        stream.next_out = reinterpret_cast<std::uint8_t*>(out.data() + stream.total_out);
-        stream.avail_out = out.size() - static_cast<std::size_t>(stream.total_out);
-        auto status = lzma_code(&stream, LZMA_FINISH);
-        if (status == LZMA_STREAM_END) {
-            break;
-        }
-        if (status != LZMA_OK) {
-            lzma_end(&stream);
-            return {};
-        }
-    }
-
-    out.resize(static_cast<std::size_t>(stream.total_out));
-    lzma_end(&stream);
-    return out;
-}
-
-inline Bytes lzma2Encode(std::span<const std::byte> data) {
-    lzma_stream stream = LZMA_STREAM_INIT;
-    lzma_options_lzma options;
-    if (lzma_lzma_preset(&options, 1) != LZMA_OK) {
-        return {};
-    }
-    options.dict_size = 1U << 12;
-    lzma_filter filters[2] = {
-        {.id = LZMA_FILTER_LZMA2, .options = &options},
-        {.id = LZMA_VLI_UNKNOWN, .options = nullptr},
-    };
-    if (lzma_raw_encoder(&stream, filters) != LZMA_OK) {
-        return {};
-    }
-
-    Bytes out(data.size() + 64);
-    stream.next_in = reinterpret_cast<const std::uint8_t*>(data.data());
-    stream.avail_in = data.size();
-    while (true) {
-        if (stream.total_out == out.size()) {
-            out.resize(out.size() + data.size() + 64);
-        }
-        stream.next_out = reinterpret_cast<std::uint8_t*>(out.data() + stream.total_out);
-        stream.avail_out = out.size() - static_cast<std::size_t>(stream.total_out);
-        auto status = lzma_code(&stream, LZMA_FINISH);
-        if (status == LZMA_STREAM_END) {
-            break;
-        }
-        if (status != LZMA_OK) {
-            lzma_end(&stream);
-            return {};
-        }
-    }
-
-    out.resize(static_cast<std::size_t>(stream.total_out));
-    lzma_end(&stream);
-    return out;
-}
 
 enum class CodecKind : std::uint8_t {
     Copy,
@@ -259,14 +67,6 @@ struct BuiltSevenZip {
     std::size_t firstNameUnitOffset = 0;
     std::size_t innerStart = 0;
 };
-
-inline Bytes aesProps() {
-    Bytes props;
-    for (std::uint8_t index = 0; index < 18; ++index) {
-        props.push_back(static_cast<std::byte>(0xA0 + index));
-    }
-    return props;
-}
 
 struct FolderSpec {
     std::vector<std::vector<std::uint8_t>> ids{};
@@ -331,7 +131,7 @@ inline FolderSpec folderFor(CodecKind codec, std::vector<Bytes> subs) {
         folder.ids.push_back({0x21});
         folder.ids.push_back({0x03, 0x03, 0x01, 0x03});
         folder.props.push_back(Bytes{std::byte{0x00}});
-        folder.packed = lzma2Encode(folder.unpacked);
+        folder.packed = lzma2BcjEncode(folder.unpacked);
         break;
     case CodecKind::AesLzma2:
         folder.ids.push_back({0x06, 0xF1, 0x07, 0x01});
@@ -448,7 +248,7 @@ inline BuiltSevenZip buildSevenZip(const SevenZipSpec& spec) {
             if (folder.ids.size() == 1) {
                 putNumber(inner, folder.unpacked.size());
             } else {
-                putNumber(inner, folder.packed.size());
+                putNumber(inner, folder.unpacked.size());
                 putNumber(inner, folder.unpacked.size());
             }
         }

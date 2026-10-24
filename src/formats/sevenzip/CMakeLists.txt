@@ -4,7 +4,9 @@ add_library(bale_formats_sevenzip STATIC
     encode.cpp
     files.cpp
     folder.cpp
+    folder_filter.cpp
     header.cpp
+    raw_lzma.cpp
     reader.cpp
     writer.cpp
 )

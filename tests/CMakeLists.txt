@@ -132,6 +132,11 @@ if(Python3_Interpreter_FOUND AND NOT CMAKE_CROSSCOMPILING)
             $<TARGET_FILE:bale>
     )
     add_test(
+        NAME interoperability.formats
+        COMMAND Python3::Interpreter -I ${CMAKE_CURRENT_SOURCE_DIR}/interoperability/formats_test.py
+            $<TARGET_FILE:bale>
+    )
+    add_test(
         NAME reference.differential
         COMMAND Python3::Interpreter -I ${CMAKE_CURRENT_SOURCE_DIR}/reference/differential_test.py
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/reference

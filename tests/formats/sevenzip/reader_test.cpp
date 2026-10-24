@@ -199,21 +199,8 @@ TEST_CASE("7z reader decodes solid entries selectively from the block start") {
 }
 
 TEST_CASE("7z reader refuses unsupported codecs without partial output") {
-    SevenZipSpec base = mixedSpec();
-
-    CodecKind codec = CodecKind::Ppmd;
-    std::string_view expected = "7z codec PPMd (03-04-01) is not supported";
-    SUBCASE("PPMd") {
-        codec = CodecKind::Ppmd;
-        expected = "7z codec PPMd (03-04-01) is not supported";
-    }
-    SUBCASE("BCJ filter chain") {
-        codec = CodecKind::BcjLzma2;
-        expected = "7z filter chains are not supported";
-    }
-
-    SevenZipSpec spec = base;
-    spec.codec = codec;
+    SevenZipSpec spec = mixedSpec();
+    spec.codec = CodecKind::Ppmd;
     auto built = buildSevenZip(spec);
 
     TempFile temp(built.bytes);
@@ -231,8 +218,62 @@ TEST_CASE("7z reader refuses unsupported codecs without partial output") {
     });
     REQUIRE_FALSE(streamed);
     CHECK(streamed.error().kind == ErrorKind::Unsupported);
-    CHECK(streamed.error().what == expected);
+    CHECK(streamed.error().what == "7z codec PPMd (03-04-01) is not supported");
     CHECK(delivered == 0);
+}
+
+TEST_CASE("7z reader decodes LZMA2 and BCJ filter chains") {
+    SevenZipSpec spec = mixedSpec();
+    spec.codec = CodecKind::BcjLzma2;
+    constexpr std::array<unsigned char, 16> x86 = {
+        0xE8,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x90,
+        0x90,
+        0xE9,
+        0x05,
+        0x00,
+        0x00,
+        0x00,
+        0x90,
+        0x90,
+        0x90,
+        0x90,
+    };
+    constexpr std::size_t split = 9;
+    spec.entries[1].data.assign(reinterpret_cast<const char*>(x86.data()), split);
+    spec.entries[3].data.assign(
+        reinterpret_cast<const char*>(x86.data() + split),
+        x86.size() - split
+    );
+
+    auto built = buildSevenZip(spec);
+    TempFile temp(built.bytes);
+    auto reader = openSevenZip(temp);
+    REQUIRE(reader);
+    auto entries = collect(*reader);
+    REQUIRE(entries.size() == 4);
+
+    auto first = streamText(*reader, entries[1], 3);
+    REQUIRE(first);
+    CHECK(
+        std::ranges::equal(
+            std::as_bytes(std::span(first->data(), first->size())),
+            std::as_bytes(std::span(x86).first(split))
+        )
+    );
+
+    auto second = streamText(*reader, entries[3], 5);
+    REQUIRE(second);
+    CHECK(
+        std::ranges::equal(
+            std::as_bytes(std::span(second->data(), second->size())),
+            std::as_bytes(std::span(x86).subspan(split))
+        )
+    );
 }
 
 TEST_CASE("7z reader reports password requirements without partial output") {
