@@ -326,11 +326,12 @@ Result<bool> LzxDecoder::readLengths() {
             if (!*second) {
                 return false;
             }
-            if (**second > maxCodeBits) {
+            std::uint32_t code = second->value_or(0);
+            if (code > maxCodeBits) {
                 return fail(ErrorKind::Malformed, "LZX tree code is out of range");
             }
             std::uint32_t base = (*prev)[lenIndex_];
-            lenValue_ = (base - **second + 17) % 17;
+            lenValue_ = (base - code + 17) % 17;
             lenLeft_ = lenSame_;
             lenNeedCode_ = false;
             continue;
@@ -349,7 +350,7 @@ Result<bool> LzxDecoder::readLengths() {
             // resumes below: the fillBits calls can need more input, and the
             // local `value` would otherwise be lost and the raw bits decoded
             // as a fresh code on resume.
-            lenCode_ = **code;
+            lenCode_ = code->value_or(0);
             lenCodeRead_ = true;
         }
         value = lenCode_;
@@ -476,7 +477,7 @@ Result<bool> LzxDecoder::readToken() {
             return false;
         }
 
-        std::uint32_t element = **symbol;
+        std::uint32_t element = symbol->value_or(0);
         if (element < 256) {
             if (!emitByte(static_cast<std::uint8_t>(element))) {
                 return fail(ErrorKind::Malformed, overrunWhat(framing_));
@@ -502,7 +503,7 @@ Result<bool> LzxDecoder::readToken() {
         if (!*symbol) {
             return false;
         }
-        tokLength_ = **symbol + 9;
+        tokLength_ = symbol->value_or(0) + 9;
         tokStage_ = 2;
         return true;
     }
@@ -544,7 +545,7 @@ Result<bool> LzxDecoder::readToken() {
     }
 
     tokLength_ = tokHeader_ == 7 ? tokLength_ : tokHeader_ + 2;
-    std::uint32_t formatted = slotBase_[tokSlot_] + (tokVerbatim_ << 3) + **symbol;
+    std::uint32_t formatted = slotBase_[tokSlot_] + (tokVerbatim_ << 3) + symbol->value_or(0);
     return readMatch(formatted);
 }
 

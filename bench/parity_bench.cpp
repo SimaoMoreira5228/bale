@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <random>
 #include <span>
 #include <vector>
 
@@ -20,15 +19,22 @@ struct Timings {
     double repair = 0;
 };
 
-Timings measure(std::uint32_t dataShards, std::uint32_t parityShards, std::size_t shardBytes) {
-    auto coder = ReedSolomon::make(dataShards, parityShards).value();
+Result<Timings>
+measure(std::uint32_t dataShards, std::uint32_t parityShards, std::size_t shardBytes) {
+    auto coder = ReedSolomon::make(dataShards, parityShards);
+    if (!coder) {
+        return tl::unexpected<Error>(coder.error());
+    }
     const std::uint32_t total = dataShards + parityShards;
 
-    std::mt19937_64 random(0x243F6A8885A308D3);
     std::vector<std::vector<std::byte>> store(total, std::vector<std::byte>(shardBytes));
     for (std::uint32_t shard = 0; shard < dataShards; ++shard) {
+        std::uint64_t state = 0x243F6A8885A308D3ULL ^ shard;
         for (std::size_t index = 0; index < shardBytes; ++index) {
-            store[shard][index] = static_cast<std::byte>(random());
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            store[shard][index] = static_cast<std::byte>(state);
         }
     }
     std::vector<std::span<const std::byte>> dataSpans(dataShards);
@@ -43,23 +49,29 @@ Timings measure(std::uint32_t dataShards, std::uint32_t parityShards, std::size_
         }
     }
 
-    auto encodeOnce = [&] {
-        if (auto encoded = coder.encode(dataSpans, paritySpans); !encoded) {
-            std::printf("encode failed\n");
-        }
+    auto encodeOnce = [&]() -> Result<void> {
+        return coder->encode(dataSpans, paritySpans);
     };
-    encodeOnce();
+    if (auto encoded = encodeOnce(); !encoded) {
+        return tl::unexpected<Error>(encoded.error());
+    }
 
     std::vector<std::uint32_t> missing(parityShards);
     for (std::uint32_t shard = 0; shard < parityShards; ++shard) {
         missing[shard] = shard;
     }
-    std::vector<std::byte> scratch(*ReedSolomon::scratchBytes(dataShards, parityShards));
+    auto scratchSize = ReedSolomon::scratchBytes(dataShards, parityShards);
+    if (!scratchSize) {
+        return tl::unexpected<Error>(scratchSize.error());
+    }
+    std::vector<std::byte> scratch(*scratchSize);
 
     Timings best;
     for (int run = 0; run < runs; ++run) {
         auto start = std::chrono::steady_clock::now();
-        encodeOnce();
+        if (auto encoded = encodeOnce(); !encoded) {
+            return tl::unexpected<Error>(encoded.error());
+        }
         std::chrono::duration<double> encodeElapsed = std::chrono::steady_clock::now() - start;
         const double dataBytes = static_cast<double>(dataShards * shardBytes);
         if (best.encode == 0 || dataBytes / encodeElapsed.count() > best.encode) {
@@ -67,8 +79,8 @@ Timings measure(std::uint32_t dataShards, std::uint32_t parityShards, std::size_
         }
 
         start = std::chrono::steady_clock::now();
-        if (auto repaired = coder.repair(allSpans, missing, scratch); !repaired) {
-            std::printf("repair failed\n");
+        if (auto repaired = coder->repair(allSpans, missing, scratch); !repaired) {
+            return tl::unexpected<Error>(repaired.error());
         }
         std::chrono::duration<double> repairElapsed = std::chrono::steady_clock::now() - start;
         if (best.repair == 0 || dataBytes / repairElapsed.count() > best.repair) {
@@ -88,7 +100,17 @@ int main() {
              {17, 3},
          }) {
         for (std::size_t shardBytes : {std::size_t{64} << 10, std::size_t{1} << 20}) {
-            Timings timings = measure(dataShards, parityShards, shardBytes);
+            auto measured = measure(dataShards, parityShards, shardBytes);
+            if (!measured) {
+                std::fprintf(
+                    stderr,
+                    "parity benchmark failed: %.*s\n",
+                    static_cast<int>(measured.error().what.size()),
+                    measured.error().what.data()
+                );
+                return 1;
+            }
+            Timings timings = *measured;
             std::printf(
                 "%3u+%u      %7zu %-8s %12.2f\n",
                 dataShards,

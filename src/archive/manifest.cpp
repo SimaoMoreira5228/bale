@@ -518,8 +518,8 @@ Result<ManifestEntry> decodeEntry(
     entry.kind = static_cast<EntryKind>(raw->kind);
     entry.length = raw->length;
     entry.mtimeNanoseconds = raw->mtime;
-    if (raw->mode) {
-        entry.mode = static_cast<std::uint32_t>(*raw->mode);
+    if (raw->mode.has_value()) {
+        entry.mode = static_cast<std::uint32_t>(raw->mode.value_or(0));
     }
     entry.firstChunk = static_cast<std::uint32_t>(firstChunk);
     entry.chunkCount = static_cast<std::uint32_t>(raw->chunkCount);

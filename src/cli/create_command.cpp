@@ -196,14 +196,15 @@ ExitCode writeArchive(
 
     std::string escaped;
     if (summary->native) {
+        const auto native = summary->native.value_or(archive::WriteSummary{});
         std::println(
             "created {}: {} entries, {} bytes of content in {} unique of {} chunks, {} bytes total",
             escapeForTerminal(archivePath, escaped),
-            summary->native->entries,
-            summary->native->contentBytes,
-            summary->native->dataRecords,
-            summary->native->chunkReferences,
-            summary->native->archiveSize
+            native.entries,
+            native.contentBytes,
+            native.dataRecords,
+            native.chunkReferences,
+            native.archiveSize
         );
         return ExitCode::Ok;
     }

@@ -164,8 +164,8 @@ Result<Zip64End> readZip64End(const File& file, std::uint64_t locatorPosition) {
     if (!direct) {
         return tl::unexpected<Error>(direct.error());
     }
-    if (*direct) {
-        return **direct;
+    if (direct->has_value()) {
+        return direct->value_or(Zip64End{});
     }
 
     if (locatorPosition < zip64EndRecordSize) {
@@ -181,11 +181,11 @@ Result<Zip64End> readZip64End(const File& file, std::uint64_t locatorPosition) {
     if (!moved) {
         return tl::unexpected<Error>(moved.error());
     }
-    if (!*moved) {
+    if (!moved->has_value()) {
         return fail(ErrorKind::Malformed, "ZIP64 end record not found", locatorPosition);
     }
 
-    auto end = **moved;
+    auto end = moved->value_or(Zip64End{});
     end.prefix = shifted - recordOffset;
     return end;
 }
