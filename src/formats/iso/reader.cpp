@@ -60,8 +60,8 @@ Result<Reader> Reader::open(File file, const Limits& limits) {
         nodes = std::move(joliet);
     }
 
-    if (volume->bootCatalog) {
-        auto images = parseBootCatalog(file, *size, *volume->bootCatalog, limits);
+    if (volume->bootCatalog.has_value()) {
+        auto images = parseBootCatalog(file, *size, volume->bootCatalog.value_or(0), limits);
         if (!images) {
             return tl::unexpected<Error>(images.error());
         }
