@@ -1,21 +1,13 @@
 #include "formats/sevenzip/folder.hpp"
 
 #include "base/checked.hpp"
-#include "base/endian.hpp"
 #include "formats/sevenzip/methods.hpp"
 
 #include <algorithm>
-#include <array>
-#include <limits>
-
-#include <lzma.h>
 
 namespace bale::sevenzip {
 
 namespace {
-
-constexpr std::size_t maxStepBytes = std::numeric_limits<std::uint32_t>::max();
-constexpr std::uint32_t lzmaDictMin = 1U << 12;
 
 bool idEquals(std::span<const std::uint8_t> id, std::span<const std::uint8_t> want) {
     return id.size() == want.size() && std::ranges::equal(id, want);
@@ -95,29 +87,6 @@ std::string codecHex(std::span<const std::uint8_t> id) {
     return text;
 }
 
-tl::unexpected<Error> lzmaFailure(lzma_ret status) {
-    switch (status) {
-    case LZMA_MEMLIMIT_ERROR:
-        return fail(ErrorKind::LimitExceeded, "7z lzma decoder memory limit exceeded");
-    case LZMA_MEM_ERROR:
-        return fail(ErrorKind::LimitExceeded, "7z lzma decoder allocation failed");
-    case LZMA_FORMAT_ERROR:
-        return fail(ErrorKind::Malformed, "not a 7z lzma stream");
-    case LZMA_OPTIONS_ERROR:
-        return fail(ErrorKind::Malformed, "7z lzma properties are invalid");
-    case LZMA_DATA_ERROR:
-        return fail(ErrorKind::Integrity, "7z lzma data integrity check failed");
-    case LZMA_BUF_ERROR:
-        return fail(ErrorKind::Truncated, "7z lzma stream truncated");
-    default:
-        return fail(ErrorKind::Malformed, "7z lzma decoder failed");
-    }
-}
-
-std::uint64_t lzma2DictSize(std::uint8_t props) {
-    return (std::uint64_t{2} | (props & 1)) << (props / 2 + 11);
-}
-
 }
 
 bool isMainCodec(std::span<const std::uint8_t> id, Codec& codec) {
@@ -171,6 +140,30 @@ CodecInfo resolveCodec(const Folder& folder) {
     }
 
     CodecInfo info;
+    if (folder.coders.size() == 2) {
+        const Coder& main = folder.coders[0];
+        const Coder& filter = folder.coders[1];
+        bool isBcj = idEquals(filter.id, methodBcj);
+        bool linear = main.inStreams == 1 && main.outStreams == 1 && filter.inStreams == 1 &&
+            filter.outStreams == 1;
+        bool linked = folder.binds.size() == 1 && folder.binds[0].inIndex == 1 &&
+            folder.binds[0].outIndex == 0;
+        bool packedMain = folder.numInStreams == 2 && folder.numOutStreams == 2 &&
+            folder.numPackedStreams == 1 && folder.finalOutStream == 1 &&
+            (folder.packedStreams.empty() || folder.packedStreams[0] == 0);
+        if (isBcj && filter.props.empty() && linear && linked && packedMain &&
+            isMainCodec(main.id, info.codec)) {
+            info.props.assign(main.props.begin(), main.props.end());
+            info.name = codecName(main.id) + " + BCJ";
+            info.hex = codecHex(main.id) + "+" + codecHex(filter.id);
+            info.bcjFilter = true;
+            return info;
+        }
+
+        info.supported = false;
+        info.name = "filter chain";
+        return info;
+    }
     if (folder.coders.size() != 1) {
         info.supported = false;
         info.name = "filter chain";
@@ -231,18 +224,16 @@ Result<FolderPlan> resolveFolder(
     if (folder.unpackSizes.size() != folder.numOutStreams) {
         return fail(ErrorKind::Malformed, "7z folder unpack sizes do not match", packBase);
     }
+    if (folder.finalOutStream >= folder.unpackSizes.size()) {
+        return fail(ErrorKind::Malformed, "7z folder final output is out of range", packBase);
+    }
 
-    std::uint64_t unpackSize = 0;
     for (std::uint64_t size : folder.unpackSizes) {
-        auto next = checkedAdd(unpackSize, size);
-        if (!next) {
-            return fail(ErrorKind::Malformed, "7z folder unpack size overflows", packBase);
+        if (size > limits.maxFolderBytes) {
+            return fail(ErrorKind::LimitExceeded, "7z folder exceeds size limit", packBase);
         }
-        unpackSize = *next;
     }
-    if (unpackSize > limits.maxFolderBytes) {
-        return fail(ErrorKind::LimitExceeded, "7z folder exceeds size limit", packBase);
-    }
+    std::uint64_t unpackSize = folder.unpackSizes[folder.finalOutStream];
 
     std::vector<std::uint64_t> relatives;
     if (folder.packedStreams.empty()) {
@@ -286,146 +277,6 @@ Result<FolderPlan> resolveFolder(
     return plan;
 }
 
-struct RawLzma::State {
-    State() = default;
-    State(const State&) = delete;
-    State& operator=(const State&) = delete;
-
-    ~State() {
-        if (initialized) {
-            lzma_end(&stream);
-        }
-    }
-
-    lzma_stream stream = LZMA_STREAM_INIT;
-    lzma_options_lzma options;
-    lzma_filter filters[2] = {};
-    bool initialized = false;
-    bool ended = false;
-};
-
-RawLzma::RawLzma(std::unique_ptr<State> state) : state_(std::move(state)) {
-}
-
-RawLzma::RawLzma(RawLzma&& other) noexcept = default;
-
-RawLzma& RawLzma::operator=(RawLzma&& other) noexcept = default;
-
-RawLzma::~RawLzma() = default;
-
-Result<RawLzma>
-RawLzma::create(Codec codec, std::span<const std::byte> props, std::uint64_t memLimitBytes) {
-    if (memLimitBytes == 0) {
-        return fail(ErrorKind::LimitExceeded, "7z lzma memory limit is zero");
-    }
-
-    auto state = std::make_unique<State>();
-    state->options.preset_dict = nullptr;
-    state->options.preset_dict_size = 0;
-    state->options.mode = LZMA_MODE_NORMAL;
-    state->options.nice_len = 64;
-    state->options.mf = LZMA_MF_HC4;
-    state->options.depth = 0;
-    std::uint64_t dictSize = 0;
-    if (codec == Codec::Lzma1) {
-        if (props.size() != 5) {
-            return fail(ErrorKind::Malformed, "7z LZMA1 properties have the wrong size");
-        }
-
-        std::uint8_t first = std::to_integer<std::uint8_t>(props[0]);
-        std::uint8_t literalContext = first % 9;
-        std::uint8_t remainder = first / 9;
-        std::uint8_t literalPosition = remainder % 5;
-        std::uint8_t position = remainder / 5;
-        if (literalContext > 8 || literalPosition > 4 || position > 4) {
-            return fail(ErrorKind::Malformed, "7z LZMA1 properties are invalid");
-        }
-
-        dictSize = loadLe<std::uint32_t>(props.data() + 1);
-        if (dictSize < lzmaDictMin) {
-            return fail(ErrorKind::Malformed, "7z LZMA1 dictionary is too small");
-        }
-
-        state->options.lc = literalContext;
-        state->options.lp = literalPosition;
-        state->options.pb = position;
-        state->filters[0].id = LZMA_FILTER_LZMA1;
-    } else if (codec == Codec::Lzma2) {
-        if (props.size() != 1) {
-            return fail(ErrorKind::Malformed, "7z LZMA2 properties have the wrong size");
-        }
-
-        std::uint8_t bits = std::to_integer<std::uint8_t>(props[0]);
-        if (bits > 40) {
-            return fail(ErrorKind::Malformed, "7z LZMA2 properties are invalid");
-        }
-        dictSize = lzma2DictSize(bits);
-
-        state->options.lc = 3;
-        state->options.lp = 0;
-        state->options.pb = 2;
-        state->filters[0].id = LZMA_FILTER_LZMA2;
-    } else {
-        return fail(ErrorKind::Malformed, "7z codec is not an LZMA variant");
-    }
-
-    if (dictSize > memLimitBytes) {
-        return fail(ErrorKind::LimitExceeded, "7z lzma dictionary exceeds decoder memory limit");
-    }
-    state->options.dict_size = static_cast<std::uint32_t>(
-        std::min<std::uint64_t>(dictSize, std::uint64_t{std::numeric_limits<std::uint32_t>::max()})
-    );
-    state->filters[0].options = &state->options;
-    state->filters[1].id = LZMA_VLI_UNKNOWN;
-
-    auto status = lzma_raw_decoder(&state->stream, state->filters);
-    if (status == LZMA_MEM_ERROR) {
-        return fail(ErrorKind::LimitExceeded, "7z lzma decoder allocation failed");
-    }
-    if (status != LZMA_OK) {
-        return fail(ErrorKind::Malformed, "7z lzma decoder initialization failed");
-    }
-    state->initialized = true;
-    return RawLzma(std::move(state));
-}
-
-Result<DecodeStep>
-RawLzma::decompress(std::span<const std::byte> input, std::span<std::byte> output) {
-    if (state_->ended) {
-        return DecodeStep{.finished = true};
-    }
-
-    auto inputSize = std::min(input.size(), maxStepBytes);
-    auto outputSize = std::min(output.size(), maxStepBytes);
-    lzma_stream& stream = state_->stream;
-    stream.next_in = reinterpret_cast<const std::uint8_t*>(input.data());
-    stream.avail_in = inputSize;
-    stream.next_out = reinterpret_cast<std::uint8_t*>(output.data());
-    stream.avail_out = outputSize;
-
-    auto status = lzma_code(&stream, LZMA_RUN);
-
-    DecodeStep step{
-        .consumed = inputSize - stream.avail_in,
-        .produced = outputSize - stream.avail_out,
-    };
-    stream.next_in = nullptr;
-    stream.avail_in = 0;
-    stream.next_out = nullptr;
-    stream.avail_out = 0;
-
-    switch (status) {
-    case LZMA_OK:
-        return step;
-    case LZMA_STREAM_END:
-        state_->ended = true;
-        step.finished = true;
-        return step;
-    default:
-        return lzmaFailure(status);
-    }
-}
-
 Result<FolderSession> FolderSession::start(
     File file,
     FolderPlan plan,
@@ -457,11 +308,15 @@ Result<FolderSession> FolderSession::start(
 }
 
 Result<void> FolderSession::prepareDecoder() {
-    useBcj_ = plan_.codec.codec == Codec::Bcj;
-    if (useBcj_) {
+    useBcj_ = plan_.codec.codec == Codec::Bcj || plan_.codec.bcjFilter;
+    decoderFinished_ = false;
+    if (plan_.codec.codec == Codec::Bcj) {
         bcj_.reset();
         decoder_.emplace<std::monostate>();
         return {};
+    }
+    if (useBcj_) {
+        bcj_.reset();
     }
     switch (plan_.codec.codec) {
     case Codec::Copy:
@@ -523,18 +378,28 @@ Result<void> FolderSession::startEntry(
     entryActive_ = true;
     entryDone_ = false;
 
-    if (plan_.codec.codec == Codec::Copy) {
+    if (plan_.codec.codec == Codec::Copy && !plan_.codec.bcjFilter) {
         if (scratch.empty() && size != 0) {
             return fail(ErrorKind::LimitExceeded, "scratch buffer is empty");
         }
         input_ = scratch;
         output_ = {};
+        filterOutput_ = {};
+    } else if (plan_.codec.bcjFilter && plan_.codec.codec != Codec::Copy) {
+        if (scratch.size() < 3) {
+            return fail(ErrorKind::LimitExceeded, "scratch buffer too small for 7z filter chain");
+        }
+        std::size_t part = scratch.size() / 3;
+        input_ = scratch.first(part);
+        output_ = scratch.subspan(part, part);
+        filterOutput_ = scratch.subspan(part * 2);
     } else {
         if (scratch.size() < 2) {
             return fail(ErrorKind::LimitExceeded, "scratch buffer too small for 7z decode");
         }
         input_ = scratch.first(scratch.size() / 2);
         output_ = scratch.subspan(scratch.size() / 2);
+        filterOutput_ = {};
     }
 
     // NOTE: any read-ahead still buffered is dropped here; the consume cursor
@@ -790,82 +655,6 @@ Result<std::span<const std::byte>> FolderSession::nextCoded() {
         if (!part->empty()) {
             return *part;
         }
-    }
-}
-
-Result<std::span<const std::byte>> FolderSession::nextFiltered() {
-    while (true) {
-        if (entryLeft_ == 0) {
-            auto finished = finishEntry();
-            if (!finished) {
-                return tl::unexpected<Error>(finished.error());
-            }
-            return std::span<const std::byte>{};
-        }
-
-        if (pending_.empty()) {
-            auto filled = fillInput();
-            if (!filled) {
-                return tl::unexpected<Error>(filled.error());
-            }
-        }
-
-        std::uint64_t windowSize =
-            std::min(static_cast<std::uint64_t>(output_.size()), entryEnd_ - unpackPosition_);
-        if (windowSize == 0) {
-            return fail(ErrorKind::LimitExceeded, "scratch buffer is empty");
-        }
-        auto window = output_.first(static_cast<std::size_t>(windowSize));
-
-        if (!pending_.empty()) {
-            auto step = bcj_.filter(pending_, window);
-            if (!step) {
-                auto error = step.error();
-                error.offset = packPosition_;
-                pending_ = {};
-                return tl::unexpected<Error>(error);
-            }
-
-            auto consumed = noteConsumed(step->consumed);
-            if (!consumed) {
-                pending_ = {};
-                return tl::unexpected<Error>(consumed.error());
-            }
-
-            if (step->produced > 0) {
-                auto part = deliver(window.first(step->produced));
-                if (!part) {
-                    return tl::unexpected<Error>(part.error());
-                }
-                if (!part->empty()) {
-                    return *part;
-                }
-                continue;
-            }
-        }
-
-        if (pending_.empty() && packPosition_ >= packDataEnd_) {
-            auto flushed = bcj_.flush(window);
-            if (!flushed) {
-                return tl::unexpected<Error>(flushed.error());
-            }
-            if (*flushed == 0) {
-                return fail(ErrorKind::Truncated, "7z data stream truncated", packPosition_);
-            }
-            auto part = deliver(window.first(*flushed));
-            if (!part) {
-                return tl::unexpected<Error>(part.error());
-            }
-            if (!part->empty()) {
-                return *part;
-            }
-            continue;
-        }
-
-        if (pending_.empty()) {
-            continue;
-        }
-        return fail(ErrorKind::Malformed, "7z filter made no progress", packPosition_);
     }
 }
 

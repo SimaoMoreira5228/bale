@@ -968,8 +968,8 @@ int runFormats() {
     printFormat(
         "7z",
         true,
-        "copy, lzma1, lzma2, deflate, bzip2; solid blocks decode from the block start; no "
-        "encryption, no filter chains"
+        "copy, lzma1, lzma2, deflate, bzip2; standalone BCJ and one main-codec+BCJ chain; "
+        "solid blocks decode from the block start; no encryption or other filters"
     );
     printFormat("tar", true, "ustar, pax, GNU long names; no sparse files");
     printFormat("tar.gz", true, "tar inside gzip, recognized by content; read as one stream");
@@ -987,8 +987,9 @@ int runFormats() {
     printFormat(
         "wim",
         false,
-        "read-only; stored resources, multi-image via --image; no xpress, lzx or lzms"
+        "read-only; stored and lzx resources, multi-image via --image; no xpress or lzms"
     );
+    printFormat("iso", false, "read-only; ISO9660 with Rock Ridge, Joliet and El Torito");
     printFormat("gzip", false, "one compressed file, multi-member; named by FNAME or archive name");
     printFormat("zstd", false, "one compressed file, multi-frame, window up to 128 MiB");
     printFormat("xz", false, "one compressed file, multi-stream; memory capped at 256 MiB");

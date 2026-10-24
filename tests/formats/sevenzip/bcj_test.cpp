@@ -8,6 +8,7 @@
 #include <array>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace bale;
@@ -128,6 +129,20 @@ TEST_CASE("7z filter refusal matrix names each unsupported single filter") {
             CHECK(info.hex == want.hex);
         }
     }
+
+    auto chain = singleCoder(
+        std::vector<std::uint8_t>(sevenzip::methodLzma2.begin(), sevenzip::methodLzma2.end()),
+        {std::byte{0x00}}
+    );
+    sevenzip::Coder filter;
+    filter.id.assign(sevenzip::methodBcj.begin(), sevenzip::methodBcj.end());
+    chain.coders.push_back(std::move(filter));
+    chain.binds.push_back({.inIndex = 0, .outIndex = 1});
+    chain.numInStreams = 2;
+    chain.numOutStreams = 2;
+    chain.numPackedStreams = 1;
+    chain.finalOutStream = 1;
+    CHECK_FALSE(sevenzip::resolveCodec(chain).supported);
 }
 
 TEST_CASE("7z BCJ truncated pack fails as truncated") {

@@ -34,6 +34,7 @@ struct CodecInfo {
     std::vector<std::byte> props;
     bool encrypted = false;
     bool supported = true;
+    bool bcjFilter = false;
     std::string name;
     std::string hex;
 };
@@ -132,6 +133,7 @@ class FolderSession {
     [[nodiscard]] Result<std::span<const std::byte>> nextCopy();
     [[nodiscard]] Result<std::span<const std::byte>> nextCoded();
     [[nodiscard]] Result<std::span<const std::byte>> nextFiltered();
+    [[nodiscard]] Result<std::span<const std::byte>> nextCodedFiltered();
     [[nodiscard]] Result<void> finishEntry();
 
     File file_;
@@ -142,6 +144,7 @@ class FolderSession {
     std::variant<std::monostate, Inflater*, Bzip2Decoder*, RawLzma> decoder_;
     BcjFilter bcj_;
     bool useBcj_ = false;
+    bool decoderFinished_ = false;
     std::uint64_t packPosition_ = 0;
     std::uint64_t packDataEnd_ = 0;
     std::size_t packSegment_ = 0;
@@ -150,6 +153,7 @@ class FolderSession {
     Crc32 folderCrc_;
     std::span<std::byte> input_;
     std::span<std::byte> output_;
+    std::span<std::byte> filterOutput_;
     std::span<const std::byte> pending_;
     std::uint64_t entryBegin_ = 0;
     std::uint64_t entryEnd_ = 0;
